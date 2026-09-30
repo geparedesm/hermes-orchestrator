@@ -69,6 +69,9 @@ class ExecutionRequest:
     resume: str | None = None  # execution whose provider session to continue
     max_turns: int = 60
     model: str | None = None
+    inputs: dict[str, str] = field(default_factory=dict)  # small input files (for example runner steps)
+    result_schema: str = "agent-result"  # structured answer an agent must return
+    purpose: dict[str, Any] = field(default_factory=dict)  # control-plane bookkeeping (review, verification)
 
 
 class Executions:
@@ -77,6 +80,8 @@ class Executions:
         self.tasks = tasks
         # Set by GitChanges: rejects workspaces that are not the task's own (Phase 5).
         self.workspace_check: Any = None
+        # Called with (uow, execution row, ExecutionResult) after an agent execution is parsed.
+        self.on_agent_result: list[Any] = []
         tasks.on_cancel.append(self.stop_task_executions)
 
     @property
@@ -212,7 +217,7 @@ class Executions:
             raise BadRequest(f"invalid capability request: {exc}") from exc
 
         command = list(req.command)
-        inputs: dict[str, str] = {}
+        inputs: dict[str, str] = dict(req.inputs)
         if req.prompt:
             assert provider is not None
             caps_granted = grant["capabilities"]
@@ -220,9 +225,9 @@ class Executions:
                 role=role, prompt=req.prompt, toolchain=toolchain, egress=caps_granted["network"]["egress"],
                 workspace=caps_granted["workspace"], git=caps_granted["git"],
                 resume_session=resume_row["provider_session_id"] if resume_row else None,
-                max_turns=req.max_turns, model=req.model,
+                max_turns=req.max_turns, model=req.model, result_schema=req.result_schema,
             ))
-            command, inputs = plan.command, plan.inputs
+            command, inputs = plan.command, {**inputs, **plan.inputs}
             image = req.image or plan.image
 
         delivery = {s["name"]: s.get("delivery", "file") for s in config.get("secrets", [])}
@@ -240,12 +245,16 @@ class Executions:
             "denied_domains": production_hosts,
             "secret_env": [ref for ref in grant["capabilities"]["secrets"] if delivery.get(ref.rsplit("/", 1)[1]) == "env"],
         }
-        if req.prompt:
+        if inputs:
             spec["inputs"] = inputs
+        if req.purpose:
+            spec["purpose"] = req.purpose
+        if req.prompt:
             spec["session"] = True
             # What the agent was asked, so a replacement or resume can be rebuilt (no secrets here).
             spec["assignment"] = {"prompt": req.prompt, "max_turns": req.max_turns, "model": req.model,
-                                  "secrets": list(req.secrets), "resume_of": str(resume_row["id"]) if resume_row else None}
+                                  "secrets": list(req.secrets), "resume_of": str(resume_row["id"]) if resume_row else None,
+                                  "result_schema": req.result_schema}
         if workspace:
             spec["workspace"] = workspace
         if grant["capabilities"]["project_read"]:
@@ -567,8 +576,11 @@ class Executions:
                 adapter = adapter_for(row["provider"])
                 bundle = OutputBundle(files=files, logs=collected.get("logs") or "", exit_code=status.get("exit_code"),
                                       oom_killed=bool(status.get("oom_killed")))
-                result = adapter.collect_result(bundle)
+                schema = ((row["spec"] or {}).get("assignment") or {}).get("result_schema", "agent-result")
+                result = adapter.collect_result(bundle, schema)
                 self._record_agent_result(uow, row, result, adapter.collect_usage(bundle).units)
+                for hook in self.on_agent_result:
+                    hook(uow, row, result)
             artifact_ids = self._store_outputs(uow, row, files, collected, result)
             if status["state"] == "absent":
                 state, failure, reason = "LOST", "LOST", "container disappeared without a result"

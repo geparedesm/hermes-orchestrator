@@ -34,10 +34,11 @@ def state_hash(action: str, subject: dict[str, Any], config_hash: str, policy_ve
 class Approvals:
     def __init__(self, ctx: Context) -> None:
         self.ctx = ctx
-        self._handlers: dict[str, DecisionHandler] = {}
+        self._handlers: dict[str, list[DecisionHandler]] = {}
 
     def register_handler(self, action: ApprovalAction, handler: Callable[..., None]) -> None:
-        self._handlers[action.value] = handler
+        """Handlers run in order on every decision of the action; each ignores subjects it does not own."""
+        self._handlers.setdefault(action.value, []).append(handler)
 
     # ------------------------------------------------------------------ queries
 
@@ -120,8 +121,7 @@ class Approvals:
             summary=f"{row['action']} {state.value.lower()} by {principal.value}",
             data={"approval_id": str(row["id"]), "decision": state.value, "note": note}, pending=uow.events,
         )
-        handler = self._handlers.get(row["action"])
-        if handler:
+        for handler in self._handlers.get(row["action"], []):
             handler(uow, decided, approve, principal)
         return self.get(uow, row["id"])
 

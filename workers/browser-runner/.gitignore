@@ -1,0 +1,3 @@
+# Copied from workers/agent-base by scripts/build-images.sh; edit the originals.
+ho-verify
+ho-wait-secrets

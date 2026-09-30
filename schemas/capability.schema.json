@@ -21,124 +21,308 @@
     "resources"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
-    "grant_id": { "type": "string", "pattern": "^G-[0-9A-Za-z-]{6,64}$" },
-    "project": { "$ref": "#/$defs/slug" },
-    "task": { "type": "string", "pattern": "^T-[0-9]+$" },
-    "subtask": { "type": "string", "pattern": "^T-[0-9]+-[0-9]+$" },
-    "execution": { "type": "string", "format": "uuid" },
-    "worker": { "type": "string", "pattern": "^[a-z]+-[0-9]+-[0-9a-z-]+$", "description": "Human-readable worker name, for example codex-284-02." },
-    "role": { "enum": ["ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER", "BROWSER"] },
+    "schema_version": {
+      "const": 1
+    },
+    "grant_id": {
+      "type": "string",
+      "pattern": "^G-[0-9A-Za-z-]{6,64}$"
+    },
+    "project": {
+      "$ref": "#/$defs/slug"
+    },
+    "task": {
+      "type": "string",
+      "pattern": "^T-[0-9]+$"
+    },
+    "subtask": {
+      "type": "string",
+      "pattern": "^T-[0-9]+-[0-9]+$"
+    },
+    "execution": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "worker": {
+      "type": "string",
+      "pattern": "^[a-z]+-[0-9]+-[0-9a-z-]+$",
+      "description": "Human-readable worker name, for example codex-284-02."
+    },
+    "role": {
+      "enum": [
+        "ORCHESTRATOR",
+        "DEVELOPER",
+        "REVIEWER",
+        "TESTER",
+        "BROWSER"
+      ]
+    },
     "provider_credential": {
       "description": "Provider identity whose credential volume may be mounted. Null for runners.",
       "oneOf": [
-        { "type": "null" },
+        {
+          "type": "null"
+        },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["provider", "identity"],
+          "required": [
+            "provider",
+            "identity"
+          ],
           "properties": {
-            "provider": { "enum": ["claude", "codex"] },
-            "identity": { "$ref": "#/$defs/slug" }
+            "provider": {
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
+            "identity": {
+              "$ref": "#/$defs/slug"
+            }
           }
         }
       ]
     },
-    "issued_at": { "type": "string", "format": "date-time" },
-    "expires_at": { "type": "string", "format": "date-time" },
-    "lease_epoch": { "type": "integer", "minimum": 1 },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "lease_epoch": {
+      "type": "integer",
+      "minimum": 1
+    },
     "approvals": {
       "type": "array",
       "uniqueItems": true,
-      "items": { "type": "string", "format": "uuid" },
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
       "description": "Approval IDs that authorized capabilities beyond the role default."
     },
     "capabilities": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["workspace", "git", "network", "secrets", "environments", "docker", "production", "tests", "artifacts"],
+      "required": [
+        "workspace",
+        "git",
+        "network",
+        "secrets",
+        "environments",
+        "docker",
+        "production",
+        "tests",
+        "artifacts"
+      ],
       "properties": {
         "workspace": {
-          "enum": ["NONE", "READ", "WRITE"],
+          "enum": [
+            "NONE",
+            "READ",
+            "WRITE"
+          ],
           "description": "Access to the assigned workspace only."
         },
         "project_read": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/slug" },
+          "items": {
+            "$ref": "#/$defs/slug"
+          },
           "description": "Registered projects mounted read-only (orchestrator only)."
         },
-        "git": { "enum": ["NONE", "READ", "LOCAL_COMMIT"], "description": "Remote operations are never granted to executions." },
+        "git": {
+          "enum": [
+            "NONE",
+            "READ",
+            "LOCAL_COMMIT"
+          ],
+          "description": "Remote operations are never granted to executions."
+        },
         "network": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["egress", "test_services"],
+          "required": [
+            "egress",
+            "test_services"
+          ],
           "properties": {
-            "egress": { "enum": ["NONE", "PROVIDER_ONLY", "ALLOWLIST", "STANDARD"] },
-            "test_services": { "type": "boolean", "description": "Attach to the task's private service network." },
+            "egress": {
+              "enum": [
+                "NONE",
+                "PROVIDER_ONLY",
+                "ALLOWLIST",
+                "STANDARD"
+              ]
+            },
+            "test_services": {
+              "type": "boolean",
+              "description": "Attach to the task's private service network."
+            },
             "allowed_domains": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$" }
+              "items": {
+                "type": "string",
+                "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$"
+              }
             }
           }
         },
         "secrets": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*/(local|test|staging|production)/[A-Z][A-Z0-9_]{0,63}$" },
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*/(local|test|staging|production)/[A-Z][A-Z0-9_]{0,63}$"
+          },
           "description": "Secret references project/environment/NAME. Values are materialized by Agent Manager, never stored here."
         },
         "environments": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["LOCAL", "TEST", "STAGING_READ", "STAGING_WRITE"] }
+          "items": {
+            "enum": [
+              "LOCAL",
+              "TEST",
+              "STAGING_READ",
+              "STAGING_WRITE"
+            ]
+          }
         },
-        "docker": { "const": "NONE", "description": "Hard policy: executions never control Docker." },
-        "production": { "enum": ["NONE", "PROD_READ", "PROD_WRITE"] },
-        "tests": { "enum": ["NONE", "EXECUTE"] },
-        "artifacts": { "enum": ["NONE", "READ", "WRITE"] }
+        "docker": {
+          "const": "NONE",
+          "description": "Hard policy: executions never control Docker."
+        },
+        "production": {
+          "enum": [
+            "NONE",
+            "PROD_READ",
+            "PROD_WRITE"
+          ]
+        },
+        "tests": {
+          "enum": [
+            "NONE",
+            "EXECUTE"
+          ]
+        },
+        "artifacts": {
+          "enum": [
+            "NONE",
+            "READ",
+            "WRITE"
+          ]
+        }
       }
     },
     "resources": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["profile", "timeout_minutes"],
+      "required": [
+        "profile",
+        "timeout_minutes"
+      ],
       "properties": {
-        "profile": { "enum": ["LIGHT", "NORMAL", "HEAVY"] },
-        "timeout_minutes": { "type": "integer", "minimum": 1, "maximum": 1440 }
+        "profile": {
+          "enum": [
+            "LIGHT",
+            "NORMAL",
+            "HEAVY"
+          ]
+        },
+        "timeout_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        }
       }
     },
-    "revoked_at": { "type": ["string", "null"], "format": "date-time" }
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
   },
   "allOf": [
     {
       "description": "Reviewers never write code unless reassigned as developers.",
-      "if": { "properties": { "role": { "const": "REVIEWER" } } },
+      "if": {
+        "properties": {
+          "role": {
+            "const": "REVIEWER"
+          }
+        }
+      },
       "then": {
         "properties": {
           "capabilities": {
             "properties": {
-              "workspace": { "enum": ["NONE", "READ"] },
-              "git": { "enum": ["NONE", "READ"] },
-              "secrets": { "maxItems": 0 },
-              "production": { "const": "NONE" }
+              "workspace": {
+                "enum": [
+                  "NONE",
+                  "READ"
+                ]
+              },
+              "git": {
+                "enum": [
+                  "NONE",
+                  "READ"
+                ]
+              },
+              "secrets": {
+                "maxItems": 0
+              },
+              "production": {
+                "const": "NONE"
+              }
             }
           }
         }
       }
     },
     {
-      "description": "Runners have no provider credential and no Internet egress.",
-      "if": { "properties": { "role": { "enum": ["TESTER", "BROWSER"] } } },
+      "description": "Runners have no provider credential. Their egress is NONE, or ALLOWLIST (the project's test_allowed_domains only) when the project sets network.testing: allowlist (MASTER_SPEC section 53).",
+      "if": {
+        "properties": {
+          "role": {
+            "enum": [
+              "TESTER",
+              "BROWSER"
+            ]
+          }
+        }
+      },
       "then": {
         "properties": {
-          "provider_credential": { "type": "null" },
+          "provider_credential": {
+            "type": "null"
+          },
           "capabilities": {
             "properties": {
-              "network": { "properties": { "egress": { "const": "NONE" } } },
-              "git": { "const": "NONE" },
-              "production": { "const": "NONE" }
+              "network": {
+                "properties": {
+                  "egress": {
+                    "enum": [
+                      "NONE",
+                      "ALLOWLIST"
+                    ]
+                  }
+                }
+              },
+              "git": {
+                "const": "NONE"
+              },
+              "production": {
+                "const": "NONE"
+              }
             }
           }
         }
@@ -146,19 +330,50 @@
     },
     {
       "description": "Agent roles need their provider credential.",
-      "if": { "properties": { "role": { "enum": ["ORCHESTRATOR", "DEVELOPER", "REVIEWER"] } } },
-      "then": { "properties": { "provider_credential": { "type": "object" } } }
+      "if": {
+        "properties": {
+          "role": {
+            "enum": [
+              "ORCHESTRATOR",
+              "DEVELOPER",
+              "REVIEWER"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "provider_credential": {
+            "type": "object"
+          }
+        }
+      }
     },
     {
       "description": "The orchestrator reads projects but never writes a workspace.",
-      "if": { "properties": { "role": { "const": "ORCHESTRATOR" } } },
+      "if": {
+        "properties": {
+          "role": {
+            "const": "ORCHESTRATOR"
+          }
+        }
+      },
       "then": {
         "properties": {
           "capabilities": {
             "properties": {
-              "workspace": { "const": "NONE" },
-              "git": { "enum": ["NONE", "READ"] },
-              "production": { "const": "NONE" }
+              "workspace": {
+                "const": "NONE"
+              },
+              "git": {
+                "enum": [
+                  "NONE",
+                  "READ"
+                ]
+              },
+              "production": {
+                "const": "NONE"
+              }
             }
           }
         }
@@ -166,21 +381,76 @@
     },
     {
       "description": "project_read is only for the orchestrator.",
-      "if": { "properties": { "role": { "not": { "const": "ORCHESTRATOR" } } } },
-      "then": { "properties": { "capabilities": { "properties": { "project_read": { "maxItems": 0 } } } } }
+      "if": {
+        "properties": {
+          "role": {
+            "not": {
+              "const": "ORCHESTRATOR"
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "properties": {
+              "project_read": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      }
     },
     {
       "description": "Production access and staging writes require approvals.",
       "if": {
         "anyOf": [
-          { "properties": { "capabilities": { "properties": { "production": { "enum": ["PROD_READ", "PROD_WRITE"] } } } } },
-          { "properties": { "capabilities": { "properties": { "environments": { "contains": { "const": "STAGING_WRITE" } } } } } }
+          {
+            "properties": {
+              "capabilities": {
+                "properties": {
+                  "production": {
+                    "enum": [
+                      "PROD_READ",
+                      "PROD_WRITE"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "capabilities": {
+                "properties": {
+                  "environments": {
+                    "contains": {
+                      "const": "STAGING_WRITE"
+                    }
+                  }
+                }
+              }
+            }
+          }
         ]
       },
-      "then": { "required": ["approvals"], "properties": { "approvals": { "minItems": 1 } } }
+      "then": {
+        "required": [
+          "approvals"
+        ],
+        "properties": {
+          "approvals": {
+            "minItems": 1
+          }
+        }
+      }
     }
   ],
   "$defs": {
-    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" }
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+    }
   }
 }

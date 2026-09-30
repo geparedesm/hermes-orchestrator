@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Browser validation of the application under test (MASTER_SPEC section 55).
+
+Opens each configured page in a fresh Chromium context (no stored state), and records a
+screenshot, console messages, failed or erroring requests, and a Playwright trace per page in
+/output/browser/. Writes /output/browser/results.json and exits 1 if a page fails to load,
+answers with an HTTP error, logs a console error, or has same-origin requests that fail.
+Configuration: /run/ho-input/browser.json {"base_url": "http://app:3000", "paths": ["/"], "timeout_ms": 30000}
+"""
+
+import json
+import sys
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
+from playwright.sync_api import sync_playwright
+
+OUT = Path("/output/browser")
+
+
+def test_alias(url: str) -> str:
+    """Single-label service names (for example `app`) can collide with HSTS-preloaded top-level
+    domains, which makes Chromium force HTTPS. Test services also answer as `<name>.test`
+    (a reserved TLD, see agent_manager/compose.py), which is used instead."""
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if host and "." not in host and host != "localhost":
+        netloc = f"{host}.test" + (f":{parsed.port}" if parsed.port else "")
+        return parsed._replace(netloc=netloc).geturl()
+    return url
+
+
+def main() -> int:
+    config = json.loads(Path("/run/ho-input/browser.json").read_text())
+    base = test_alias(config["base_url"]).rstrip("/") + "/"
+    origin = urlparse(base).netloc
+    OUT.mkdir(parents=True, exist_ok=True)
+    pages = []
+    with sync_playwright() as playwright:
+        # Test services on the task's private network usually speak plain HTTP; Chromium would
+        # otherwise upgrade http:// navigations to HTTPS and fail.
+        browser = playwright.chromium.launch(args=["--disable-features=HttpsUpgrades,HttpsFirstBalancedModeAutoEnable"])
+        for index, path in enumerate(config.get("paths") or ["/"]):
+            url = urljoin(base, path.lstrip("/"))
+            context = browser.new_context(ignore_https_errors=False)
+            context.tracing.start(screenshots=True, snapshots=True)
+            page = context.new_page()
+            console, failures, requests = [], [], []
+            page.on("console", lambda m, c=console: c.append({"type": m.type, "text": m.text[:500]}))
+            page.on("pageerror", lambda e, c=console: c.append({"type": "pageerror", "text": str(e)[:500]}))
+            page.on("requestfailed", lambda r, f=failures: f.append({"url": r.url[:300], "error": (r.failure or "")[:200]}))
+            page.on("response", lambda r, q=requests: q.append({"url": r.url[:300], "status": r.status}))
+            status, error = None, None
+            try:
+                response = page.goto(url, wait_until="networkidle", timeout=int(config.get("timeout_ms", 30000)))
+                status = response.status if response else None
+            except Exception as exc:  # noqa: BLE001 - recorded as evidence
+                error = str(exc)[:500]
+            shot = OUT / f"page{index}.png"
+            try:
+                page.screenshot(path=str(shot), full_page=True)
+            except Exception:  # noqa: BLE001
+                shot = None
+            context.tracing.stop(path=str(OUT / f"page{index}-trace.zip"))
+            context.close()
+            same_origin_errors = [r for r in requests if urlparse(r["url"]).netloc == origin and r["status"] >= 400]
+            same_origin_failures = [f for f in failures if urlparse(f["url"]).netloc == origin]
+            console_errors = [m for m in console if m["type"] in ("error", "pageerror")]
+            passed = error is None and status is not None and status < 400 and not console_errors \
+                and not same_origin_errors and not same_origin_failures
+            pages.append({"url": url, "status": status, "error": error, "passed": passed, "console": console[:200],
+                          "console_errors": len(console_errors), "failed_requests": (same_origin_failures + same_origin_errors)[:100],
+                          "requests": len(requests), "screenshot": f"browser/{shot.name}" if shot else None,
+                          "trace": f"browser/page{index}-trace.zip"})
+        browser.close()
+    passed = all(p["passed"] for p in pages)
+    (OUT / "results.json").write_text(json.dumps({"passed": passed, "pages": pages}, indent=2))
+    print(json.dumps({"passed": passed, "pages": [{k: p[k] for k in ("url", "status", "passed")} for p in pages]}))
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

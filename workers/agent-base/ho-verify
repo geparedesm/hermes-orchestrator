@@ -1,0 +1,44 @@
+#!/bin/bash
+# Runs the verification steps the control plane planned (MASTER_SPEC sections 50, 56-58) and
+# records one result per step in /output/test_results.json, with each step's output in
+# /output/steps/<name>.log. Steps are /run/ho-input/step-<NN>-<name>.sh, run in order; a failing
+# test step is retried (/run/ho-input/retries, default 1) so a definitive failure can be told
+# from a flaky one; each step is limited by /run/ho-input/step-timeout seconds (default 1800).
+# Every step runs even after a failure, so the evidence is complete. Untrusted side: the control
+# plane validates what it reads back.
+set -uo pipefail
+OUT=/output
+mkdir -p "$OUT/steps"
+retries="$(cat /run/ho-input/retries 2>/dev/null || echo 1)"
+timeout_seconds="$(cat /run/ho-input/step-timeout 2>/dev/null || echo 1800)"
+[[ $retries =~ ^[0-9]$ ]] || retries=1
+[[ $timeout_seconds =~ ^[0-9]{1,5}$ ]] || timeout_seconds=1800
+results=()
+overall=0
+now_ms() { date +%s%3N; }
+
+for file in /run/ho-input/step-*.sh; do
+  [[ -e $file ]] || continue
+  name="$(basename "$file" .sh)"
+  name="${name#step-}"
+  name="${name#*-}"
+  attempts=0
+  while :; do
+    attempts=$((attempts + 1))
+    start="$(now_ms)"
+    timeout --kill-after=30 "$timeout_seconds" bash -o pipefail "$file" > "$OUT/steps/$name.log" 2>&1
+    rc=$?
+    end="$(now_ms)"
+    if [[ $rc -eq 0 || $attempts -gt $retries || $name != test* ]]; then
+      break
+    fi
+    mv "$OUT/steps/$name.log" "$OUT/steps/$name.attempt$attempts.log"
+  done
+  if [[ $rc -eq 0 ]]; then status=PASSED; elif [[ $rc -eq 124 || $rc -eq 137 ]]; then status=ERROR; else status=FAILED; overall=1; fi
+  [[ $status == ERROR ]] && overall=1
+  results+=("{\"name\": \"$name\", \"status\": \"$status\", \"exit_code\": $rc, \"duration_ms\": $((end - start)), \"attempts\": $attempts, \"log\": \"steps/$name.log\"}")
+done
+
+joined="$(IFS=,; echo "${results[*]:-}")"
+printf '{"schema_version": 1, "steps": [%s]}\n' "$joined" > "$OUT/test_results.json"
+exit $overall

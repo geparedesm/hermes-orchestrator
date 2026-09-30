@@ -19,6 +19,9 @@ class FakeAgentManager:
         self.stopped: list[str] = []
         self.removed: list[str] = []
         self.released: list[str] = []
+        self.environments: dict[str, dict[str, Any]] = {}  # task -> start request
+        self.services_stopped: list[str] = []
+        self.environment_error: AgentManagerError | None = None
         self.volumes: set[tuple[str, str]] = {("claude", "default"), ("codex", "default")}
 
     def create(self, spec: dict[str, Any]) -> dict[str, Any]:
@@ -79,6 +82,17 @@ class FakeAgentManager:
 
     def managed(self) -> dict[str, Any]:
         return {"containers": [], "networks": [], "volumes": []}
+
+    def start_environment(self, task: str, body: dict[str, Any]) -> dict[str, Any]:
+        if self.environment_error:
+            raise self.environment_error
+        self.environments[task] = body
+        return {"project": f"ho-{task.lower()}-{body['project']}", "network": f"ho-t-{task.lower()}-svc",
+                "services": [{"service": s, "state": "running", "health": "healthy"} for s in body["services"]]}
+
+    def stop_test_services(self, task: str) -> dict[str, int]:
+        self.services_stopped.append(task)
+        return {"removed": 1}
 
     def remove_task_environment(self, task: str) -> dict[str, int]:
         self.released.append(task)

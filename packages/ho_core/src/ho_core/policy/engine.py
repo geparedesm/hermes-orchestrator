@@ -120,14 +120,23 @@ ROLE_MAXIMUM: dict[Role, Json] = {
                      "tests": "EXECUTE", "artifacts": "WRITE", "secrets": True, "production": "PROD_WRITE"},
     Role.REVIEWER: {"workspace": "READ", "git": "READ", "egress": "ALLOWLIST", "test_services": True,
                     "tests": "EXECUTE", "artifacts": "READ", "secrets": False, "production": "NONE"},
-    Role.TESTER: {"workspace": "WRITE", "git": "NONE", "egress": "NONE", "test_services": True,
+    # Runners reach the Internet only when the project sets network.testing: allowlist (section 53),
+    # and then only its test_allowed_domains.
+    Role.TESTER: {"workspace": "WRITE", "git": "NONE", "egress": "ALLOWLIST", "test_services": True,
                   "tests": "EXECUTE", "artifacts": "WRITE", "secrets": True, "production": "NONE"},
-    Role.BROWSER: {"workspace": "NONE", "git": "NONE", "egress": "NONE", "test_services": True,
+    Role.BROWSER: {"workspace": "READ", "git": "NONE", "egress": "ALLOWLIST", "test_services": True,
                    "tests": "EXECUTE", "artifacts": "WRITE", "secrets": True, "production": "NONE"},
 }
 
 _PROJECT_EGRESS = {"standard": "STANDARD", "restricted": "ALLOWLIST", "provider_only": "PROVIDER_ONLY"}
 _AGENT_ROLES = (Role.ORCHESTRATOR, Role.DEVELOPER, Role.REVIEWER)
+
+
+def research_domains(network: Json, platform: Json) -> set[str]:
+    """Hosts of the research presets a project enables (official docs, package registries, public GitHub)."""
+    presets = platform.get("research_domains", {})
+    enabled = network.get("research", {})
+    return {d for name, hosts in presets.items() if enabled.get(name, False) for d in hosts}
 
 
 def _min(kind: str, *values: str) -> str:
@@ -191,6 +200,8 @@ def evaluate_grant(request: GrantRequest, config: Json, platform: Json, *, now: 
     egress_limits = [role_max["egress"]]
     if request.role in _AGENT_ROLES:
         egress_limits.append(project_egress)
+    else:
+        egress_limits.append("ALLOWLIST" if network.get("testing") == "allowlist" else "NONE")
     egress = reduce("egress", "network.egress", request.egress, *egress_limits)
     if request.role in _AGENT_ROLES and egress == "NONE":
         egress = "PROVIDER_ONLY"  # agent CLIs cannot work without their provider API
@@ -198,8 +209,13 @@ def evaluate_grant(request: GrantRequest, config: Json, platform: Json, *, now: 
 
     domains: list[str] = []
     if egress == "ALLOWLIST":
-        allowed = set(network.get("allowed_domains", []))
-        domains = sorted(set(request.allowed_domains) & allowed)
+        if request.role in _AGENT_ROLES:
+            # Development research (section 54): the project's list plus the enabled research presets.
+            allowed = set(network.get("allowed_domains", [])) | research_domains(network, platform)
+        else:
+            # Test access is separate from research access: only the project's test allowlist.
+            allowed = set(network.get("test_allowed_domains", []))
+        domains = sorted(set(request.allowed_domains) & allowed) if request.allowed_domains else sorted(allowed)
         dropped = set(request.allowed_domains) - allowed
         if dropped:
             notes.append(f"network.allowed_domains: dropped {sorted(dropped)} not in project policy")

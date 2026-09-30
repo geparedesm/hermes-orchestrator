@@ -58,6 +58,12 @@ class AgentManagerClient:
     def remove_task_environment(self, task: str) -> dict[str, Any]:
         return self._call("DELETE", f"/v1/tasks/{task}/environment")
 
+    def start_environment(self, task: str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._call("POST", f"/v1/tasks/{task}/environment", body)
+
+    def stop_test_services(self, task: str) -> dict[str, Any]:
+        return self._call("DELETE", f"/v1/tasks/{task}/environment?services_only=true")
+
     def capacity(self) -> dict[str, Any]:
         return self._call("GET", "/v1/capacity")
 

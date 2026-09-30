@@ -101,7 +101,7 @@ The capability grant expresses this as `network.egress` plus a separate `network
 | --- | --- | --- |
 | `NONE` | No Internet. With `test_services: true`, only `ho-t-<task>-svc`; otherwise no network | Test runner, browser runner |
 | `PROVIDER_ONLY` | The provider API endpoints of the execution's provider | Reviewer; orchestrator and developer in `provider_only` projects |
-| `ALLOWLIST` | Provider endpoints + project `network.allowed_domains` + research presets enabled by the project (official documentation, package registries, public GitHub) | Developer and orchestrator in `restricted` projects that need docs or packages |
+| `ALLOWLIST` | Agents: provider endpoints + project `network.allowed_domains` + research presets enabled by the project (official documentation, package registries, public GitHub; hosts in `config/defaults.yaml` `research_domains`). Runners: only `network.test_allowed_domains`, when `network.testing: allowlist` | Developer and orchestrator in `restricted` projects; runners in `testing: allowlist` projects |
 | `STANDARD` | Any public destination | Developer and orchestrator in `standard` projects (§54 default) |
 
 Rules enforced by the proxy in every mode:
@@ -161,6 +161,10 @@ For a project with its own Compose files (§52), the control plane renders an ov
 
 Agent Manager runs Compose through its own Docker access. The project's Compose files are input data, validated before use (SECURITY_MODEL §9 rule 7).
 
+**As implemented (Phase 6).** No override file is written: Agent Manager renders the project's files with `docker compose config` (pinned Compose v5.5.1, run with an empty environment so nothing from Agent Manager can be interpolated), sanitizes the model, and starts it from stdin under the project name `ho-<task>-<project>`. Only the requested services and their dependencies start. `ports:` are removed; host or container networking, privileges, added capabilities, devices, host namespaces, sysctls, `volumes_from`, builds, external volumes, top-level secrets and configs, and bind mounts outside the verification workspace are refused before anything starts (N07). Services get the task network as their only network, with aliases `<service>` and `<service>.test` (the second avoids HSTS-preloaded names such as `app` in browser tests), `no-new-privileges`, a memory limit (1 GiB unless the file sets one, capped at the machine's test-runner limit), CPU and process limits, and `ho.*` labels. The services and their volumes are removed when the verification finishes.
+
+Runner egress (§53): `NONE` by default. When the project sets `network.testing: allowlist`, runners get `ALLOWLIST` egress limited to `network.test_allowed_domains`; they never receive the development research presets.
+
 ## 9. Platform Differences
 
 | Topic | macOS (Docker Desktop, Apple Silicon) | Linux (Docker Engine) |
@@ -183,6 +187,6 @@ Phase 3 implements these as automated tests; Phase 11 reruns them on both platfo
 | N04 | Through the proxy in `PROVIDER_ONLY`, request a non-provider domain | Denied |
 | N05 | From the test runner, resolve and connect to a public domain | Fails |
 | N06 | From task A's container, reach task B's container or services | Fails |
-| N07 | Project Compose override with `ports:` or `network_mode: host` | Rejected before start |
+| N07 | Project Compose override with `ports:` or `network_mode: host` | Rejected before start (Phase 6: `network_mode: host`, privileges, capabilities, the Docker socket, and builds are rejected; `ports:` are removed rather than rejected, because most development Compose files publish ports) |
 | N08 | DNS queries for arbitrary external names from internal networks | Fails. Workers use `127.0.0.1` as their DNS server, so Docker's embedded resolver has nowhere to forward external names (verified in Phase 3); names on attached internal networks still resolve. |
 | N09 | Host port scan of published ports | Only loopback-bound Hermes ports |

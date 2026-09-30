@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .docker_ops import CapacityExceeded, CredentialMissing, DockerOps
+from .docker_ops import CapacityExceeded, CredentialMissing, DockerOps, EnvironmentFailed
 from .images import ImageNotAllowed
 from .plan import Rejected, build_plan
 
@@ -28,6 +28,15 @@ log = logging.getLogger(__name__)
 
 class StopRequest(BaseModel):
     grace_seconds: int = Field(default=10, ge=0, le=300)
+
+
+class EnvironmentRequest(BaseModel):
+    project: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    project_path: str = Field(min_length=1, max_length=300)
+    workspace: str = Field(min_length=1, max_length=400)
+    compose_files: list[str] = Field(default_factory=list, max_length=10)
+    services: list[str] = Field(default_factory=list, max_length=50)
+    startup_timeout: int = Field(default=180, ge=10, le=1800)
 
 
 def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root_host: str, reap_seconds: float = 15) -> FastAPI:
@@ -121,9 +130,24 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
     def remove(execution: str) -> dict[str, Any]:
         return ops.remove(execution)
 
+    @app.post("/v1/tasks/{task}/environment", dependencies=[Depends(authorized)])
+    def start_environment(task: str, body: EnvironmentRequest) -> JSONResponse:
+        try:
+            result = ops.start_environment(task=task, project=body.project, project_path=body.project_path,
+                                           workspace=body.workspace, compose_files=body.compose_files, services=body.services,
+                                           startup_timeout=body.startup_timeout, projects_root=projects_root,
+                                           projects_root_host=projects_root_host)
+        except EnvironmentFailed as exc:
+            return error(502, "environment_failed", str(exc))
+        return JSONResponse(result, status_code=201)
+
+    @app.get("/v1/tasks/{task}/environment", dependencies=[Depends(authorized)])
+    def environment_status(task: str) -> dict[str, Any]:
+        return {"services": ops.environment_status(task)}
+
     @app.delete("/v1/tasks/{task}/environment", dependencies=[Depends(authorized)])
-    def remove_environment(task: str) -> dict[str, Any]:
-        return {"removed": ops.remove_task_environment(task)}
+    def remove_environment(task: str, services_only: bool = False) -> dict[str, Any]:
+        return {"removed": ops.remove_task_environment(task, services_only=services_only)}
 
     @app.get("/v1/credentials", dependencies=[Depends(authorized)])
     def credentials() -> dict[str, Any]:

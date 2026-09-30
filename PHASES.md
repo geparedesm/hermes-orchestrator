@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phase 4 (Claude/Codex workers) was approved by Gabriel Paredes on 2026-09-30 (PR #5; evidence in [docs/validation/phase-4.md](docs/validation/phase-4.md)). Phase 5 (Git isolation) was approved by Gabriel Paredes on 2026-09-30 (PR #6; evidence in [docs/validation/phase-5.md](docs/validation/phase-5.md)). Phases 6–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phase 4 (Claude/Codex workers) was approved by Gabriel Paredes on 2026-09-30 (PR #5; evidence in [docs/validation/phase-4.md](docs/validation/phase-4.md)). Phase 5 (Git isolation) was approved by Gabriel Paredes on 2026-09-30 (PR #6; evidence in [docs/validation/phase-5.md](docs/validation/phase-5.md)). Phase 6 (Testing) is implemented and validated, pending review ([docs/validation/phase-6.md](docs/validation/phase-6.md)). Phases 7–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -128,15 +128,17 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Produce trustworthy test evidence and enforce project Quality Gates.
 
-- [ ] Implement Test Runner and Browser/Playwright Runner images and execution.
-- [ ] Create isolated ephemeral test services and safely integrate existing project Compose configurations.
-- [ ] Enforce test-network restrictions and separate development research access from test access.
-- [ ] Implement the Test Gap Policy and risk-adaptive verification.
-- [ ] Collect relevant test, integration, browser, build, lint, typecheck, security, and CI evidence as required by project policy.
-- [ ] Implement Quality Gate evaluation, including requirements, documentation, conflicts, review evidence, and policy violations.
-- [ ] Persist test results and artifacts; clean up ephemeral environments after completion.
+- [x] Implement Test Runner and Browser/Playwright Runner images and execution.
+- [x] Create isolated ephemeral test services and safely integrate existing project Compose configurations.
+- [x] Enforce test-network restrictions and separate development research access from test access.
+- [x] Implement the Test Gap Policy and risk-adaptive verification.
+- [x] Collect relevant test, integration, browser, build, lint, typecheck, security, and CI evidence as required by project policy. *(CI checks tested with a GitHub CLI stand-in; see Phase 5.)*
+- [x] Implement Quality Gate evaluation, including requirements, documentation, conflicts, review evidence, and policy violations.
+- [x] Persist test results and artifacts; clean up ephemeral environments after completion.
 
 **Completion criteria:** Required failures block `READY_FOR_MERGE`; successful checks produce auditable evidence in isolated environments.
+
+**Status:** Implemented, pending review. 211 unit, 75 integration, and 47 real-Docker tests, plus a 20-check end-to-end smoke test with a project's own Compose services (PostgreSQL and a web app) and the Browser Runner; the Phase 2–5 smoke tests pass. A real run on the operator's stack: Codex implemented a change, a runner verified it, Claude cross-reviewed it (approved, two LOW findings), and the Quality Gate passed it to `READY_FOR_MERGE`. Evidence, decisions, and limitations: [docs/validation/phase-6.md](docs/validation/phase-6.md).
 
 ## Phase 7: Multi-Agent Orchestration
 

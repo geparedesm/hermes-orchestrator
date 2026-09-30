@@ -378,7 +378,29 @@ A machine profile sets values that must not be hardcoded: the projects root, max
 
 Images are built for `linux/arm64` and `linux/amd64`, tagged by content version, and referenced by digest in the machine profile. Promotion follows §19: detect, notify, approval, build candidate, smoke test, promote, or roll back. Only digests listed in the active machine profile can be launched (Agent Manager invariant).
 
+**As implemented (Phase 6).** The Test Runner is the `runner-<toolchains>` image with `/opt/ho/bin/ho-verify`, which runs the steps the control plane planned (install, build, lint, typecheck, test, security) and writes `test_results.json` plus one log per step; a failing test step is retried once to tell flaky from definitive failures. The Browser Runner is `browser-runner`: the official Playwright image (`mcr.microsoft.com/playwright/python:v1.63.0-noble`, pinned by digest) with a non-root user, the matching Python Playwright package, `ho-verify`, and `ho-browser-check`, which records a screenshot, console messages, failed requests, and a Playwright trace per page. Both run with the container baseline and an empty in-memory home.
+
 **As implemented (Phase 4).** [scripts/build-images.sh](scripts/build-images.sh) builds a chain for each toolchain set in `HO_TOOLCHAINS` (default `generic node python`): `agent-base` ([workers/agent-base](workers/agent-base/)), then one layer per profile ([workers/toolchains](workers/toolchains/)), then one layer per provider ([workers/providers](workers/providers/)). The lock records `runner-<set>`, `claude-<set>`, and `codex-<set>`, where `<set>` is the sorted profiles joined by `-` (for example `codex-node-python`); the control plane picks the set from the project's `toolchain.profiles`. The provider CLIs come from their official npm packages at the versions in [workers/versions.env](workers/versions.env) (Claude Code 2.1.280, Codex 0.159.2); Claude Code ships a native binary, Codex runs through its npm launcher with a private Node.js runtime. Automatic updates are disabled in the images. Flutter's SDK cache is kept read-only and exposed through a per-container `/tmp` copy of its small stamp files, because the root filesystem is read-only. Images are pinned by local image ID in the untracked `config/images.lock.yaml`, which the operator regenerates with `make images`; the §19 approval-and-promotion workflow is Phase 11.
+
+### 10.1 Verification and Quality Gate (Phase 6)
+
+```mermaid
+flowchart LR
+    I[integrate] --> V[verification: fresh clone + project Compose services on ho-t-task-svc]
+    V --> T[Test Runner: ho-verify steps]
+    V --> B[Browser Runner: page checks + e2e]
+    T --> E[test_runs + artifacts]
+    B --> E
+    R[cross-review by another provider] --> G
+    E --> G[Quality Gate evaluation]
+    G -->|PASS| RFM[READY_FOR_MERGE]
+    G -->|FAIL| FIX[FIX_REQUIRED]
+    G -->|exception| APR[APPROVAL_REQUIRED]
+```
+
+- The change's risk (§57) comes from its files: sensitive areas (authentication, authorization, payments, migrations, Docker, infrastructure, CI/CD, secrets, permissions, dependencies, network configuration), the project's `sensitive_paths` (HIGH) and `critical_paths` (CRITICAL), and its size. Risk adds requirements: MEDIUM lint and typecheck, HIGH security checks, CRITICAL an explicit approval. The project's `quality_gate` adds its own; cross-review, requirements, no blocking findings, no conflicts, and no policy violations are always required.
+- Test gaps (§56): no test command, code changed without any test changing, or a required check without a command. Gaps are recorded with the alternative evidence that ran; on HIGH or CRITICAL changes they need an explicit approval.
+- The Quality Gate evaluation stores each requirement's status and evidence, the gaps, and the residual risk. It is the only path from `QUALITY_GATE` to `READY_FOR_MERGE`; a merge approval binds the evaluation it was requested on. A pending verification or CI run leaves the task in `QUALITY_GATE` for re-evaluation.
 
 ## 11. Persistent Volumes
 

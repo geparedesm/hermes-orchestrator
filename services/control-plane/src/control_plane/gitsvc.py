@@ -61,6 +61,9 @@ class GitServiceClient:
     def integrate(self, path: str, task: str, target_branch: str, heads: list[str]) -> dict[str, Any]:
         return self._post("/v1/integrate", {"path": path, "task": task, "target_branch": target_branch, "heads": heads})
 
+    def changes(self, path: str, base: str, head: str) -> dict[str, Any]:
+        return self._post("/v1/changes", {"path": path, "base": base, "head": head})
+
     def refs(self, path: str, refs: list[str]) -> dict[str, Any]:
         return self._post("/v1/refs", {"path": path, "refs": refs})
 

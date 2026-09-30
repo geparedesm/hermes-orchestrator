@@ -10,20 +10,23 @@ import base64
 import io
 import json
 import logging
+import os
+import subprocess
 import tarfile
 import threading
 import time
 from dataclasses import dataclass
+import re
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import docker
 from docker.errors import APIError, NotFound
 from docker.types import Mount as DockerMount
 
-from . import images
-from .plan import INPUT_MOUNT, PROXY_PORT, SECRETS_MOUNT, WORKER_UID, ContainerPlan, Rejected
+from . import compose, images
+from .plan import INPUT_MOUNT, PROXY_PORT, SECRETS_MOUNT, WORKER_UID, ContainerPlan, Rejected, resolve_workspace
 from .secrets import SecretStore
 
 log = logging.getLogger(__name__)
@@ -43,6 +46,10 @@ class CapacityExceeded(RuntimeError):
 
 class CredentialMissing(RuntimeError):
     pass
+
+
+class EnvironmentFailed(RuntimeError):
+    """Test services did not start (image pull, health check, or Compose error)."""
 
 
 def _tar(files: dict[str, bytes]) -> bytes:
@@ -395,8 +402,78 @@ class DockerOps:
                 removed["volumes"] += 1
         return removed
 
-    def remove_task_environment(self, task: str) -> int:
+    # ------------------------------------------------------- test environments
+
+    def _compose(self, *args: str, input_text: str | None = None, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+        """Run the pinned Compose binary with an empty environment: nothing from Agent Manager
+        can be interpolated into a project's Compose files."""
+        env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/tmp", "DOCKER_CONFIG": "/tmp/.docker",
+               "DOCKER_HOST": os.environ.get("DOCKER_HOST", "unix:///var/run/docker.sock")}
+        return subprocess.run([os.environ.get("HO_COMPOSE_BIN", "docker-compose"), *args], capture_output=True, text=True,
+                              input=input_text, timeout=timeout, env=env, check=False)
+
+    def start_environment(self, *, task: str, project: str, project_path: str, workspace: str, compose_files: list[str],
+                          services: list[str], startup_timeout: int, projects_root: Path, projects_root_host: str) -> dict[str, Any]:
+        """Start the project's test services on the task's private network (sections 51-52)."""
+        if not re.match(r"^T-[0-9]+$", task):
+            raise Rejected("invalid task key")
+        relative, resolved = resolve_workspace(project_path, workspace, projects_root)
+        files = []
+        for name in compose_files or ["compose.yaml"]:
+            candidate = resolved / name
+            if ".." in PurePosixPath(name).parts or candidate.is_symlink() or not candidate.is_file():
+                raise Rejected(f"Compose file {name} must be a regular file inside the workspace")
+            files += ["-f", str(candidate)]
+        name = compose.project_name(task, project)
+        rendered = self._compose("-p", name, "--project-directory", str(resolved), *files, "config", "--format", "json")
+        if rendered.returncode != 0:
+            raise Rejected(f"the project's Compose files could not be read: {rendered.stderr.strip()[:300]}")
+        limits = self.platform["machine"]["runners"]["test"]
+        network = f"ho-t-{task.lower()}-svc"
+        model = compose.sanitize(json.loads(rendered.stdout), task=task, project=project, network=network, services=services,
+                                 workspace_container=str(resolved),
+                                 workspace_host=f"{self._projects_root_host(projects_root_host)}/{relative}",
+                                 limits=compose.Limits(int(float(limits["memory_gb"]) * 1024**3), float(limits["cpus"])))
+        needed = sum(int(s["mem_limit"]) for s in model["services"].values())
+        with self._lock:
+            available = self.capacity()["memory_available_for_executions"]
+            if needed > available:
+                raise CapacityExceeded(f"test services need {needed // 1024**2} MiB, {available // 1024**2} MiB available")
+            self._ensure_network(network, {"ho.managed": "true", "ho.kind": "network", "ho.task": task, "ho.project": project},
+                                 internal=True)
+            started = self._compose("-p", name, "-f", "-", "up", "-d", "--wait", "--wait-timeout", str(startup_timeout),
+                                    "--no-build", "--pull", "missing", "--quiet-pull", "--remove-orphans",
+                                    input_text=json.dumps(model), timeout=startup_timeout + 300)
+        if started.returncode != 0:
+            self._compose("-p", name, "down", "-v", "--remove-orphans", timeout=120)
+            raise EnvironmentFailed(f"test services did not start: {started.stderr.strip()[-500:]}")
+        return {"project": name, "network": network, "services": self.environment_status(task)}
+
+    @staticmethod
+    def _projects_root_host(value: str) -> str:
+        return value.rstrip("/")
+
+    def environment_status(self, task: str) -> list[dict[str, Any]]:
+        result = []
+        for container in self.client.containers.list(all=True, filters={"label": [f"ho.task={task}", "ho.kind=test-service"]}):
+            health = (container.attrs.get("State", {}).get("Health") or {}).get("Status")
+            result.append({"service": container.labels.get("ho.service"), "state": container.status, "health": health,
+                           "image": container.attrs.get("Config", {}).get("Image")})
+        return sorted(result, key=lambda s: s["service"] or "")
+
+    def remove_task_environment(self, task: str, *, services_only: bool = False) -> int:
+        """Remove the task's test services (and, unless `services_only`, its networks and session stores)."""
         count = 0
+        projects = {c.labels.get("com.docker.compose.project") for c in self.client.containers.list(
+            all=True, filters={"label": [f"ho.task={task}", "ho.kind=test-service"]})} - {None}
+        for name in sorted(projects):
+            self._compose("-p", name, "down", "-v", "--remove-orphans", timeout=180)
+            count += 1
+        for volume in self.client.volumes.list(filters={"label": [f"ho.task={task}", "ho.kind=test-service"]}):
+            volume.remove(force=True)
+            count += 1
+        if services_only:
+            return count
         for network in self.client.networks.list(filters={"label": [f"ho.task={task}", "ho.kind=network"]}):
             network.reload()
             if network.attrs.get("Containers"):

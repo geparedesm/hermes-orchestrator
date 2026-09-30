@@ -14,7 +14,7 @@ RUN apt-get update \
  && chmod 700 /run/ho-credentials/claude /run/ho-credentials/codex
 # Mount points owned by the worker user: Docker copies this ownership into a new, empty
 # named volume the first time it is mounted (output, input, and session volumes).
-COPY --chmod=755 ho-wait-secrets /opt/ho/bin/ho-wait-secrets
+COPY --chmod=755 ho-wait-secrets ho-verify /opt/ho/bin/
 
 LABEL org.hermes-orchestrator.role="agent-base" org.hermes-orchestrator.toolchains="generic"
 ENV HOME=/home/agent

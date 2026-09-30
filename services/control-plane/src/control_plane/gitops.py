@@ -49,6 +49,9 @@ class GitChanges:
         approvals.register_handler(ApprovalAction.MERGE, self._on_merge_decision)
         approvals.register_handler(ApprovalAction.HIGH_RISK_OPERATION, self._on_conflict_decision)
         executions.workspace_check = self.check_workspace
+        # Set by verification.Verifications and verification.QualityGate (Phase 6).
+        self.verifications: Any = None
+        self.quality_gate: Any = None
 
     # ---------------------------------------------------------------- helpers
 
@@ -278,9 +281,10 @@ class GitChanges:
                     f"integrated {len(heads)} workspace(s) onto {changes['target_branch']} {result['target_sha'][:12]}: "
                     f"{result['files_changed']} file(s), +{result['insertions']}/-{result['deletions']}",
                     {"integration_sha": result["integration_sha"], "target_sha": result["target_sha"]})
-        if retest:
-            result["retest"] = self._start_tests(uow, task, config, "refs/hermes/tasks/{key}/integration".format(key=task_key),
-                                                 purpose="retest")
+        if retest and self.verifications is not None:
+            verification = self.verifications.start(uow, task_key, ref=result["integration_ref"], purpose="INTEGRATION")
+            uow.cur.execute("UPDATE git_changes SET retest_status = 'RUNNING' WHERE task_id = %s", (task["id"],))
+            result["verification"] = str(verification["id"])
         return result
 
     def resolve_conflicts(self, uow: UnitOfWork, task_key: str, *, provider: str, principal: Principal) -> dict[str, Any]:
@@ -315,24 +319,6 @@ class GitChanges:
             role="DEVELOPER", provider=provider, prompt=prompt, workspace=prepared["path"],
             capabilities={"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE"}))
         return {"workspace": name, "conflicts": prepared["conflicts"], "execution": str(execution["id"])}
-
-    def _start_tests(self, uow: UnitOfWork, task: Row, config: dict[str, Any], ref: str, *, purpose: str) -> dict[str, Any]:
-        """Run the project's test command on a fresh clone of `ref` (retest or post-merge verification)."""
-        column_exec, column_status = (("retest_execution_id", "retest_status") if purpose == "retest"
-                                      else ("verification_execution_id", "post_merge_status"))
-        command = (config.get("commands") or {}).get("test")
-        if not command:
-            uow.cur.execute(f"UPDATE git_changes SET {column_status} = 'NOT_CONFIGURED' WHERE task_id = %s", (task["id"],))
-            return {"status": "NOT_CONFIGURED"}
-        uow.cur.execute("SELECT count(*) AS n FROM workspaces WHERE task_id = %s AND kind = 'VERIFICATION'", (task["id"],))
-        suffix = f"{purpose}{uow.cur.fetchone()['n'] + 1}"  # type: ignore[index]
-        ws = self.workspace(uow, task["key"], principal=CONTROL_PLANE, suffix=suffix, kind="VERIFICATION", base_ref=ref)
-        execution = self.executions.request(uow, principal=CONTROL_PLANE, task_key=task["key"], req=ExecutionRequest(
-            role="TESTER", command=["bash", "-lc", command], workspace=ws["path"],
-            capabilities={"workspace": "WRITE", "tests": "EXECUTE", "artifacts": "WRITE"}), allow_waiting=purpose != "retest")
-        uow.cur.execute(f"UPDATE git_changes SET {column_exec} = %s, {column_status} = 'RUNNING' WHERE task_id = %s",
-                        (execution["id"], task["id"]))
-        return {"status": "RUNNING", "execution": str(execution["id"]), "workspace": ws["name"]}
 
     # ----------------------------------------------------------------- GitHub
 
@@ -390,15 +376,16 @@ class GitChanges:
         method = (config.get("git") or {}).get("merge_method", "merge")
         remote = self.ctx.git.refs(project["relative_path"], [changes["target_branch"]])
         github = remote["remote"]["kind"] == "github" and (config.get("git") or {}).get("require_pull_request", True)
+        gate = self.quality_gate.latest_passing(uow, task, changes["integration_sha"]) if self.quality_gate else None
         if github:
             if not changes["pr_number"]:
                 raise Conflict("this project merges through a pull request; run `ho git pr` first")
             pr = self.ctx.git.pr_view(project["relative_path"], changes["pr_number"])
             return {"project": project["relative_path"], "target_branch": pr["baseRefName"], "target_sha": pr["base_sha"],
-                    "head_sha": pr["headRefOid"], "method": method, "pr_number": changes["pr_number"]}
+                    "head_sha": pr["headRefOid"], "method": method, "pr_number": changes["pr_number"], "quality_gate": gate}
         return {"project": project["relative_path"], "target_branch": changes["target_branch"],
                 "target_sha": remote["refs"][changes["target_branch"]], "head_sha": changes["integration_sha"],
-                "method": method, "pr_number": None}
+                "method": method, "pr_number": None, "quality_gate": gate}
 
     def request_merge(self, uow: UnitOfWork, task_key: str, *, principal: Principal) -> Row:
         task, project, config = self._context(uow, task_key, lock=True)
@@ -410,6 +397,8 @@ class GitChanges:
         if changes["retest_status"] in ("RUNNING", "FAILED"):
             raise Conflict(f"the integrated change's tests are {changes['retest_status']}")
         subject = self._merge_subject(uow, task, project, config, changes)
+        if self.quality_gate is not None and not subject["quality_gate"]:
+            raise Conflict(f"{task_key} has no passing Quality Gate evaluation for its integrated change")
         if subject["pr_number"] is None and subject["target_sha"] != changes["integration_target_sha"]:
             raise Conflict(f"{changes['target_branch']} moved since integration; run `ho git integrate {task_key}` again")
         if subject["pr_number"] is not None and subject["head_sha"] != changes["integration_sha"]:
@@ -495,9 +484,12 @@ class GitChanges:
                         f"({result['method']})", {"merge_sha": result["merge_sha"], "approval_id": str(changes["merge_approval_id"])})
             task = self.tasks.transition(uow, task, S.VERIFYING, trigger=Trigger.SYSTEM, actor="git-service",
                                          reason="merge confirmed; post-merge verification")
-            started = self._start_tests(uow, task, config, f"refs/hermes/merges/{changes['merge_approval_id']}", purpose="verify")
-            if started["status"] == "NOT_CONFIGURED":
-                self._finish_verification(uow, task, passed=True, note="merge confirmed; the project has no test command")
+            uow.cur.execute("UPDATE git_changes SET post_merge_status = 'RUNNING' WHERE task_id = %s", (task["id"],))
+            verification = self.verifications.start(uow, task_key, ref=f"refs/hermes/merges/{changes['merge_approval_id']}",
+                                                    purpose="POST_MERGE")
+            uow.cur.execute("UPDATE git_changes SET verification_execution_id = NULL WHERE task_id = %s", (task["id"],))
+            self._event(uow, task, "POST_MERGE_STARTED", f"post-merge verification {str(verification['id'])[:8]} started",
+                        actor="control-plane")
             if changes["remote_branch"] and (config.get("git") or {}).get("delete_remote_branch_after_merge", True):
                 path, branch, policy = project["relative_path"], changes["remote_branch"], self._policy(config)
                 uow.after_commit.append(lambda: self._delete_remote(path, branch, policy))
@@ -542,7 +534,7 @@ class GitChanges:
     # ------------------------------------------------------------------- sync
 
     def sync(self) -> dict[str, int]:
-        """Scheduler hook: retry unconfirmed merges, finish retests and post-merge verification, watch for human changes."""
+        """Scheduler hook: retry unconfirmed merges and watch for human changes."""
         stats = {"merges": 0, "verified": 0}
         with self.ctx.unit_of_work() as uow:
             uow.cur.execute("SELECT key FROM tasks WHERE state = 'MERGING'")
@@ -550,33 +542,5 @@ class GitChanges:
         for key in merging:
             self.execute_merge(key)
             stats["merges"] += 1
-        with self.ctx.unit_of_work() as uow:
-            uow.cur.execute(
-                """
-                SELECT g.task_id, g.retest_status, g.post_merge_status, r.state AS retest_state, v.state AS verify_state
-                FROM git_changes g
-                LEFT JOIN executions r ON r.id = g.retest_execution_id
-                LEFT JOIN executions v ON v.id = g.verification_execution_id
-                WHERE g.retest_status = 'RUNNING' OR g.post_merge_status = 'RUNNING'
-                """
-            )
-            for row in uow.cur.fetchall():
-                if row["retest_status"] == "RUNNING" and row["retest_state"] in ("SUCCEEDED", "FAILED", "CANCELLED", "LOST"):
-                    status = "PASSED" if row["retest_state"] == "SUCCEEDED" else "FAILED"
-                    uow.cur.execute("UPDATE git_changes SET retest_status = %s WHERE task_id = %s", (status, row["task_id"]))
-                    uow.cur.execute("SELECT * FROM tasks WHERE id = %s", (row["task_id"],))
-                    task = uow.cur.fetchone()
-                    self._event(uow, task, "TEST_PASSED" if status == "PASSED" else "TEST_FAILED",  # type: ignore[arg-type]
-                                f"tests on the integrated change {status.lower()}", actor="control-plane")
-                if row["post_merge_status"] == "RUNNING" and row["verify_state"] in ("SUCCEEDED", "FAILED", "CANCELLED", "LOST"):
-                    uow.cur.execute("SELECT * FROM tasks WHERE id = %s FOR UPDATE", (row["task_id"],))
-                    task = uow.cur.fetchone()
-                    if task and task["state"] == S.VERIFYING:
-                        passed = row["verify_state"] == "SUCCEEDED"
-                        uow.cur.execute("UPDATE git_changes SET post_merge_status = %s WHERE task_id = %s",
-                                        ("PASSED" if passed else "FAILED", row["task_id"]))
-                        self._finish_verification(uow, task, passed=passed,
-                                                  note="post-merge tests passed" if passed else "post-merge tests failed")
-                        stats["verified"] += 1
         stats["divergence_checks"] = self.monitor()
         return stats
