@@ -2,6 +2,7 @@
 
 **Date:** 2026-09-30  
 **Machine:** MacBook Pro (Apple Silicon), Docker Desktop 29.4.0, `linux/arm64`, Docker VM with 12 CPUs and 8 GB RAM  
+**Status:** Approved by Gabriel Paredes on 2026-09-30 (PR #5)  
 **Scope:** PHASES.md Phase 4 and its completion criteria: *both providers execute isolated tasks through the same contract; credentials remain outside Git, PostgreSQL, logs, manifests, and normal backups.*
 
 ## What was built

@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phase 4 (Claude/Codex workers) is implemented and validated, pending review ([docs/validation/phase-4.md](docs/validation/phase-4.md)). Phases 5–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phase 4 (Claude/Codex workers) was approved by Gabriel Paredes on 2026-09-30 (PR #5; evidence in [docs/validation/phase-4.md](docs/validation/phase-4.md)). Phases 5–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -104,7 +104,7 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Completion criteria:** Both providers execute isolated tasks through the same contract; credentials remain outside Git, PostgreSQL, logs, manifests, and normal backups.
 
-**Status:** Implemented, pending review. 142 unit, 48 integration, and 39 real-Docker tests, plus a 29-check end-to-end smoke test on the Compose stack (macOS, Apple Silicon). With the operator's subscription logins, one real Claude Code 2.1.280 and one real Codex 0.159.2 execution each implemented a change, ran the tests, and committed in an isolated workspace, reaching their providers only through the egress proxy. Evidence, decisions, and limitations: [docs/validation/phase-4.md](docs/validation/phase-4.md).
+**Status:** Complete. Approved by Gabriel Paredes on 2026-09-30 (PR #5). 142 unit, 48 integration, and 39 real-Docker tests, plus a 29-check end-to-end smoke test on the Compose stack (macOS, Apple Silicon). With the operator's subscription logins, one real Claude Code 2.1.280 and one real Codex 0.159.2 execution each implemented a change, ran the tests, and committed in an isolated workspace, reaching their providers only through the egress proxy. Evidence, decisions, and limitations: [docs/validation/phase-4.md](docs/validation/phase-4.md).
 
 ## Phase 5: Git Isolation
 
