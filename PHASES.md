@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phases 4–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phase 4 (Claude/Codex workers) is implemented and validated, pending review ([docs/validation/phase-4.md](docs/validation/phase-4.md)). Phases 5–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -81,7 +81,7 @@ All code, filenames, comments, configuration documentation, and project document
 - [x] Implement assigned-workspace mounts and project-specific network isolation.
 - [x] Enforce machine-specific CPU/RAM profiles and concurrency limits, including the Mac default of three simultaneous agent workers.
 - [x] Evaluate policy, budget, credentials, resources, and capabilities before launching workers.
-- [ ] Keep workers alive through their logical implement/test/fix/retest/commit cycle. *(Partial: Agent Manager never stops a worker before its command exits or its grant expires; the multi-step cycle inside one worker is completed with the Phase 4 adapters.)*
+- [ ] Keep workers alive through their logical implement/test/fix/retest/commit cycle. *(Partial: Agent Manager never stops a worker before its command exits or its grant expires. Since Phase 4, one DEVELOPER agent execution runs the whole cycle and commits locally; this is checked once the operator's first real agent run completes.)*
 - [x] Prevent worker access to Docker sockets, unrelated host paths/projects, control databases, and GitHub credentials.
 
 **Completion criteria:** Workers can be managed through the private authenticated API, and forbidden mounts, networks, and capabilities are denied.
@@ -92,17 +92,19 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Provide interchangeable agent execution with secure authentication and structured results.
 
-- [ ] Implement `AgentAdapter`, `ClaudeAdapter`, and `CodexAdapter`.
-- [ ] Support task execution, resume, cancellation, health checks, result collection, and usage collection.
-- [ ] Build pinned/versioned agent-base, Claude worker, and Codex worker images for the supported architectures.
-- [ ] Implement composable generic, Node, Python, Flutter, PHP, and Java toolchain profiles.
-- [ ] Implement authentication bootstrap using officially supported subscription/interactive flows.
-- [ ] Implement Credential Broker and separate Secrets Broker interfaces with least-privilege access and redaction.
-- [ ] Preserve provider sessions securely across ephemeral worker destruction.
-- [ ] Handle expired sessions through `AUTH_REQUIRED`, notification events, re-authentication, and checkpoint resume.
-- [ ] Return structured artifacts, results, and operational usage data without uncontrolled worker-to-worker communication.
+- [x] Implement `AgentAdapter`, `ClaudeAdapter`, and `CodexAdapter`.
+- [x] Support task execution, resume, cancellation, health checks, result collection, and usage collection.
+- [x] Build pinned/versioned agent-base, Claude worker, and Codex worker images for the supported architectures. *(`linux/arm64` built and tested; on `linux/amd64` the Codex image was built and run under emulation, and the Claude Code image still needs a run on an amd64 host.)*
+- [x] Implement composable generic, Node, Python, Flutter, PHP, and Java toolchain profiles.
+- [x] Implement authentication bootstrap using officially supported subscription/interactive flows. *(A login with a real account is part of the operator's review: `make auth-claude`, `make auth-codex`.)*
+- [x] Implement Credential Broker and separate Secrets Broker interfaces with least-privilege access and redaction.
+- [x] Preserve provider sessions securely across ephemeral worker destruction.
+- [x] Handle expired sessions through `AUTH_REQUIRED`, notification events, re-authentication, and checkpoint resume.
+- [x] Return structured artifacts, results, and operational usage data without uncontrolled worker-to-worker communication.
 
 **Completion criteria:** Both providers execute isolated tasks through the same contract; credentials remain outside Git, PostgreSQL, logs, manifests, and normal backups.
+
+**Status:** Implemented, pending review. 142 unit, 48 integration, and 39 real-Docker tests, plus a 29-check end-to-end smoke test on the Compose stack (macOS, Apple Silicon). The real Claude Code 2.1.280 and Codex 0.159.2 CLIs were run in workers against their providers through the egress proxy, with invalid logins so that no model request was billed; a successful model run needs the operator's own login and is the remaining review step. Evidence, decisions, and limitations: [docs/validation/phase-4.md](docs/validation/phase-4.md).
 
 ## Phase 5: Git Isolation
 

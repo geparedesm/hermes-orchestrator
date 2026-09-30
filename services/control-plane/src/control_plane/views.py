@@ -109,11 +109,18 @@ def execution_view(row: Row, *, grant: Row | None = None) -> dict[str, Any]:
         "failure_class": row["failure_class"],
         "failure_reason": row["failure_reason"],
         "artifacts": [str(a) for a in row["result_artifact_ids"]],
+        "agent_run": row["agent_run"],
+        "provider_session_id": row["provider_session_id"],
+        "resume_of": str(row["resume_of"]) if row["resume_of"] else None,
+        "result": row["result"],
         "requested_by": row["requested_by"],
         "created_at": _iso(row["created_at"]),
         "started_at": _iso(row["started_at"]),
         "ended_at": _iso(row["ended_at"]),
     }
+    if row["agent_run"]:
+        # The command carries the adapter's fixed flags; the assignment is what was asked.
+        view["assignment"] = (row["spec"] or {}).get("assignment")
     if grant is not None:
         view["grant"] = grant["grant_doc"]
         view["grant_reductions"] = grant["reductions"]

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hermes-orchestrator:schema:agent-result:1",
+  "title": "Agent execution result",
+  "description": "Structured final answer every Claude or Codex execution must return (ARCHITECTURE.md section 7.5). Passed to the CLIs as their output schema (claude --json-schema, codex exec --output-schema) without the top-level metadata keywords, so it only uses keywords both providers' structured output supports: every property is required and nullable values use a type list. Lengths are enforced by the control plane on ingestion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "changed_files", "tests", "commits", "follow_ups", "blocked_reason"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["completed", "blocked", "failed"],
+      "description": "completed: the assignment is done; blocked: it cannot continue without something outside the agent's control; failed: the agent tried and could not do it."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short operational summary of what was done and why. Not a transcript."
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Paths relative to the workspace."
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ran", "passed", "command", "summary"],
+      "properties": {
+        "ran": {"type": "boolean"},
+        "passed": {"type": ["boolean", "null"]},
+        "command": {"type": ["string", "null"]},
+        "summary": {"type": ["string", "null"]}
+      }
+    },
+    "commits": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Local commit SHAs created in the workspace."
+    },
+    "follow_ups": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "blocked_reason": {
+      "type": ["string", "null"]
+    }
+  }
+}

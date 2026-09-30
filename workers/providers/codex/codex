@@ -1,0 +1,3 @@
+#!/bin/sh
+# Official npm launcher for the pinned Codex CLI, with the image's private Node.js runtime.
+exec /opt/ho/node/bin/node /opt/ho/codex/node_modules/@openai/codex/bin/codex.js "$@"

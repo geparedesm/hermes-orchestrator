@@ -1,0 +1,40 @@
+#!/bin/bash
+# In-container runner for Codex CLI executions (ARCHITECTURE.md section 7.5).
+#
+# Untrusted side of the adapter: it prepares a per-execution CODEX_HOME, runs
+# the CLI with the arguments chosen by the trusted CodexAdapter, and writes raw
+# output to /output/ho. The control plane parses and filters it.
+set -uo pipefail
+OUT=/output/ho
+CRED_DIR=/run/ho-credentials/codex
+mkdir -p "$OUT" "$CODEX_HOME"
+finish() { printf '{"exit_code": %d, "reason": "%s"}\n' "$1" "$2" > "$OUT/runner.json"; exit "$1"; }
+
+# ChatGPT login saved by `codex login` (scripts/auth-login.sh). Codex refreshes
+# tokens during use, so the working copy lives in the per-execution CODEX_HOME
+# and is written back only if nobody else changed the stored copy meanwhile.
+[[ -s $CRED_DIR/auth.json ]] || finish 3 credential_missing
+install -m 600 "$CRED_DIR/auth.json" "$CODEX_HOME/auth.json"
+before="$(sha256sum < "$CODEX_HOME/auth.json")"
+
+if [[ -d /run/ho-sessions ]]; then
+  mkdir -p /run/ho-sessions/codex && ln -sfn /run/ho-sessions/codex "$CODEX_HOME/sessions"
+fi
+
+prompt=/run/ho-input/prompt.md
+[[ -f $prompt ]] || finish 2 input_missing
+codex "$@" < "$prompt" > "$OUT/events.jsonl"
+rc=$?
+
+if [[ -s $CODEX_HOME/auth.json && "$(sha256sum < "$CODEX_HOME/auth.json")" != "$before" ]]; then
+  (
+    flock -w 30 9 || exit 0
+    if [[ "$(sha256sum < "$CRED_DIR/auth.json")" == "$before" ]]; then
+      install -m 600 "$CODEX_HOME/auth.json" "$CRED_DIR/.auth.json.$$" && mv -f "$CRED_DIR/.auth.json.$$" "$CRED_DIR/auth.json"
+      echo refreshed > "$OUT/credential.txt"
+    else
+      echo stale > "$OUT/credential.txt"
+    fi
+  ) 9>"$CRED_DIR/.lock"
+fi
+finish "$rc" cli_exited

@@ -37,6 +37,8 @@ class Settings:
     log_level: str = "INFO"
     bind_host: str = "0.0.0.0"
     bind_port: int = 8080
+    # Provider identity whose credential volume executions use (cred-<provider>-<identity>).
+    provider_identity: str = "default"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -74,6 +76,7 @@ class Settings:
             run_scheduler=env.get("HO_RUN_SCHEDULER", "true").lower() == "true",
             log_level=env.get("HO_LOG_LEVEL", "INFO"),
             bind_port=int(env.get("HO_PORT", "8080")),
+            provider_identity=env.get("HO_PROVIDER_IDENTITY") or "default",
         )
 
     def platform_config(self) -> dict:

@@ -79,6 +79,7 @@ services:
       HO_GIT_SERVICE_TOKEN_FILE: /run/secrets/ho_git_service_token
       HO_AGENT_MANAGER_URL: http://agent-manager:8082
       HO_AGENT_MANAGER_TOKEN_FILE: /run/secrets/ho_agent_manager_token
+      HO_PROVIDER_IDENTITY: ${HO_PROVIDER_IDENTITY:-default}
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
     secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token]
     volumes:
@@ -117,11 +118,15 @@ services:
       HO_PROJECTS_ROOT_HOST: ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}
       HO_PROJECTS_ROOT: /projects
       HO_AGENT_MANAGER_TOKEN_FILE: /run/secrets/ho_agent_manager_token
+      HO_PROJECT_SECRETS_DIR: /var/lib/ho/project-secrets
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
     secrets: [ho_agent_manager_token]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config:/app/config:ro
+      # Secrets Broker v1: <project>/<environment>/<NAME> files, outside the projects root.
+      # Only Agent Manager reads them, to deliver granted secrets into executions.
+      - ${HO_PROJECT_SECRETS_HOST:-./project-secrets}:/var/lib/ho/project-secrets:ro
       # Read-only: used only to validate workspace paths before asking Docker to mount them.
       - ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}:/projects:ro
     networks: [ho-control]

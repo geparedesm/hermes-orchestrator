@@ -1,0 +1,20 @@
+#!/bin/bash
+# Interactive Codex login for one provider identity (SECURITY_MODEL.md section 7.1).
+# Run by scripts/auth-login.sh in a bootstrap container that mounts only this
+# identity's credential volume. No model runs.
+#
+# Uses the documented device-code flow for headless environments
+# (`codex login --device-auth`) with file credential storage, then stores
+# auth.json in the credential volume (mode 0600).
+set -euo pipefail
+dest=/run/ho-credentials/codex
+mkdir -p "$CODEX_HOME"
+store=(-c 'cli_auth_credentials_store="file"' -c 'forced_login_method="chatgpt"')
+
+echo "Step 1: sign in with your ChatGPT account using the device code shown below."
+codex "${store[@]}" login --device-auth
+codex "${store[@]}" login status
+[[ -s $CODEX_HOME/auth.json ]] || { echo "Codex did not write auth.json; nothing was saved." >&2; exit 1; }
+install -m 600 "$CODEX_HOME/auth.json" "$dest/.auth.json.new"
+mv -f "$dest/.auth.json.new" "$dest/auth.json"
+echo "Login saved to the credential volume."

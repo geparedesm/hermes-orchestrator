@@ -80,11 +80,11 @@ def test_symlinked_workspace_is_rejected(api, credential):
         lambda b: b.__setitem__("execution_id", "00000000-0000-4000-8000-000000000000"),
         lambda b: b.__setitem__("project", "proj-b"),
         lambda b: b["grant"]["capabilities"].__setitem__("secrets", ["proj-a/test/DB"]),
-        lambda b: b.__setitem__("image", "python"),
+        lambda b: b.__setitem__("image", "codex-unpinned"),
         lambda b: b.__setitem__("env", {"DOCKER_HOST": "tcp://host.docker.internal:2375"}),
         lambda b: b.__setitem__("command", "rm -rf /"),
     ],
-    ids=["docker-write", "expired", "wrong-execution", "wrong-project", "secrets", "unpinned-image", "docker-host-env", "string-command"],
+    ids=["docker-write", "expired", "wrong-execution", "wrong-project", "secret-not-in-store", "unpinned-image", "docker-host-env", "string-command"],
 )
 def test_invalid_requests_are_rejected(api, credential, tamper):
     body = api.request(D, "true", egress="NONE", workspace="WRITE")

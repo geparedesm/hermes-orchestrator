@@ -1,0 +1,30 @@
+#!/bin/bash
+# In-container runner for Claude Code executions (ARCHITECTURE.md section 7.5).
+#
+# Untrusted side of the adapter: it prepares the per-execution configuration
+# directory, runs the CLI with the arguments chosen by the trusted ClaudeAdapter,
+# and writes raw output to /output/ho. The control plane parses and filters it;
+# nothing here is trusted.
+set -uo pipefail
+OUT=/output/ho
+mkdir -p "$OUT" "$CLAUDE_CONFIG_DIR"
+finish() { printf '{"exit_code": %d, "reason": "%s"}\n' "$1" "$2" > "$OUT/runner.json"; exit "$1"; }
+
+# Subscription token created by `claude setup-token` (scripts/auth-login.sh), mounted read-only.
+token_file=/run/ho-credentials/claude/oauth_token
+[[ -s $token_file ]] || finish 3 credential_missing
+CLAUDE_CODE_OAUTH_TOKEN="$(cat "$token_file")"
+export CLAUDE_CODE_OAUTH_TOKEN
+
+# Per-task session store, so a later execution of the same task can resume (--resume).
+if [[ -d /run/ho-sessions ]]; then
+  mkdir -p /run/ho-sessions/claude && ln -sfn /run/ho-sessions/claude "$CLAUDE_CONFIG_DIR/projects"
+fi
+
+prompt=/run/ho-input/prompt.md
+[[ -f $prompt ]] || finish 2 input_missing
+claude "$@" < "$prompt" > "$OUT/events.jsonl"
+rc=$?
+# The result message is the last line; keep it separately so it survives output truncation.
+tail -n 1 "$OUT/events.jsonl" > "$OUT/final.json" 2>/dev/null
+finish "$rc" cli_exited

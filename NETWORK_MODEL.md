@@ -115,6 +115,15 @@ Rules enforced by the proxy in every mode:
 
 Provider API endpoints are not hardcoded here. Phase 4 records them from each provider's official network documentation for the pinned CLI version. They are kept in the machine profile, not in project configuration.
 
+**Phase 4:** recorded in `config/defaults.yaml` (`machine.provider_domains`):
+
+| Provider | Hosts | Source |
+| --- | --- | --- |
+| Claude Code | `api.anthropic.com`, `claude.ai`, `platform.claude.com` | [Claude Code network access requirements](https://code.claude.com/docs/en/network-config#network-access-requirements) (API, claude.ai authentication, OAuth token exchange and refresh) |
+| Codex CLI | `chatgpt.com`, `auth.openai.com`, `api.openai.com` | [Codex agent approvals and security](https://learn.chatgpt.com/docs/agent-approvals-security) |
+
+Hosts for telemetry, error reporting, plugins, and updates are deliberately left out; the images disable automatic updates, and Claude Code runs with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. Real runs of both pinned CLIs through a `PROVIDER_ONLY` proxy (invalid logins, so no model request succeeded) contacted only listed hosts: Claude Code `api.anthropic.com`; Codex `chatgpt.com` and `auth.openai.com` ([docs/validation/phase-4.md](docs/validation/phase-4.md)).
+
 **OI-05 (resolved in Phase 3):** the proxy is a small purpose-built service, [services/egress-proxy](services/egress-proxy/) (about 200 lines, standard library only), rather than a general proxy such as Squid. It implements exactly the rules above and nothing else, which keeps its behavior easy to review and test. It runs non-root with the same container baseline as workers (SECURITY_MODEL §8.1), 64 MiB of memory, and 0.25 CPU.
 
 ## 6. Access Matrix

@@ -64,6 +64,12 @@ class AgentManagerClient:
     def managed(self) -> dict[str, Any]:
         return self._call("GET", "/v1/managed")
 
+    def credentials(self) -> dict[str, Any]:
+        return self._call("GET", "/v1/credentials")
+
+    def images(self) -> dict[str, Any]:
+        return self._call("GET", "/v1/images")
+
     def ping(self) -> bool:
         try:
             return self._client.get("/health/live").status_code == 200

@@ -1,0 +1,35 @@
+#!/bin/bash
+# Interactive Claude Code subscription login for one provider identity
+# (SECURITY_MODEL.md section 7.1). Run by scripts/auth-login.sh in a bootstrap
+# container that mounts only this identity's credential volume. No model runs.
+#
+# Uses the documented `claude setup-token` flow: it opens the claude.ai
+# authorization page and prints a long-lived subscription token, which is saved
+# to the credential volume (mode 0600) and never printed again.
+set -euo pipefail
+dest=/run/ho-credentials/claude
+mkdir -p "$CLAUDE_CONFIG_DIR"
+
+echo "Step 1: authorize in your browser. Claude Code prints a token when you finish."
+claude setup-token
+echo
+read -rsp "Step 2: paste the token printed above (input is hidden) and press Enter: " token
+echo
+token="${token//[[:space:]]/}"
+[[ -n $token ]] || { echo "No token entered; nothing was saved." >&2; exit 1; }
+umask 077
+printf '%s' "$token" > "$dest/.oauth_token.new"
+mv -f "$dest/.oauth_token.new" "$dest/oauth_token"
+echo "Token saved to the credential volume."
+
+if [[ ${HO_AUTH_VERIFY:-1} == 1 ]]; then
+  echo "Step 3: verifying with a one-turn request..."
+  if CLAUDE_CODE_OAUTH_TOKEN="$token" claude -p --setting-sources user --strict-mcp-config --tools "" --max-turns 1 \
+       --output-format json "Reply with the single word OK." > /tmp/verify.json 2>/dev/null \
+     && grep -Eq '"is_error": ?false' /tmp/verify.json; then
+    echo "Verified: Claude Code accepted the token."
+  else
+    echo "Verification failed. Run the login again." >&2
+    exit 4
+  fi
+fi

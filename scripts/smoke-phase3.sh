@@ -10,7 +10,8 @@ PROJECT=ho-smoke3
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ho-smoke3.XXXXXX")"
 ROOT="$WORK/HermesProjects"
 ENV_FILE="$WORK/smoke.env"
-CREDENTIAL=cred-codex-default
+# A throwaway provider identity, so the operator's real login (cred-codex-default) is never touched.
+CREDENTIAL=cred-codex-smoke3
 FAILURES=0
 
 dc() { docker compose -p "$PROJECT" --env-file "$ENV_FILE" "$@"; }
@@ -43,9 +44,10 @@ echo '{"name": "sample-app", "scripts": {"test": "true"}}' > "$ROOT/sample-app/p
 git -C "$ROOT/sample-app" init -q -b main
 git -C "$ROOT/sample-app" add package.json
 git -C "$ROOT/sample-app" -c user.name=smoke -c user.email=smoke@example.com commit -qm init
-printf 'HO_MACHINE_PROFILE=mac-m2-pro\nHO_PROJECTS_ROOT_HOST=%s\nHO_VERSION=dev\n' "$ROOT" > "$ENV_FILE"
+printf 'HO_MACHINE_PROFILE=mac-m2-pro\nHO_PROJECTS_ROOT_HOST=%s\nHO_VERSION=dev\nHO_PROVIDER_IDENTITY=smoke3\nHO_PROJECT_SECRETS_HOST=%s\n' "$ROOT" "$WORK/project-secrets" > "$ENV_FILE"
 # Phase 4 creates provider credential volumes through a login flow; simulate an empty one.
-docker volume create --label ho.credential=codex/default "$CREDENTIAL" >/dev/null
+mkdir -p "$WORK/project-secrets"
+docker volume create --label ho.credential=codex/smoke3 "$CREDENTIAL" >/dev/null
 dc up -d --build --wait >/dev/null
 check "agent-manager ready" "True" "$(ho health | field 'd["checks"].get("agent_manager")')"
 

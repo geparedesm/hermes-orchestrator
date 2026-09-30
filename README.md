@@ -8,7 +8,7 @@ A local-first multi-agent development platform built around the official [Hermes
 
 ## Current status
 
-Phases 2–3 are implemented: project registration and read-only onboarding, configuration proposals with hard-policy enforcement, approvals, tasks with deterministic states, a scheduler queue, an operator CLI, and the **Agent Manager**, which runs commands in isolated, resource-limited worker containers with per-execution egress control. **Claude Code and Codex do not run yet** (Phase 4), and Hermes integration arrives in Phase 9. Evidence: [docs/validation/phase-2.md](docs/validation/phase-2.md), [docs/validation/phase-3.md](docs/validation/phase-3.md).
+Phases 2–4 are implemented: project registration and read-only onboarding, configuration proposals with hard-policy enforcement, approvals, tasks with deterministic states, a scheduler queue, an operator CLI, the **Agent Manager**, which runs isolated, resource-limited worker containers with per-execution egress control, and **Claude Code and Codex workers** that sign in with your subscriptions, return structured results, and pause in `AUTH_REQUIRED` when a login expires. The operator starts agent executions by hand until the orchestrator arrives (Phase 7); Hermes integration arrives in Phase 9. Evidence: [docs/validation/phase-2.md](docs/validation/phase-2.md), [docs/validation/phase-3.md](docs/validation/phase-3.md), [docs/validation/phase-4.md](docs/validation/phase-4.md).
 
 This README grows with each phase. The full operations guide required by the specification is completed in Phase 11.
 
@@ -87,6 +87,31 @@ docker compose exec control-plane ho workers                          # capacity
 
 If the repository has its own `.hermes/project.yaml`, the scan uses it (validated against [schemas/project.schema.json](schemas/project.schema.json)). An untracked `.hermes.local.yaml` can tighten settings but never weaken them.
 
+## Claude Code and Codex (Phase 4)
+
+Log in once per provider. Each command opens the provider's official login flow in a throwaway container and stores the result in a dedicated Docker volume (`cred-claude-default`, `cred-codex-default`), never in Git, PostgreSQL, logs, or backups:
+
+```bash
+make auth-claude    # claude setup-token: authorize in the browser, then paste the printed token
+make auth-codex     # codex login --device-auth: enter the code shown at the ChatGPT URL
+docker compose exec control-plane ho auth status
+```
+
+Codex's device-code login must be allowed for your ChatGPT account. When a login expires, affected tasks wait in `AUTH_REQUIRED`; run the same `make auth-*` command again and they resume.
+
+Run an agent on a task (the workspace must exist under `.hermes/worktrees/` until Phase 5):
+
+```bash
+docker compose exec control-plane ho agent run T-1 "Add a health check endpoint with tests" \
+  --provider codex --workspace .hermes/worktrees/w1 --workspace-access WRITE
+docker compose exec control-plane ho execution show <execution-id>          # state, result, usage, artifacts
+docker compose exec control-plane ho execution resume <execution-id> "Also update the README"
+```
+
+The image follows the project's `toolchain.profiles` (for example `codex-node`); build extra profiles with `make images HO_TOOLCHAINS="generic node python php java flutter"`.
+
+Project secrets are declared by name in `.hermes/project.yaml` and stored as files under `./project-secrets/<project>/<environment>/<NAME>` (mode 0600). Request them with `--secret NAME`; they are delivered into the worker's memory and redacted from everything collected.
+
 ## Development
 
 ```bash
@@ -95,10 +120,11 @@ make test              # unit tests + integration tests (starts throwaway Postgr
 make test-docker       # Agent Manager against the real Docker daemon (needs Internet)
 make smoke             # Phase 2 end-to-end test on a throwaway Compose stack
 make smoke-phase3      # Phase 3 end-to-end test with real workers
+make smoke-phase4      # Phase 4 end-to-end test: adapters, real CLIs (invalid logins), AUTH_REQUIRED, secrets
 make lint validate-schemas
 make test-env-down     # remove the integration test containers
 ```
 
 ## Repository layout
 
-See [ARCHITECTURE.md §12](ARCHITECTURE.md#12-repository-layout). The main pieces today are `packages/ho_core` (shared contracts and policy), `services/control-plane`, `services/git-service`, `services/agent-manager`, `services/egress-proxy`, `workers/agent-base`, `migrations/`, `schemas/`, and `config/`.
+See [ARCHITECTURE.md §12](ARCHITECTURE.md#12-repository-layout). The main pieces today are `packages/ho_core` (shared contracts and policy), `services/control-plane`, `services/git-service`, `services/agent-manager`, `services/egress-proxy`, `workers/` (agent-base, toolchains, providers), `migrations/`, `schemas/`, and `config/`.

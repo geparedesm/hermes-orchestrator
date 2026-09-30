@@ -22,9 +22,14 @@ machine:
   max_execution_minutes: 240
   # Memory kept free for platform services; Agent Manager refuses executions beyond the rest.
   docker_memory_reserve_gb: 2
-  # Provider API hostnames for PROVIDER_ONLY/ALLOWLIST egress. Recorded in Phase 4 from each
-  # provider's official network documentation for the pinned CLI version; empty until then.
-  provider_domains: {claude: [], codex: []}
+  # Provider hostnames for PROVIDER_ONLY/ALLOWLIST egress, from each provider's official network
+  # documentation for the pinned CLI versions (workers/versions.env):
+  #   Claude Code: code.claude.com/docs/en/network-config (API, claude.ai login, token exchange)
+  #   Codex CLI:   learn.chatgpt.com/docs/agent-approvals-security (chatgpt.com, auth, API)
+  # Telemetry and update hosts are left out on purpose; the images disable both.
+  provider_domains:
+    claude: [api.anthropic.com, claude.ai, platform.claude.com]
+    codex: [chatgpt.com, auth.openai.com, api.openai.com]
   resource_profiles:
     LIGHT: {cpus: 1, memory_gb: 2}
     NORMAL: {cpus: 2, memory_gb: 4}

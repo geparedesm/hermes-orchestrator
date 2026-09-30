@@ -16,3 +16,7 @@ done
 # owner-only secrets/ directory (mode 0700).
 chmod 700 secrets
 chmod 644 secrets/ho_*
+# Project secrets store for the Secrets Broker (see .env.example). Created empty;
+# the operator adds <project>/<environment>/<NAME> files.
+mkdir -p project-secrets
+chmod 700 project-secrets

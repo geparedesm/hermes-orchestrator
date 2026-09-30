@@ -13,3 +13,6 @@ config/local.yaml
 .env
 compose.override.yaml
 config/images.lock.yaml
+
+# Secrets Broker v1 file store (never committed)
+project-secrets/

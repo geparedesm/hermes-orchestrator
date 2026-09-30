@@ -33,6 +33,7 @@ class Context:
     artifacts: ArtifactStore
     git: GitServiceClient
     agents: AgentManagerClient | None = None
+    provider_identity: str = "default"
 
     @property
     def policy_version(self) -> str:
