@@ -1,0 +1,506 @@
+"""Executions: capability grants, dispatch to Agent Manager, and reconciliation
+(MASTER_SPEC sections 10-12, 33-34, 70; ARCHITECTURE.md section 6.3).
+
+Order of operations for every side effect on Docker:
+1. decide (Policy Engine grant, capacity, budget) and persist the execution,
+   grant, and a PENDING intent in one transaction;
+2. after commit, call Agent Manager (idempotent on the execution ID);
+3. record the outcome. `sync` repeats step 2 for executions still REQUESTED
+   and reconciles running ones with Docker's actual state.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from uuid import UUID
+
+from ho_core.enums import ProjectStatus, Role, TaskState
+from ho_core.ids import uuid7
+from ho_core.policy.engine import GrantRequest, evaluate_grant
+from ho_core.redact import redact
+from ho_core.statemachine import ACTIVE_STATES
+
+from .agentmgr import AgentManagerError
+from .auth import Principal
+from .context import Context, UnitOfWork
+from .db import Row, jsonb
+from .errors import BadRequest, Conflict, NotFound, UpstreamError
+from .events import record_event
+from .tasks import Tasks
+
+log = logging.getLogger(__name__)
+
+ACTIVE = ("REQUESTED", "STARTING", "RUNNING", "STOPPING")
+TERMINAL = ("SUCCEEDED", "FAILED", "CANCELLED", "LOST")
+AGENT_ROLES = {Role.ORCHESTRATOR, Role.DEVELOPER, Role.REVIEWER}
+MAX_DISPATCH_ATTEMPTS = 5
+_WORKSPACE = re.compile(r"^\.hermes/worktrees/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_FAILURE_BY_CODE = {"capacity_exceeded": "CAPACITY", "auth_required": "AUTH", "rejected": "POLICY",
+                    "image_not_allowed": "POLICY", "not_found": "UNKNOWN", "docker_error": "TRANSIENT"}
+
+
+class BudgetExhausted(Conflict):
+    pass
+
+
+@dataclass
+class ExecutionRequest:
+    role: str
+    command: list[str]
+    provider: str | None = None
+    image: str = "agent-base"
+    workspace: str | None = None
+    capabilities: dict[str, Any] = field(default_factory=dict)
+    resource_profile: str | None = None
+    timeout_minutes: int = 60
+    env: dict[str, str] = field(default_factory=dict)
+
+
+class Executions:
+    def __init__(self, ctx: Context, tasks: Tasks) -> None:
+        self.ctx = ctx
+        self.tasks = tasks
+        tasks.on_cancel.append(self.stop_task_executions)
+
+    @property
+    def agents(self):
+        if self.ctx.agents is None:
+            raise UpstreamError("agent-manager is not configured")
+        return self.ctx.agents
+
+    # ------------------------------------------------------------------ queries
+
+    def get(self, uow: UnitOfWork, execution_id: UUID | str, *, lock: bool = False) -> Row:
+        try:
+            UUID(str(execution_id))
+        except ValueError as exc:
+            raise NotFound(f"execution {execution_id} not found") from exc
+        uow.cur.execute(f"SELECT * FROM executions WHERE id = %s{' FOR UPDATE' if lock else ''}", (str(execution_id),))
+        row = uow.cur.fetchone()
+        if row is None:
+            raise NotFound(f"execution {execution_id} not found")
+        return row
+
+    def list(self, uow: UnitOfWork, *, task: str | None = None, state: str | None = None, limit: int = 100) -> list[Row]:
+        query = "SELECT e.*, t.key AS task_key FROM executions e JOIN tasks t ON t.id = e.task_id WHERE true"
+        params: list[Any] = []
+        if task:
+            query += " AND t.key = %s"
+            params.append(task)
+        if state:
+            query += " AND e.state = %s"
+            params.append(state)
+        uow.cur.execute(query + " ORDER BY e.created_at DESC LIMIT %s", [*params, limit])
+        return uow.cur.fetchall()
+
+    def grant(self, uow: UnitOfWork, execution_id: UUID) -> Row | None:
+        uow.cur.execute("SELECT * FROM capability_grants WHERE execution_id = %s", (execution_id,))
+        return uow.cur.fetchone()
+
+    # ----------------------------------------------------------------- request
+
+    def request(self, uow: UnitOfWork, *, principal: Principal, task_key: str, req: ExecutionRequest,
+                replacing: UUID | None = None) -> Row:
+        if self.ctx.agents is None:
+            raise UpstreamError("agent-manager is not configured")
+        task = self.tasks.get(uow, task_key, lock=True)
+        if TaskState(task["state"]) not in ACTIVE_STATES:
+            raise Conflict(f"{task_key} is {task['state']}; executions need an active task")
+        uow.cur.execute("SELECT * FROM projects WHERE id = %s", (task["project_id"],))
+        project = uow.cur.fetchone()
+        assert project is not None
+        if project["status"] != ProjectStatus.PROJECT_READY:
+            raise Conflict(f"project {project['slug']} is {project['status']}")
+        uow.cur.execute("SELECT effective_config FROM project_configs WHERE id = %s", (task["config_id"],))
+        config_row = uow.cur.fetchone()
+        if config_row is None:
+            raise Conflict(f"{task_key} has no pinned project configuration")
+        config = config_row["effective_config"]
+
+        try:
+            role = Role(req.role)
+        except ValueError as exc:
+            raise BadRequest(f"unknown role {req.role}") from exc
+        if role in AGENT_ROLES:
+            if req.provider not in config["agents"]["allowed_providers"]:
+                raise BadRequest(f"provider must be one of {config['agents']['allowed_providers']}")
+        elif req.provider not in (None, "none"):
+            raise BadRequest(f"{role.value} executions do not use a provider")
+        provider = req.provider if role in AGENT_ROLES else None
+
+        workspace = None
+        if req.workspace:
+            if not _WORKSPACE.match(req.workspace):
+                raise BadRequest("workspace must be .hermes/worktrees/<name>")
+            workspace = f"{project['relative_path']}/{req.workspace}"
+
+        self._check_capacity(uow, config, role, replacing=replacing)
+        self._charge_budget(uow, task)
+
+        execution_id = uuid7()
+        caps = dict(req.capabilities)
+        unknown = set(caps) - {"workspace", "git", "egress", "test_services", "allowed_domains", "environments",
+                               "production", "tests", "artifacts", "project_read"}
+        if unknown:
+            raise BadRequest(f"unknown capabilities: {sorted(unknown)}")
+        grant_request = GrantRequest(
+            grant_id=f"G-{execution_id}",
+            project=project["slug"],
+            task=task["key"],
+            execution=str(execution_id),
+            worker=f"{provider or role.value.lower()}-{task['key'][2:]}-{str(execution_id)[-8:]}",
+            role=role,
+            provider=provider,
+            workspace=caps.get("workspace", "NONE"),
+            git=caps.get("git", "NONE"),
+            egress=caps.get("egress", "NONE"),
+            test_services=bool(caps.get("test_services", False)),
+            allowed_domains=caps.get("allowed_domains", ()),
+            environments=caps.get("environments", ()),
+            production=caps.get("production", "NONE"),
+            tests=caps.get("tests", "NONE"),
+            artifacts=caps.get("artifacts", "NONE"),
+            project_read=[project["slug"]] if caps.get("project_read") else (),
+            resource_profile=req.resource_profile or config["resources"]["default_profile"],
+            timeout_minutes=req.timeout_minutes,
+        )
+        try:
+            grant, reductions = evaluate_grant(grant_request, config, self.ctx.platform, now=datetime.now(timezone.utc))
+        except (KeyError, ValueError) as exc:
+            raise BadRequest(f"invalid capability request: {exc}") from exc
+
+        production_hosts = config.get("environments", {}).get("production", {}).get("hosts", [])
+        spec: dict[str, Any] = {
+            "execution_id": str(execution_id),
+            "task": task["key"],
+            "project": project["slug"],
+            "project_path": project["relative_path"],
+            "role": role.value,
+            "image": req.image,
+            "command": req.command,
+            "env": req.env,
+            "grant": grant,
+            "denied_domains": production_hosts,
+        }
+        if workspace:
+            spec["workspace"] = workspace
+        if grant["capabilities"]["project_read"]:
+            spec["project_read"] = [{"slug": project["slug"], "path": project["relative_path"]}]
+
+        uow.cur.execute(
+            """
+            INSERT INTO executions (id, task_id, project_id, role, provider, provider_identity, image, command, workspace,
+                                    resource_profile, state, spec, requested_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'REQUESTED', %s, %s)
+            RETURNING *
+            """,
+            (execution_id, task["id"], project["id"], role.value, provider or "none",
+             grant["provider_credential"]["identity"] if grant["provider_credential"] else None,
+             req.image, jsonb(req.command), workspace, grant["resources"]["profile"], jsonb(spec), principal.value),
+        )
+        row = uow.cur.fetchone()
+        assert row is not None
+        uow.cur.execute(
+            """
+            INSERT INTO capability_grants (id, grant_key, execution_id, project_id, task_id, grant_doc, requested,
+                                           reductions, issued_at, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (uuid7(), grant["grant_id"], execution_id, project["id"], task["id"], jsonb(grant), jsonb(caps),
+             jsonb(reductions), grant["issued_at"], grant["expires_at"]),
+        )
+        uow.cur.execute(
+            """
+            INSERT INTO policy_decisions (id, project_id, task_id, execution_id, subject, decision, rule_ids, summary)
+            VALUES (%s, %s, %s, %s, 'CAPABILITY_GRANT', 'ALLOW', %s, %s)
+            """,
+            (uuid7(), project["id"], task["id"], execution_id, ["GRANT-INTERSECTION"],
+             "; ".join(reductions) or "granted as requested"),
+        )
+        uow.cur.execute(
+            "INSERT INTO operation_intents (id, project_id, task_id, kind, target, request, state) VALUES (%s, %s, %s, 'CREATE_EXECUTION', %s, %s, 'PENDING')",
+            (uuid7(), project["id"], task["id"], str(execution_id), jsonb({"execution_id": str(execution_id)})),
+        )
+        record_event(uow.cur, "GRANT_ISSUED", actor="policy-engine", project_id=project["id"], task_id=task["id"],
+                     summary=f"{grant['grant_id']} for {role.value} ({grant['capabilities']['network']['egress']} egress)",
+                     data={"execution_id": str(execution_id), "reductions": reductions}, pending=uow.events)
+        record_event(uow.cur, "AGENT_ASSIGNED", actor=principal.value, project_id=project["id"], task_id=task["id"],
+                     summary=f"{role.value} execution requested ({provider or 'runner'}, {grant['resources']['profile']})",
+                     data={"execution_id": str(execution_id)}, pending=uow.events)
+        uow.after_commit.append(lambda: self.dispatch(execution_id))
+        return row
+
+    def _check_capacity(self, uow: UnitOfWork, config: dict[str, Any], role: Role, *, replacing: UUID | None = None) -> None:
+        if role not in AGENT_ROLES:
+            return
+        cap = min(int(self.ctx.platform["machine"]["max_agent_workers"]), int(config["resources"]["max_agent_workers"]))
+        # A replacement takes over the slot of the execution it stops.
+        uow.cur.execute(
+            "SELECT count(*) AS n FROM executions WHERE state IN ('REQUESTED', 'STARTING', 'RUNNING', 'STOPPING') "
+            "AND role IN ('ORCHESTRATOR', 'DEVELOPER', 'REVIEWER') AND id IS DISTINCT FROM %s",
+            (replacing,),
+        )
+        if uow.cur.fetchone()["n"] >= cap:  # type: ignore[index]
+            raise Conflict(f"agent worker limit reached ({cap}); try again when a worker finishes")
+
+    def _charge_budget(self, uow: UnitOfWork, task: Row) -> None:
+        uow.cur.execute("SELECT * FROM budgets WHERE task_id = %s FOR UPDATE", (task["id"],))
+        budget = uow.cur.fetchone()
+        assert budget is not None
+        consumed = dict(budget["consumed"])
+        limit = budget["limits"].get("agent_launches")
+        launches = int(consumed.get("agent_launches", 0)) + 1
+        if limit is not None and launches > int(limit):
+            raise BudgetExhausted(f"{task['key']} used its {limit} agent launches")
+        consumed["agent_launches"] = launches
+        percent = 0 if not limit else 100 * launches / int(limit)
+        thresholds = budget["thresholds"]
+        state = "EXHAUSTED" if percent >= 100 else "OPTIMIZE" if percent >= thresholds["optimize_percent"] \
+            else "WARNING" if percent >= thresholds["warning_percent"] else "OK"
+        uow.cur.execute("UPDATE budgets SET consumed = %s, state = %s, updated_at = now() WHERE task_id = %s",
+                        (jsonb(consumed), state, task["id"]))
+        if state != budget["state"] and state != "OK":
+            record_event(uow.cur, "BUDGET_THRESHOLD", actor="control-plane", project_id=task["project_id"], task_id=task["id"],
+                         summary=f"{task['key']} agent launches at {percent:.0f}% of budget", data={"state": state},
+                         pending=uow.events)
+
+    def pause_for_budget(self, task_key: str, reason: str) -> None:
+        with self.ctx.unit_of_work() as uow:
+            task = self.tasks.get(uow, task_key, lock=True)
+            if TaskState(task["state"]) in ACTIVE_STATES:
+                from ho_core.statemachine import Trigger
+
+                self.tasks.transition(uow, task, TaskState.PAUSED_BUDGET, trigger=Trigger.SYSTEM, actor="control-plane", reason=reason)
+
+    # ---------------------------------------------------------------- dispatch
+
+    def dispatch(self, execution_id: UUID | str) -> None:
+        with self.ctx.unit_of_work() as uow:
+            row = self.get(uow, execution_id, lock=True)
+            if row["state"] != "REQUESTED":
+                return
+            uow.cur.execute("UPDATE executions SET dispatch_attempts = dispatch_attempts + 1, updated_at = now() WHERE id = %s",
+                            (row["id"],))
+            spec, attempts = row["spec"], row["dispatch_attempts"] + 1
+        try:
+            status = self.agents.create(spec)
+        except AgentManagerError as exc:
+            with self.ctx.unit_of_work() as uow:
+                row = self.get(uow, execution_id, lock=True)
+                if row["state"] != "REQUESTED":
+                    return
+                self._intent(uow, row["id"], "SENT" if exc.retryable else "FAILED", str(exc))
+                if exc.retryable and attempts < MAX_DISPATCH_ATTEMPTS:
+                    log.warning("dispatch of %s will be retried: %s", execution_id, exc)
+                    return
+                failure = _FAILURE_BY_CODE.get(exc.code, "UNKNOWN")
+                self._finish(uow, row, "FAILED", failure_class=failure, reason=exc.message)
+                if failure == "AUTH":
+                    record_event(uow.cur, "AUTH_REQUIRED", actor="agent-manager", project_id=row["project_id"], task_id=row["task_id"],
+                                 summary=exc.message, data={"execution_id": str(row["id"])}, pending=uow.events)
+            return
+        with self.ctx.unit_of_work() as uow:
+            row = self.get(uow, execution_id, lock=True)
+            if row["state"] != "REQUESTED":
+                return
+            state = "RUNNING" if status.get("state") in ("running", "exited") else "STARTING"
+            uow.cur.execute("UPDATE executions SET state = %s, started_at = now(), updated_at = now(), version = version + 1 WHERE id = %s",
+                            (state, row["id"]))
+            self._intent(uow, row["id"], "CONFIRMED", None)
+            record_event(uow.cur, "WORKER_CREATED", actor="agent-manager", project_id=row["project_id"], task_id=row["task_id"],
+                         summary=f"{row['role']} worker started", data={"execution_id": str(row["id"])}, pending=uow.events)
+
+    def _intent(self, uow: UnitOfWork, execution_id: UUID, state: str, error: str | None) -> None:
+        uow.cur.execute(
+            "UPDATE operation_intents SET state = %s, attempts = attempts + 1, last_error = %s, updated_at = now() "
+            "WHERE kind = 'CREATE_EXECUTION' AND target = %s",
+            (state, error, str(execution_id)),
+        )
+
+    # -------------------------------------------------------------------- stop
+
+    def stop(self, uow: UnitOfWork, execution_id: UUID | str, *, actor: str, reason: str) -> Row:
+        row = self.get(uow, execution_id, lock=True)
+        if row["state"] in TERMINAL:
+            raise Conflict(f"execution is already {row['state']}")
+        if row["state"] == "REQUESTED":
+            self._intent(uow, row["id"], "ABANDONED", reason)
+            self._finish(uow, row, "CANCELLED", failure_class="CANCELLED", reason=reason)
+        elif row["state"] != "STOPPING":
+            uow.cur.execute(
+                "UPDATE executions SET state = 'STOPPING', failure_reason = %s, updated_at = now(), version = version + 1 WHERE id = %s",
+                (reason, row["id"]),
+            )
+            record_event(uow.cur, "WORKER_STOPPING", actor=actor, project_id=row["project_id"], task_id=row["task_id"],
+                         summary=f"stopping {row['role']} execution: {reason}", data={"execution_id": str(row["id"])}, pending=uow.events)
+            exec_id = str(row["id"])
+            uow.after_commit.append(lambda: self._send_stop(exec_id))
+        return self.get(uow, row["id"])
+
+    def replace(self, uow: UnitOfWork, execution_id: UUID | str, *, principal: Principal, reason: str) -> Row:
+        """Stop an execution and start a new one with the same request (MASTER_SPEC section 11).
+
+        The new execution gets a fresh grant evaluated under current policy; nothing
+        from the old grant carries over.
+        """
+        old = self.get(uow, execution_id, lock=True)
+        if old["state"] not in ("STARTING", "RUNNING"):
+            raise Conflict(f"only running executions can be replaced (this one is {old['state']})")
+        uow.cur.execute("SELECT requested FROM capability_grants WHERE execution_id = %s", (old["id"],))
+        requested = uow.cur.fetchone()["requested"]  # type: ignore[index]
+        spec = old["spec"]
+        workspace = old["workspace"]
+        project_prefix = spec["project_path"] + "/"
+        uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (old["task_id"],))
+        task_key = uow.cur.fetchone()["key"]  # type: ignore[index]
+        self.stop(uow, old["id"], actor=principal.value, reason=f"replaced: {reason}")
+        request = ExecutionRequest(
+            role=old["role"],
+            command=list(old["command"]),
+            provider=None if old["provider"] == "none" else old["provider"],
+            image=old["image"],
+            workspace=workspace[len(project_prefix):] if workspace else None,
+            capabilities=requested,
+            resource_profile=old["resource_profile"],
+            timeout_minutes=max(1, round((datetime.fromisoformat(spec["grant"]["expires_at"])
+                                          - datetime.fromisoformat(spec["grant"]["issued_at"])).total_seconds() / 60)),
+            env=spec.get("env") or {},
+        )
+        new = self.request(uow, principal=principal, task_key=task_key, req=request, replacing=old["id"])
+        record_event(uow.cur, "WORKER_REPLACED", actor=principal.value, project_id=old["project_id"], task_id=old["task_id"],
+                     summary=f"execution {str(old['id'])[:8]} replaced by {str(new['id'])[:8]}: {reason}",
+                     data={"old": str(old["id"]), "new": str(new["id"])}, pending=uow.events)
+        return new
+
+    def _send_stop(self, execution_id: str) -> None:
+        try:
+            self.agents.stop(execution_id)
+        except AgentManagerError as exc:
+            log.warning("stop of %s not delivered yet; sync will retry: %s", execution_id, exc)
+
+    def stop_task_executions(self, uow: UnitOfWork, task: Row, reason: str) -> None:
+        uow.cur.execute("SELECT id FROM executions WHERE task_id = %s AND state IN ('REQUESTED', 'STARTING', 'RUNNING')", (task["id"],))
+        for row in uow.cur.fetchall():
+            self.stop(uow, row["id"], actor="control-plane", reason=reason)
+
+    # -------------------------------------------------------------------- sync
+
+    def sync(self) -> dict[str, int]:
+        """Reconcile active executions with Agent Manager (called by the scheduler loop)."""
+        stats = {"dispatched": 0, "finished": 0, "timed_out": 0}
+        if self.ctx.agents is None:
+            return stats
+        with self.ctx.unit_of_work() as uow:
+            uow.cur.execute(
+                "SELECT e.id, e.state, e.updated_at, g.expires_at FROM executions e "
+                "LEFT JOIN capability_grants g ON g.execution_id = e.id WHERE e.state = ANY(%s)",
+                (list(ACTIVE),),
+            )
+            rows = uow.cur.fetchall()
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            try:
+                if row["state"] == "REQUESTED":
+                    if now - row["updated_at"] > timedelta(seconds=5):
+                        self.dispatch(row["id"])
+                        stats["dispatched"] += 1
+                    continue
+                status = self.agents.status(str(row["id"]))
+                if status["state"] in ("absent", "exited"):
+                    self._finalize(row["id"], status)
+                    stats["finished"] += 1
+                elif row["state"] == "STOPPING":
+                    self._send_stop(str(row["id"]))
+                elif row["expires_at"] and row["expires_at"] <= now:
+                    with self.ctx.unit_of_work() as uow:
+                        current = self.get(uow, row["id"], lock=True)
+                        uow.cur.execute("UPDATE executions SET failure_class = 'TIMEOUT' WHERE id = %s", (current["id"],))
+                        self.stop(uow, current["id"], actor="control-plane", reason="capability grant expired")
+                    stats["timed_out"] += 1
+            except AgentManagerError as exc:
+                log.warning("sync of execution %s deferred: %s", row["id"], exc)
+        return stats
+
+    def _finalize(self, execution_id: UUID, status: dict[str, Any]) -> None:
+        collected: dict[str, Any] = {}
+        if status["state"] == "exited":
+            try:
+                collected = self.agents.collect(str(execution_id))
+            except AgentManagerError as exc:
+                log.warning("could not collect output of %s: %s", execution_id, exc)
+        with self.ctx.unit_of_work() as uow:
+            row = self.get(uow, execution_id, lock=True)
+            if row["state"] in TERMINAL:
+                return
+            artifact_ids = self._store_outputs(uow, row, collected)
+            if status["state"] == "absent":
+                state, failure, reason = "LOST", "LOST", "container disappeared without a result"
+            elif row["state"] == "STOPPING":
+                timed_out = row["failure_class"] == "TIMEOUT"
+                state, failure, reason = ("FAILED" if timed_out else "CANCELLED"), ("TIMEOUT" if timed_out else "CANCELLED"), row["failure_reason"]
+            elif status.get("exit_code") == 0:
+                state, failure, reason = "SUCCEEDED", None, None
+            else:
+                state, failure = "FAILED", "TASK"
+                reason = "out of memory" if status.get("oom_killed") else f"exit code {status.get('exit_code')}"
+            self._finish(uow, row, state, failure_class=failure, reason=reason, exit_code=status.get("exit_code"),
+                         artifacts=artifact_ids)
+            exec_id = str(row["id"])
+            uow.after_commit.append(lambda: self._remove(exec_id))
+
+    def _remove(self, execution_id: str) -> None:
+        try:
+            self.agents.remove(execution_id)
+        except AgentManagerError as exc:
+            log.warning("cleanup of %s deferred: %s", execution_id, exc)
+
+    def _store_outputs(self, uow: UnitOfWork, row: Row, collected: dict[str, Any]) -> list[UUID]:
+        ids: list[UUID] = []
+
+        def store(name: str, content: bytes, media_type: str) -> None:
+            artifact = self.ctx.artifacts.write(uow.cur, project_id=row["project_id"], task_id=row["task_id"],
+                                                kind=f"executions/{row['id']}", name=name, content=content, media_type=media_type)
+            ids.append(artifact.id)
+
+        for path, encoded in sorted((collected.get("files") or {}).items()):
+            content = base64.b64decode(encoded)
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", path.replace("/", "__"))[:120] or "output"
+            try:
+                text, _ = redact(content.decode("utf-8"))
+                store(safe.lstrip("."), text.encode(), "text/plain")
+            except UnicodeDecodeError:
+                store(safe.lstrip("."), content, "application/octet-stream")
+        if collected.get("logs"):
+            text, _ = redact(collected["logs"])
+            store("logs.txt", text.encode(), "text/plain")
+        if collected.get("egress"):
+            store("egress.jsonl", "\n".join(json.dumps(e, sort_keys=True) for e in collected["egress"]).encode(), "application/x-ndjson")
+        return ids
+
+    def _finish(self, uow: UnitOfWork, row: Row, state: str, *, failure_class: str | None, reason: str | None,
+                exit_code: int | None = None, artifacts: list[UUID] | None = None) -> None:
+        uow.cur.execute(
+            """
+            UPDATE executions SET state = %s, failure_class = %s, failure_reason = %s, exit_code = %s,
+                   result_artifact_ids = %s, ended_at = now(), updated_at = now(), version = version + 1
+            WHERE id = %s
+            """,
+            (state, failure_class, reason, exit_code, artifacts or [], row["id"]),
+        )
+        uow.cur.execute(
+            "UPDATE capability_grants SET revoked_at = now(), revoked_reason = %s WHERE execution_id = %s AND revoked_at IS NULL",
+            (f"execution {state.lower()}", row["id"]),
+        )
+        record_event(uow.cur, "WORKER_STOPPED", actor="control-plane", project_id=row["project_id"], task_id=row["task_id"],
+                     summary=f"{row['role']} execution {state}" + (f": {reason}" if reason else ""),
+                     data={"execution_id": str(row["id"]), "state": state, "exit_code": exit_code, "failure_class": failure_class},
+                     pending=uow.events)
+        record_event(uow.cur, "GRANT_REVOKED", actor="control-plane", project_id=row["project_id"], task_id=row["task_id"],
+                     summary=f"grant for execution {str(row['id'])[:8]} revoked", data={"execution_id": str(row["id"])},
+                     pending=uow.events)

@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 is in progress; Phases 4–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) is implemented and validated, pending review ([docs/validation/phase-3.md](docs/validation/phase-3.md)). Phases 4–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -75,16 +75,18 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Safely create and manage isolated ephemeral workers.
 
-- [ ] Implement dynamic worker creation, replacement, stopping, and cleanup.
-- [ ] Make Agent Manager the only component controlling Docker worker lifecycle.
-- [ ] Enforce temporary, auditable, revocable capabilities scoped to project, task, and worker.
-- [ ] Implement assigned-workspace mounts and project-specific network isolation.
-- [ ] Enforce machine-specific CPU/RAM profiles and concurrency limits, including the Mac default of three simultaneous agent workers.
-- [ ] Evaluate policy, budget, credentials, resources, and capabilities before launching workers.
-- [ ] Keep workers alive through their logical implement/test/fix/retest/commit cycle.
-- [ ] Prevent worker access to Docker sockets, unrelated host paths/projects, control databases, and GitHub credentials.
+- [x] Implement dynamic worker creation, replacement, stopping, and cleanup.
+- [x] Make Agent Manager the only component controlling Docker worker lifecycle.
+- [x] Enforce temporary, auditable, revocable capabilities scoped to project, task, and worker.
+- [x] Implement assigned-workspace mounts and project-specific network isolation.
+- [x] Enforce machine-specific CPU/RAM profiles and concurrency limits, including the Mac default of three simultaneous agent workers.
+- [x] Evaluate policy, budget, credentials, resources, and capabilities before launching workers.
+- [ ] Keep workers alive through their logical implement/test/fix/retest/commit cycle. *(Partial: Agent Manager never stops a worker before its command exits or its grant expires; the multi-step cycle inside one worker is completed with the Phase 4 adapters.)*
+- [x] Prevent worker access to Docker sockets, unrelated host paths/projects, control databases, and GitHub credentials.
 
 **Completion criteria:** Workers can be managed through the private authenticated API, and forbidden mounts, networks, and capabilities are denied.
+
+**Status:** Implemented, pending review. 107 unit, 37 integration, and 25 real-Docker tests pass, plus a 21-check end-to-end smoke test on the Compose stack (macOS, Apple Silicon). Workers run one command per execution until the Phase 4 adapters add the full implement/test/fix cycle. Evidence, design changes (one egress proxy per execution), and limitations: [docs/validation/phase-3.md](docs/validation/phase-3.md).
 
 ## Phase 4: Claude/Codex Workers
 

@@ -76,10 +76,12 @@ def effective_rank(priority: str, waiting_minutes: float, aging_minutes: int) ->
 
 
 class Scheduler:
-    def __init__(self, ctx: Context, tasks: Tasks, approvals: Approvals, dispatcher: Dispatcher | None = None) -> None:
+    def __init__(self, ctx: Context, tasks: Tasks, approvals: Approvals, dispatcher: Dispatcher | None = None,
+                 executions: Any = None) -> None:
         self.ctx = ctx
         self.tasks = tasks
         self.approvals = approvals
+        self.executions = executions
         self.dispatcher = dispatcher or NoWorkersDispatcher()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -108,7 +110,9 @@ class Scheduler:
     # ------------------------------------------------------------------ passes
 
     def run_once(self) -> dict[str, int]:
-        stats = {"expired": 0, "promoted": 0, "dispatched": 0}
+        stats = {"expired": 0, "promoted": 0, "dispatched": 0, "executions_finished": 0}
+        if self.executions is not None:
+            stats["executions_finished"] = self.executions.sync()["finished"]
         with self.ctx.unit_of_work() as uow:
             stats["expired"] = self.approvals.expire_due(uow)
         with self.ctx.unit_of_work() as uow:

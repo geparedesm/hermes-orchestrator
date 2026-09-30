@@ -46,6 +46,8 @@ class Tasks:
         self.ctx = ctx
         self.projects = projects
         self.approvals = approvals
+        # Called with (uow, task, reason) before a task is cancelled (for example to stop its executions).
+        self.on_cancel: list[Any] = []
         approvals.register_handler(ApprovalAction.BUDGET_UNLIMITED, self._on_budget_unlimited_decision)
 
     # ------------------------------------------------------------------ queries
@@ -207,6 +209,8 @@ class Tasks:
     def cancel(self, uow: UnitOfWork, key: str, *, principal: Principal) -> Row:
         task = self.get(uow, key, lock=True)
         self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=None, reason="task cancelled")
+        for hook in self.on_cancel:
+            hook(uow, task, "task cancelled")
         return self.transition(uow, task, S.CANCELLED, trigger=Trigger.USER, actor=principal.value, reason="cancelled by user")
 
     def retry(self, uow: UnitOfWork, key: str, *, principal: Principal, idempotency_key: str) -> Row:

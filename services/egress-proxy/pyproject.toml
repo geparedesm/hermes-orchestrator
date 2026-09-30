@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ho-egress-proxy"
+version = "0.1.0"
+description = "Per-execution HTTPS CONNECT egress proxy with domain allowlists and post-resolution IP checks."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+egress-proxy = "egress_proxy.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/egress_proxy"]

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ho-agent-manager"
+version = "0.1.0"
+description = "Hermes Orchestrator Agent Manager: the only component that controls dynamic containers."
+requires-python = ">=3.12"
+dependencies = [
+  "ho-core",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.32,<1",
+  "docker>=7.1,<8",
+]
+
+[project.scripts]
+agent-manager = "agent_manager.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_manager"]

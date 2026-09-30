@@ -12,3 +12,4 @@ secrets/*
 config/local.yaml
 .env
 compose.override.yaml
+config/images.lock.yaml

@@ -1,9 +1,11 @@
 # Hermes Orchestrator platform services (ARCHITECTURE.md section 4, NETWORK_MODEL.md section 3).
 #
-# Phase 2 services: postgres, redis, migrate (one-shot), control-plane, git-service.
-# Phase 3 adds agent-manager; Phase 9 adds the official Hermes service with the plugin.
+# Services: postgres, redis, migrate (one-shot), control-plane, git-service, agent-manager.
+# Phase 9 adds the official Hermes service with the plugin.
+# Execution containers (workers, egress proxies) are not Compose services: agent-manager
+# creates them on demand from the images pinned in config/images.lock.yaml.
 #
-# Setup: cp .env.example .env && edit it; ./scripts/init-secrets.sh; docker compose up -d --build
+# Setup: cp .env.example .env && edit it; make up
 name: hermes-orchestrator
 
 x-hardening: &hardening
@@ -75,8 +77,10 @@ services:
       HO_PLUGIN_TOKEN_FILE: /run/secrets/ho_plugin_token
       HO_OPERATOR_TOKEN_FILE: /run/secrets/ho_operator_token
       HO_GIT_SERVICE_TOKEN_FILE: /run/secrets/ho_git_service_token
+      HO_AGENT_MANAGER_URL: http://agent-manager:8082
+      HO_AGENT_MANAGER_TOKEN_FILE: /run/secrets/ho_agent_manager_token
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
-    secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token]
+    secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token]
     volumes:
       - ./config:/app/config:ro
       - artifacts:/var/lib/ho/artifacts
@@ -84,6 +88,7 @@ services:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       git-service: {condition: service_healthy}
+      agent-manager: {condition: service_healthy}
     networks: [ho-data, ho-control, ho-edge]
 
   git-service:
@@ -97,6 +102,27 @@ services:
     secrets: [ho_git_service_token]
     volumes:
       # Read-only until Phase 5 adds workspace and integration operations.
+      - ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}:/projects:ro
+    networks: [ho-control]
+
+  agent-manager:
+    image: hermes-orchestrator/agent-manager:${HO_VERSION:-dev}
+    build: {context: ., dockerfile: services/agent-manager/Dockerfile}
+    <<: *hardening
+    # Non-root; the Docker socket is reachable through its group only.
+    # Docker Desktop: group 0. Linux: set HO_DOCKER_GID to the host's docker group ID.
+    group_add: ["${HO_DOCKER_GID:-0}"]
+    environment:
+      HO_MACHINE_PROFILE: ${HO_MACHINE_PROFILE:?set HO_MACHINE_PROFILE in .env}
+      HO_PROJECTS_ROOT_HOST: ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}
+      HO_PROJECTS_ROOT: /projects
+      HO_AGENT_MANAGER_TOKEN_FILE: /run/secrets/ho_agent_manager_token
+      HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
+    secrets: [ho_agent_manager_token]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config:/app/config:ro
+      # Read-only: used only to validate workspace paths before asking Docker to mount them.
       - ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}:/projects:ro
     networks: [ho-control]
 
@@ -116,3 +142,4 @@ secrets:
   ho_plugin_token: {file: ./secrets/ho_plugin_token}
   ho_operator_token: {file: ./secrets/ho_operator_token}
   ho_git_service_token: {file: ./secrets/ho_git_service_token}
+  ho_agent_manager_token: {file: ./secrets/ho_agent_manager_token}

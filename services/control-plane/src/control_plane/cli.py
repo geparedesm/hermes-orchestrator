@@ -78,6 +78,27 @@ def main(argv: list[str] | None = None) -> int:
         a.add_argument("id")
         a.add_argument("--note")
 
+    execution = sub.add_parser("execution", help="Phase 3: run a command in an isolated worker").add_subparsers(dest="cmd", required=True)
+    e = execution.add_parser("run", help="start an execution for a task")
+    e.add_argument("task")
+    e.add_argument("command", help="shell command run with bash -c inside the worker")
+    e.add_argument("--role", default="TESTER", choices=["ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER", "BROWSER"])
+    e.add_argument("--provider", choices=["claude", "codex"])
+    e.add_argument("--workspace", help=".hermes/worktrees/<name> inside the project")
+    e.add_argument("--workspace-access", default="NONE", choices=["NONE", "READ", "WRITE"])
+    e.add_argument("--egress", default="NONE", choices=["NONE", "PROVIDER_ONLY", "ALLOWLIST", "STANDARD"])
+    e.add_argument("--allow-domain", action="append", default=[])
+    e.add_argument("--test-services", action="store_true")
+    e.add_argument("--profile", choices=["LIGHT", "NORMAL", "HEAVY"])
+    e.add_argument("--timeout", type=int, default=30, help="minutes")
+    el = execution.add_parser("list")
+    el.add_argument("--task")
+    el.add_argument("--state")
+    execution.add_parser("show").add_argument("id")
+    execution.add_parser("stop").add_argument("id")
+    execution.add_parser("replace", help="stop an execution and start a fresh one with the same request").add_argument("id")
+    sub.add_parser("workers", help="Agent Manager capacity and managed containers")
+
     policy = sub.add_parser("policy").add_subparsers(dest="cmd", required=True)
     c = policy.add_parser("check", help="classify a command")
     c.add_argument("command")
@@ -129,6 +150,27 @@ def main(argv: list[str] | None = None) -> int:
             return _call("GET", f"/v1/approvals/{args.id}")
         decision = "APPROVE" if cmd == "approve" else "REJECT"
         return _call("POST", f"/v1/approvals/{args.id}/decision", body={"decision": decision, "note": args.note}, mutate=True)
+    if g == "execution":
+        if cmd == "run":
+            caps: dict[str, Any] = {"workspace": args.workspace_access, "egress": args.egress,
+                                    "test_services": args.test_services, "tests": "EXECUTE", "artifacts": "WRITE"}
+            if args.workspace_access == "WRITE":
+                caps["git"] = "LOCAL_COMMIT"
+            if args.allow_domain:
+                caps["allowed_domains"] = args.allow_domain
+            body = {"role": args.role, "command": ["bash", "-c", args.command], "provider": args.provider,
+                    "workspace": args.workspace, "capabilities": caps, "resource_profile": args.profile,
+                    "timeout_minutes": args.timeout}
+            return _call("POST", f"/v1/tasks/{args.task}/executions", body=body, mutate=True)
+        if cmd == "list":
+            return _call("GET", "/v1/executions", params={k: v for k, v in (("task", args.task), ("state", args.state)) if v})
+        if cmd == "show":
+            return _call("GET", f"/v1/executions/{args.id}")
+        if cmd == "replace":
+            return _call("POST", f"/v1/executions/{args.id}/replace", body={"reason": "replaced by operator"}, mutate=True)
+        return _call("POST", f"/v1/executions/{args.id}/stop", body={"reason": "stopped by operator"}, mutate=True)
+    if g == "workers":
+        return _call("GET", "/v1/workers")
     if g == "policy":
         return _call("POST", "/v1/policy/commands/evaluate", body={"command": args.command, "autonomy": args.autonomy})
     parser.error("unknown command")

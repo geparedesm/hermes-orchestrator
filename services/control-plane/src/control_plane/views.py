@@ -92,3 +92,30 @@ def task_view(row: Row, *, project_slug: str, budget: Row | None = None, pending
     if budget:
         view["budget"] = {"profile": budget["profile"], "state": budget["state"]}
     return view
+
+
+def execution_view(row: Row, *, grant: Row | None = None) -> dict[str, Any]:
+    view: dict[str, Any] = {
+        "id": str(row["id"]),
+        "task_id": str(row["task_id"]),
+        "role": row["role"],
+        "provider": row["provider"],
+        "image": row["image"],
+        "command": row["command"],
+        "workspace": row["workspace"],
+        "resource_profile": row["resource_profile"],
+        "state": row["state"],
+        "exit_code": row["exit_code"],
+        "failure_class": row["failure_class"],
+        "failure_reason": row["failure_reason"],
+        "artifacts": [str(a) for a in row["result_artifact_ids"]],
+        "requested_by": row["requested_by"],
+        "created_at": _iso(row["created_at"]),
+        "started_at": _iso(row["started_at"]),
+        "ended_at": _iso(row["ended_at"]),
+    }
+    if grant is not None:
+        view["grant"] = grant["grant_doc"]
+        view["grant_reductions"] = grant["reductions"]
+        view["grant_revoked_at"] = _iso(grant["revoked_at"])
+    return view

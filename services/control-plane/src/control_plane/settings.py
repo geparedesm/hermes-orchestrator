@@ -28,6 +28,8 @@ class Settings:
     artifact_dir: Path
     git_service_url: str
     git_service_token: str
+    agent_manager_url: str | None = None
+    agent_manager_token: str | None = None
     # token -> identity name
     tokens: dict[str, str] = field(default_factory=dict)
     projects_root_host: str | None = None
@@ -65,6 +67,8 @@ class Settings:
             artifact_dir=Path(env.get("HO_ARTIFACT_DIR", "/var/lib/ho/artifacts")),
             git_service_url=env.get("HO_GIT_SERVICE_URL", "http://git-service:8081"),
             git_service_token=_read_secret(env.get("HO_GIT_SERVICE_TOKEN_FILE")) or "",
+            agent_manager_url=env.get("HO_AGENT_MANAGER_URL"),
+            agent_manager_token=_read_secret(env.get("HO_AGENT_MANAGER_TOKEN_FILE")),
             tokens=tokens,
             projects_root_host=env.get("HO_PROJECTS_ROOT_HOST"),
             run_scheduler=env.get("HO_RUN_SCHEDULER", "true").lower() == "true",
