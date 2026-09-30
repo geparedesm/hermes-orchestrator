@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hermes-orchestrator:schema:task:1",
+  "title": "Task creation request",
+  "description": "Body of a Task API create request, shared by Hermes chat, Dashboard, and CLI (MASTER_SPEC section 76). The root validates a create request; $defs/taskSummary describes the status view returned by the API. Autonomy and budget values in a request can only be equal to or stricter than the project configuration unless an approval is obtained.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project", "request", "requested_by", "idempotency_key"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "project": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+      "description": "Registered project slug. When the user did not name one, the entry point applies the Ambiguity Policy before submitting."
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "request": { "type": "string", "minLength": 1, "maxLength": 20000, "description": "Original user request, stored as an artifact." },
+    "priority": { "$ref": "#/$defs/priority", "default": "NORMAL" },
+    "budget_profile": { "$ref": "#/$defs/budgetProfile" },
+    "expansion_profile": { "$ref": "#/$defs/budgetProfile" },
+    "autonomy": { "enum": ["SUPERVISED", "BALANCED", "AUTONOMOUS"] },
+    "related_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task", "kind"],
+        "properties": {
+          "task": { "$ref": "#/$defs/taskKey" },
+          "kind": { "enum": ["RELATED", "DEPENDENCY"] }
+        }
+      }
+    },
+    "requested_by": { "$ref": "#/$defs/principal" },
+    "idempotency_key": { "type": "string", "minLength": 8, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+    "labels": {
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$" }
+    }
+  },
+  "$defs": {
+    "taskKey": { "type": "string", "pattern": "^T-[0-9]+$" },
+    "subtaskKey": { "type": "string", "pattern": "^T-[0-9]+-[0-9]+$" },
+    "priority": { "enum": ["CRITICAL", "HIGH", "NORMAL", "LOW"] },
+    "budgetProfile": { "enum": ["SMALL", "NORMAL", "LARGE", "UNLIMITED"] },
+    "risk": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "subject"],
+      "properties": {
+        "channel": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$", "description": "For example telegram, discord, dashboard, host-cli." },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "taskState": {
+      "enum": [
+        "BACKLOG",
+        "READY",
+        "PLANNING",
+        "QUEUED",
+        "RUNNING",
+        "TESTING",
+        "REVIEW",
+        "FIX_REQUIRED",
+        "QUALITY_GATE",
+        "APPROVAL_REQUIRED",
+        "AUTH_REQUIRED",
+        "PAUSED",
+        "PAUSED_BUDGET",
+        "BLOCKED",
+        "FAILED",
+        "READY_FOR_MERGE",
+        "MERGING",
+        "VERIFYING",
+        "DONE",
+        "CANCELLED"
+      ]
+    },
+    "subtaskState": {
+      "enum": [
+        "PENDING",
+        "READY",
+        "QUEUED",
+        "RUNNING",
+        "REVIEW",
+        "FIX_REQUIRED",
+        "ACCEPTED",
+        "INTEGRATED",
+        "BLOCKED",
+        "FAILED",
+        "CANCELLED",
+        "SUPERSEDED"
+      ]
+    },
+    "taskSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "project", "title", "state", "priority", "created_at", "updated_at"],
+      "properties": {
+        "key": { "$ref": "#/$defs/taskKey" },
+        "project": { "type": "string" },
+        "title": { "type": "string" },
+        "state": { "$ref": "#/$defs/taskState" },
+        "resume_state": { "$ref": "#/$defs/taskState" },
+        "state_reason": { "type": "string", "maxLength": 500 },
+        "priority": { "$ref": "#/$defs/priority" },
+        "risk": { "$ref": "#/$defs/risk" },
+        "subtasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "state"],
+            "properties": {
+              "key": { "$ref": "#/$defs/subtaskKey" },
+              "title": { "type": "string" },
+              "state": { "$ref": "#/$defs/subtaskState" },
+              "developer_provider": { "enum": ["claude", "codex"] },
+              "reviewer_provider": { "enum": ["claude", "codex"] }
+            }
+          }
+        },
+        "pending_approvals": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "profile": { "$ref": "#/$defs/budgetProfile" },
+            "used_percent": { "type": "number", "minimum": 0 },
+            "state": { "enum": ["OK", "WARNING", "OPTIMIZE", "EXHAUSTED"] }
+          }
+        },
+        "pull_request_url": { "type": "string", "format": "uri" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

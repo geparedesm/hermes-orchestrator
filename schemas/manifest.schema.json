@@ -1,0 +1,386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hermes-orchestrator:schema:manifest:1",
+  "title": "Task Manifest",
+  "description": "Sanitized reproducibility manifest (MASTER_SPEC section 48). It references artifacts by hash and contains no secrets, credentials, raw provider transcripts, or model reasoning. Every object is closed (additionalProperties: false) so arbitrary payloads cannot be embedded. Replay creates a new execution under current policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "generated_at",
+    "task",
+    "original_request",
+    "requirements",
+    "dag",
+    "agent_assignments",
+    "agent_versions",
+    "worker_images",
+    "toolchains",
+    "project_config_hash",
+    "policy_version",
+    "base_commit",
+    "generated_commits",
+    "commands",
+    "tests",
+    "reviews",
+    "approvals",
+    "technical_sources",
+    "retries_and_fallbacks",
+    "budget",
+    "final_result"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "enum": ["READY_FOR_MERGE", "FINAL", "ON_DEMAND"] },
+    "generated_at": { "$ref": "#/$defs/timestamp" },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "project", "title", "priority", "requested_by", "created_at"],
+      "properties": {
+        "key": { "$ref": "#/$defs/taskKey" },
+        "project": { "$ref": "#/$defs/slug" },
+        "title": { "type": "string", "maxLength": 200 },
+        "priority": { "enum": ["CRITICAL", "HIGH", "NORMAL", "LOW"] },
+        "requested_by": { "$ref": "#/$defs/principal" },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "replay_of": { "$ref": "#/$defs/taskKey" }
+      }
+    },
+    "original_request": { "$ref": "#/$defs/artifactRef" },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "artifact", "source", "created_at"],
+        "properties": {
+          "version": { "type": "integer", "minimum": 1 },
+          "artifact": { "$ref": "#/$defs/artifactRef" },
+          "source": { "enum": ["USER", "ORCHESTRATOR"] },
+          "change_reason": { "type": "string", "maxLength": 1000 },
+          "approval": { "$ref": "#/$defs/uuid" },
+          "created_at": { "$ref": "#/$defs/timestamp" }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["level", "assumption", "reason", "reversibility", "status"],
+        "properties": {
+          "level": { "enum": ["LOW", "MEDIUM", "HIGH"] },
+          "assumption": { "type": "string", "maxLength": 1000 },
+          "reason": { "type": "string", "maxLength": 1000 },
+          "evidence": { "type": "string", "maxLength": 1000 },
+          "impact": { "type": "string", "maxLength": 1000 },
+          "reversibility": { "enum": ["REVERSIBLE", "COSTLY", "IRREVERSIBLE"] },
+          "status": { "enum": ["ACTIVE", "CONFIRMED", "CORRECTED"] }
+        }
+      }
+    },
+    "dag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_version", "subtasks"],
+      "properties": {
+        "plan_version": { "type": "integer", "minimum": 1 },
+        "subtasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "kind", "title", "state", "depends_on"],
+            "properties": {
+              "key": { "$ref": "#/$defs/subtaskKey" },
+              "kind": { "enum": ["IMPLEMENT", "TEST_AUTHORING", "INTEGRATION", "VERIFICATION", "RESEARCH"] },
+              "title": { "type": "string", "maxLength": 200 },
+              "state": {
+                "enum": ["PENDING", "READY", "QUEUED", "RUNNING", "REVIEW", "FIX_REQUIRED", "ACCEPTED", "INTEGRATED", "BLOCKED", "FAILED", "CANCELLED", "SUPERSEDED"]
+              },
+              "risk": { "$ref": "#/$defs/risk" },
+              "developer_provider": { "$ref": "#/$defs/provider" },
+              "reviewer_provider": { "$ref": "#/$defs/provider" },
+              "depends_on": { "type": "array", "items": { "$ref": "#/$defs/subtaskKey" } }
+            }
+          }
+        },
+        "task_relationships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["task", "kind"],
+            "properties": {
+              "task": { "$ref": "#/$defs/taskKey" },
+              "kind": { "enum": ["DUPLICATE", "RELATED", "DEPENDENCY", "CONFLICTING", "INDEPENDENT"] }
+            }
+          }
+        }
+      }
+    },
+    "agent_assignments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["execution", "role", "provider", "state", "started_at"],
+        "properties": {
+          "execution": { "$ref": "#/$defs/uuid" },
+          "subtask": { "$ref": "#/$defs/subtaskKey" },
+          "role": { "enum": ["ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER", "BROWSER"] },
+          "provider": { "enum": ["claude", "codex", "none"] },
+          "image": { "$ref": "#/$defs/digest" },
+          "grant": { "type": "string", "pattern": "^G-[0-9A-Za-z-]{6,64}$" },
+          "state": { "enum": ["SUCCEEDED", "FAILED", "CANCELLED", "LOST", "RUNNING"] },
+          "started_at": { "$ref": "#/$defs/timestamp" },
+          "ended_at": { "$ref": "#/$defs/timestamp" }
+        }
+      }
+    },
+    "agent_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claude": { "$ref": "#/$defs/version" },
+        "codex": { "$ref": "#/$defs/version" },
+        "hermes": { "$ref": "#/$defs/version" },
+        "platform": { "$ref": "#/$defs/version" }
+      }
+    },
+    "worker_images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "digest", "platform"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$" },
+          "digest": { "$ref": "#/$defs/digest" },
+          "platform": { "enum": ["linux/arm64", "linux/amd64"] }
+        }
+      }
+    },
+    "toolchains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["profile", "version"],
+        "properties": {
+          "profile": { "enum": ["generic", "node", "python", "flutter", "php", "java"] },
+          "version": { "$ref": "#/$defs/version" }
+        }
+      }
+    },
+    "project_config_hash": { "$ref": "#/$defs/sha256" },
+    "policy_version": { "type": "string", "maxLength": 64 },
+    "base_commit": { "$ref": "#/$defs/gitSha" },
+    "generated_commits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sha", "subject"],
+        "properties": {
+          "sha": { "$ref": "#/$defs/gitSha" },
+          "subtask": { "$ref": "#/$defs/subtaskKey" },
+          "subject": { "type": "string", "maxLength": 200 }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "description": "Sanitized command records. Arguments are redacted before storage.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["execution", "command", "class"],
+        "properties": {
+          "execution": { "$ref": "#/$defs/uuid" },
+          "command": { "type": "string", "maxLength": 500 },
+          "class": { "enum": ["SAFE", "CONTROLLED", "HIGH_RISK"] },
+          "decision": { "enum": ["ALLOW", "DENY", "REQUIRE_APPROVAL"] },
+          "exit_code": { "type": "integer" }
+        }
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scope", "commit", "status"],
+        "properties": {
+          "scope": { "enum": ["RELEVANT", "FULL_SUITE", "BROWSER", "POST_MERGE", "ALTERNATIVE"] },
+          "commit": { "$ref": "#/$defs/gitSha" },
+          "status": { "enum": ["PASSED", "FAILED", "ERROR", "SKIPPED"] },
+          "passed": { "type": "integer", "minimum": 0 },
+          "failed": { "type": "integer", "minimum": 0 },
+          "skipped": { "type": "integer", "minimum": 0 },
+          "report": { "$ref": "#/$defs/artifactRef" }
+        }
+      }
+    },
+    "quality_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "commit", "evaluated_at"],
+      "properties": {
+        "outcome": { "enum": ["PASS", "FAIL"] },
+        "commit": { "$ref": "#/$defs/gitSha" },
+        "evaluated_at": { "$ref": "#/$defs/timestamp" },
+        "test_gaps": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+        "residual_risk": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["subject", "developer_provider", "reviewer_provider", "cycle", "outcome"],
+        "properties": {
+          "subject": { "oneOf": [{ "$ref": "#/$defs/subtaskKey" }, { "$ref": "#/$defs/taskKey" }] },
+          "developer_provider": { "$ref": "#/$defs/provider" },
+          "reviewer_provider": { "$ref": "#/$defs/provider" },
+          "cycle": { "type": "integer", "minimum": 1 },
+          "outcome": { "enum": ["APPROVED", "CHANGES_REQUESTED", "BLOCKED"] },
+          "open_findings": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "LOW": { "type": "integer", "minimum": 0 },
+              "MEDIUM": { "type": "integer", "minimum": 0 },
+              "HIGH": { "type": "integer", "minimum": 0 },
+              "CRITICAL": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "feedback": { "$ref": "#/$defs/artifactRef" }
+        }
+      }
+    },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "action", "state", "state_hash", "requested_at"],
+        "properties": {
+          "id": { "$ref": "#/$defs/uuid" },
+          "action": {
+            "enum": ["MERGE", "SCOPE_EXPANSION", "BUDGET_INCREASE", "BUDGET_UNLIMITED", "HIGH_RISK_OPERATION", "ENVIRONMENT_ACCESS", "PROJECT_CONFIG_CHANGE", "ASSUMPTION", "UPDATE", "PROJECT_READY"]
+          },
+          "state": { "enum": ["PENDING", "APPROVED", "REJECTED", "EXPIRED", "INVALIDATED", "CONSUMED"] },
+          "state_hash": { "$ref": "#/$defs/sha256" },
+          "requested_at": { "$ref": "#/$defs/timestamp" },
+          "decided_by": { "$ref": "#/$defs/principal" },
+          "decided_at": { "$ref": "#/$defs/timestamp" }
+        }
+      }
+    },
+    "technical_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["url", "retrieved_at", "purpose"],
+        "properties": {
+          "url": { "type": "string", "format": "uri", "maxLength": 2000 },
+          "version": { "type": "string", "maxLength": 100 },
+          "retrieved_at": { "$ref": "#/$defs/timestamp" },
+          "purpose": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "retries_and_fallbacks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "at", "reason"],
+        "properties": {
+          "kind": { "enum": ["RETRY", "ALTERNATE_PROVIDER", "ALTERNATE_DEVELOPER", "ORCHESTRATOR_FAILOVER", "ORCHESTRATOR_FAILBACK"] },
+          "at": { "$ref": "#/$defs/timestamp" },
+          "subtask": { "$ref": "#/$defs/subtaskKey" },
+          "from_provider": { "$ref": "#/$defs/provider" },
+          "to_provider": { "$ref": "#/$defs/provider" },
+          "reason": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "limits", "consumed"],
+      "properties": {
+        "profile": { "enum": ["SMALL", "NORMAL", "LARGE", "UNLIMITED"] },
+        "limits": { "$ref": "#/$defs/budgetCounters" },
+        "consumed": { "$ref": "#/$defs/budgetCounters" }
+      }
+    },
+    "final_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "enum": ["READY_FOR_MERGE", "DONE", "CANCELLED", "FAILED", "BLOCKED"]
+        },
+        "integration_branch": { "type": "string", "maxLength": 200 },
+        "head_commit": { "$ref": "#/$defs/gitSha" },
+        "merge_commit": { "$ref": "#/$defs/gitSha" },
+        "pull_request_url": { "type": "string", "format": "uri" },
+        "post_merge_verification": { "enum": ["NOT_RUN", "PASSED", "FAILED"] },
+        "summary": { "type": "string", "maxLength": 2000 }
+      }
+    }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "taskKey": { "type": "string", "pattern": "^T-[0-9]+$" },
+    "subtaskKey": { "type": "string", "pattern": "^T-[0-9]+-[0-9]+$" },
+    "provider": { "enum": ["claude", "codex"] },
+    "risk": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "gitSha": { "type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$" },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "version": { "type": "string", "pattern": "^[0-9A-Za-z.+_-]{1,64}$" },
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "subject"],
+      "properties": {
+        "channel": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).{1,500}$" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "budgetCounters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runtime_minutes": { "type": ["integer", "null"], "minimum": 0 },
+        "agent_launches": { "type": ["integer", "null"], "minimum": 0 },
+        "retries": { "type": ["integer", "null"], "minimum": 0 },
+        "review_cycles": { "type": ["integer", "null"], "minimum": 0 },
+        "provider_usage_units": { "type": ["integer", "null"], "minimum": 0 },
+        "subtasks": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    }
+  }
+}

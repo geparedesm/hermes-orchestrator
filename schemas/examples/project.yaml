@@ -1,0 +1,120 @@
+# Example .hermes/project.yaml (schema: schemas/project.schema.json).
+# Values can only tighten platform hard policy. Secrets are referenced by name only.
+version: 1
+
+project:
+  name: example-web
+  description: Node.js web application with a PostgreSQL database.
+
+autonomy: BALANCED
+
+toolchain:
+  profiles: [node]
+  versions:
+    node: "22"
+
+commands:
+  install: npm ci
+  build: npm run build
+  test: npm test
+  test_relevant: npm test -- {paths}
+  lint: npm run lint
+  typecheck: npx tsc --noEmit
+  security: npm audit --audit-level=high
+  e2e:
+    run: npx playwright test
+    timeout_minutes: 30
+
+agents:
+  allowed_providers: [claude, codex]
+  preferred:
+    planning: claude
+    implementation: codex
+    debugging: claude
+    tests: codex
+  orchestrator_may_develop: true
+
+review:
+  cycle_limit: 2
+  on_limit: ALTERNATE_DEVELOPER
+
+retries:
+  transient: 2
+  fix_attempts: 2
+  alternate_developer: true
+
+resources:
+  default_profile: NORMAL
+  max_profile: HEAVY
+
+network:
+  development: standard
+  testing: isolated
+  research:
+    official_docs: true
+    package_registries: true
+    public_github: true
+
+environments:
+  test:
+    secrets: [TEST_DATABASE_URL]
+  staging:
+    hosts: [staging.example.com]
+  production:
+    hosts: [example.com, "*.example.com"]
+
+secrets:
+  - name: TEST_DATABASE_URL
+    environment: test
+    description: Connection string for the ephemeral test database.
+
+test_environment:
+  compose_files: [compose.yaml]
+  services: [db]
+  startup_timeout_seconds: 120
+
+quality_gate:
+  tests: true
+  full_suite: true
+  build: true
+  lint: true
+  typecheck: true
+  security_checks: true
+  browser_tests: true
+  ci_checks: true
+  docs_updated: false
+  block_on_findings: [HIGH, CRITICAL]
+
+verification:
+  sensitive_paths:
+    - "src/auth/**"
+    - "migrations/**"
+    - "Dockerfile"
+    - ".github/workflows/**"
+  critical_paths:
+    - "src/payments/**"
+
+budget:
+  profile: NORMAL
+
+expansion:
+  profile: NORMAL
+
+git:
+  protected_branches: [main, release]
+  branch_prefix: hermes/
+  merge_method: merge
+  require_pull_request: true
+  delete_remote_branch_after_merge: true
+
+browser_tests:
+  enabled: true
+  base_url: http://app:3000
+  specs: [e2e/]
+
+config_drift:
+  auto_update_trivial: false
+
+retention:
+  artifacts_days: 30
+  failed_workspace_days: 14
