@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) is implemented and validated, pending review ([docs/validation/phase-3.md](docs/validation/phase-3.md)). Phases 4–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phases 4–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -86,7 +86,7 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Completion criteria:** Workers can be managed through the private authenticated API, and forbidden mounts, networks, and capabilities are denied.
 
-**Status:** Implemented, pending review. 107 unit, 37 integration, and 25 real-Docker tests pass, plus a 21-check end-to-end smoke test on the Compose stack (macOS, Apple Silicon). Workers run one command per execution until the Phase 4 adapters add the full implement/test/fix cycle. Evidence, design changes (one egress proxy per execution), and limitations: [docs/validation/phase-3.md](docs/validation/phase-3.md).
+**Status:** Complete. Approved by Gabriel Paredes on 2026-09-30 (PR #4). 114 unit, 37 integration, and 25 real-Docker tests pass, plus a 21-check end-to-end smoke test on the Compose stack (macOS, Apple Silicon). Workers run one command per execution until the Phase 4 adapters add the full implement/test/fix cycle. Evidence, design changes (one egress proxy per execution), and limitations: [docs/validation/phase-3.md](docs/validation/phase-3.md).
 
 ## Phase 4: Claude/Codex Workers
 
