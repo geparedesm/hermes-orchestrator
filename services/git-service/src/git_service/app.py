@@ -65,6 +65,11 @@ class IntegrateBody(ProjectPath):
     heads: list[str] = Field(min_length=1, max_length=50)
 
 
+class ChangesBody(ProjectPath):
+    base: str = Field(min_length=1, max_length=200)
+    head: str = Field(min_length=1, max_length=200)
+
+
 class RefsBody(ProjectPath):
     refs: list[str] = Field(min_length=1, max_length=50)
 
@@ -236,6 +241,11 @@ def create_app(projects_root: Path, token: str, merge_key: bytes = b"") -> FastA
     def integrate(body: IntegrateBody) -> dict[str, Any]:
         repo = git_repository(body.path)
         return locked(repo, lambda: repo_ops.integrate(repo, task=body.task, target_branch=body.target_branch, heads=body.heads))
+
+    @app.post("/v1/changes", dependencies=[Depends(authorized)])
+    def changes(body: ChangesBody) -> dict[str, Any]:
+        repo = git_repository(body.path)
+        return repo_ops.changes(repo, repo_ops.resolve_commit(repo, body.base), repo_ops.resolve_commit(repo, body.head))
 
     @app.post("/v1/refs", dependencies=[Depends(authorized)])
     def refs(body: RefsBody) -> dict[str, Any]:

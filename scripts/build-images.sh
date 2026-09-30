@@ -31,6 +31,11 @@ tag_of() { echo "hermes-orchestrator/$1:$VERSION"; }
 
 build agent-base workers/agent-base/Dockerfile workers/agent-base
 build egress-proxy services/egress-proxy/Dockerfile .
+if [[ "${HO_BUILD_BROWSER:-1}" == "1" ]]; then
+  # The verification scripts are shared with agent-base; the build context needs its own copies.
+  cp workers/agent-base/ho-verify workers/agent-base/ho-wait-secrets workers/browser-runner/
+  build browser-runner workers/browser-runner/Dockerfile workers/browser-runner
+fi
 
 DONE=" "  # toolchain chains already built (bash 3.2 compatible, no associative arrays)
 for set in $TOOLCHAINS; do

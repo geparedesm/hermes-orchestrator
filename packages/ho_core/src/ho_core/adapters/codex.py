@@ -76,7 +76,8 @@ class CodexAdapter:
         return ExecutionPlan(
             image=f"codex-{assignment.toolchain}",
             command=command,
-            inputs={"prompt.md": compose_prompt(assignment), "result.schema.json": json.dumps(result_schema(), indent=2)},
+            inputs={"prompt.md": compose_prompt(assignment),
+                    "result.schema.json": json.dumps(result_schema(assignment.result_schema), indent=2)},
         )
 
     # ------------------------------------------------------------------ events
@@ -115,7 +116,7 @@ class CodexAdapter:
 
     # ------------------------------------------------------------------ results
 
-    def collect_result(self, bundle: OutputBundle) -> ExecutionResult:
+    def collect_result(self, bundle: OutputBundle, schema: str = "agent-result") -> ExecutionResult:
         raw = list(bundle.json_lines("events.jsonl"))
         result = ExecutionResult(provider=self.provider, ok=False)
         for event in raw:
@@ -135,7 +136,7 @@ class CodexAdapter:
                 structured = json.loads(last)
             except ValueError:
                 structured = None
-        if not failed and runner_state(bundle).get("exit_code") == 0 and normalize_structured(self.provider, structured, result):
+        if not failed and runner_state(bundle).get("exit_code") == 0 and normalize_structured(self.provider, structured, result, schema):
             result.ok = True
         else:
             result.failure_class = self.classify_failure(bundle)

@@ -131,6 +131,18 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("task")
     rs.add_argument("--provider", required=True, choices=["claude", "codex"])
 
+    sub.add_parser("verify", help="run the full verification of a task's integrated change").add_argument("task")
+    tests = sub.add_parser("tests", help="verification runs and test results").add_subparsers(dest="cmd", required=True)
+    tests.add_parser("show").add_argument("task")
+    review = sub.add_parser("review", help="cross-review by a provider other than the developers").add_subparsers(dest="cmd", required=True)
+    rr = review.add_parser("run")
+    rr.add_argument("task")
+    rr.add_argument("--provider", required=True, choices=["claude", "codex"])
+    review.add_parser("show").add_argument("task")
+    gate = sub.add_parser("gate", help="Quality Gate").add_subparsers(dest="cmd", required=True)
+    gate.add_parser("evaluate", help="evaluate the Quality Gate now").add_argument("task")
+    gate.add_parser("show", help="latest evaluation").add_argument("task")
+
     auth = sub.add_parser("auth", help="provider logins (Credential Broker)").add_subparsers(dest="cmd", required=True)
     auth.add_parser("status", help="provider health and credential status")
     ready = auth.add_parser("ready", help="confirm a new login (after make auth-<provider>) and resume waiting tasks")
@@ -211,6 +223,18 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "resolve":
             return _call("POST", f"/v1/tasks/{args.task}/git/resolve", body={"provider": args.provider}, mutate=True)
         return _call("POST", f"/v1/tasks/{args.task}/git/{cmd}", mutate=True)
+    if g == "verify":
+        return _call("POST", f"/v1/tasks/{args.task}/verify", mutate=True)
+    if g == "tests":
+        return _call("GET", f"/v1/tasks/{args.task}/tests")
+    if g == "review":
+        if cmd == "run":
+            return _call("POST", f"/v1/tasks/{args.task}/reviews", body={"provider": args.provider}, mutate=True)
+        return _call("GET", f"/v1/tasks/{args.task}/reviews")
+    if g == "gate":
+        if cmd == "evaluate":
+            return _call("POST", f"/v1/tasks/{args.task}/quality-gate", mutate=True)
+        return _call("GET", f"/v1/tasks/{args.task}/quality-gate")
     if g == "auth":
         if cmd == "status":
             return _call("GET", "/v1/credentials")

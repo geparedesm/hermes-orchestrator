@@ -239,6 +239,22 @@
     },
     "project_defaults": {
       "type": "object"
+    },
+    "research_domains": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Research presets for development executions with ALLOWLIST egress (MASTER_SPEC section 54). Never granted to test runners.",
+      "properties": {
+        "official_docs": {
+          "$ref": "#/$defs/domains"
+        },
+        "package_registries": {
+          "$ref": "#/$defs/domains"
+        },
+        "public_github": {
+          "$ref": "#/$defs/domains"
+        }
+      }
     }
   },
   "$defs": {

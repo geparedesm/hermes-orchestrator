@@ -19,6 +19,7 @@ from .auth import PRINCIPAL_HEADER, Authenticator, Identity, Principal
 from .context import Context, UnitOfWork
 from .credentials import Credentials
 from .gitops import GitChanges
+from .verification import QualityGate, Reviews, Verifications
 from .agentmgr import AgentManagerError
 from .errors import ApiError, Conflict, Forbidden, UpstreamError
 from .idempotency import run_idempotent
@@ -43,6 +44,9 @@ class Services:
     run_scheduler: bool = True
     credentials: Credentials | None = None
     git: GitChanges | None = None
+    verifications: Verifications | None = None
+    reviews: Reviews | None = None
+    gate: QualityGate | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None) -> Services:
@@ -53,8 +57,12 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     scheduler = Scheduler(ctx, tasks, approvals, dispatcher, executions)
     credentials = Credentials(ctx, tasks, executions)
     git = GitChanges(ctx, tasks, approvals, executions)
-    scheduler.hooks.append(git.sync)
-    return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git)
+    verifications = Verifications(ctx, tasks, executions, git)
+    reviews = Reviews(ctx, tasks, executions, git)
+    gate = QualityGate(ctx, tasks, approvals, git, reviews)
+    scheduler.hooks += [git.sync, verifications.sync, gate.sync]
+    return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
+                    verifications, reviews, gate)
 
 
 # ------------------------------------------------------------------ request models
@@ -93,6 +101,10 @@ class GitWorkspace(BaseModel):
 
 
 class GitResolve(BaseModel):
+    provider: Literal["claude", "codex"]
+
+
+class ReviewRequest(BaseModel):
     provider: Literal["claude", "codex"]
 
 
@@ -388,6 +400,73 @@ def create_app(services: Services) -> FastAPI:
         ("merge-request", lambda uow, key, who, body: approval_view(git.request_merge(uow, key, principal=who))),
     ):
         app.post(f"/v1/tasks/{{key}}/git/{name}", name=f"git_{name.replace('-', '_')}")(git_command(name, action))
+
+    # ------------------------------------------------ verification and Quality Gate
+
+    assert services.verifications is not None and services.reviews is not None and services.gate is not None
+    verifications, reviews, gate = services.verifications, services.reviews, services.gate
+
+    def operator_only(who_identity: Identity) -> None:
+        if who_identity.name != "operator":
+            raise Forbidden("only the operator can run this directly")
+
+    @app.post("/v1/tasks/{key}/verify", status_code=201)
+    def verify(key: str, who_identity: Identity = Depends(identity), who: Principal = Depends(principal),
+               idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        operator_only(who_identity)
+
+        def command(uow: UnitOfWork):
+            task = services.tasks.get(uow, key)
+            uow.cur.execute("SELECT integration_ref FROM git_changes WHERE task_id = %s", (task["id"],))
+            row = uow.cur.fetchone()
+            if not row or not row["integration_ref"]:
+                raise Conflict(f"integrate {key} first")
+            return 201, jsonable(dict(verifications.start(uow, key, ref=row["integration_ref"], purpose="INTEGRATION")))
+        return idempotent(idempotency_key, who, {"op": "verify", "task": key}, command)
+
+    @app.get("/v1/tasks/{key}/tests")
+    def test_results(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return {"task": key, "verifications": jsonable(verifications.results(uow, key))}
+
+    @app.post("/v1/tasks/{key}/reviews", status_code=201)
+    def request_review(key: str, body: ReviewRequest, who_identity: Identity = Depends(identity),
+                       who: Principal = Depends(principal), idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        operator_only(who_identity)
+
+        def command(uow: UnitOfWork):
+            return 201, execution_view(reviews.request(uow, key, provider=body.provider, principal=who))
+        return idempotent(idempotency_key, who, {"op": "review", "task": key, **body.model_dump()}, command)
+
+    @app.get("/v1/tasks/{key}/reviews")
+    def list_reviews(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            uow.cur.execute("SELECT * FROM reviews WHERE task_id = %s ORDER BY created_at DESC", (task["id"],))
+            result = []
+            for review in uow.cur.fetchall():
+                uow.cur.execute("SELECT severity, category, path, line, description, status FROM review_findings "
+                                "WHERE review_id = %s ORDER BY severity", (review["id"],))
+                result.append({**jsonable(dict(review)), "findings": uow.cur.fetchall()})
+            return {"task": key, "reviews": result}
+
+    @app.post("/v1/tasks/{key}/quality-gate")
+    def evaluate_gate(key: str, who_identity: Identity = Depends(identity), who: Principal = Depends(principal),
+                      idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        operator_only(who_identity)
+
+        def command(uow: UnitOfWork):
+            return 200, jsonable(dict(gate.evaluate(uow, key, actor=who.value)))
+        return idempotent(idempotency_key, who, {"op": "quality-gate", "task": key}, command)
+
+    @app.get("/v1/tasks/{key}/quality-gate")
+    def show_gate(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            uow.cur.execute("SELECT * FROM quality_gate_evaluations WHERE task_id = %s ORDER BY evaluated_at DESC LIMIT 1",
+                            (task["id"],))
+            row = uow.cur.fetchone()
+            return {"task": key, "evaluation": jsonable(dict(row)) if row else None}
 
     # ---------------------------------------------------------- credentials
 

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hermes-orchestrator:schema:review-result:1",
+  "title": "Cross-review result",
+  "description": "Structured answer of a REVIEWER execution (MASTER_SPEC sections 9 and 58). Passed to the CLIs as their output schema without the top-level metadata keywords; every property is required and nullable values use a type list.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "requirements_met", "unmet_requirements", "findings"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["approved", "changes_requested", "blocked"]},
+    "summary": {"type": "string", "description": "Short assessment of the change. Not a transcript."},
+    "requirements_met": {"type": "boolean", "description": "Whether the change does what the task asked."},
+    "unmet_requirements": {"type": "array", "items": {"type": "string"}},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "category", "path", "line", "description"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+          "category": {"type": "string", "description": "For example correctness, security, tests, performance, style, requirements."},
+          "path": {"type": ["string", "null"]},
+          "line": {"type": ["integer", "null"]},
+          "description": {"type": "string"}
+        }
+      }
+    }
+  }
+}

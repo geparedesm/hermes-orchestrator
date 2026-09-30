@@ -8,7 +8,7 @@ A local-first multi-agent development platform built around the official [Hermes
 
 ## Current status
 
-Phases 2–5 are implemented: project registration and read-only onboarding, configuration proposals with hard-policy enforcement, approvals, tasks with deterministic states, a scheduler queue, an operator CLI, the **Agent Manager**, which runs isolated, resource-limited worker containers with per-execution egress control, and **Claude Code and Codex workers** that sign in with your subscriptions, return structured results, and pause in `AUTH_REQUIRED` when a login expires, and **Git isolation**: each task works in isolated clones, human changes are detected and never overwritten, and nothing merges into a protected branch without an explicit human approval. The operator starts agent executions by hand until the orchestrator arrives (Phase 7); Hermes integration arrives in Phase 9. Evidence: [docs/validation/phase-2.md](docs/validation/phase-2.md), [docs/validation/phase-3.md](docs/validation/phase-3.md), [docs/validation/phase-4.md](docs/validation/phase-4.md), [docs/validation/phase-5.md](docs/validation/phase-5.md).
+Phases 2–6 are implemented: project registration and read-only onboarding, configuration proposals with hard-policy enforcement, approvals, tasks with deterministic states, a scheduler queue, an operator CLI, the **Agent Manager**, which runs isolated, resource-limited worker containers with per-execution egress control, and **Claude Code and Codex workers** that sign in with your subscriptions, return structured results, and pause in `AUTH_REQUIRED` when a login expires, and **Git isolation**: each task works in isolated clones, human changes are detected and never overwritten, and nothing merges into a protected branch without an explicit human approval, and **testing**: every integrated change is verified in an isolated environment (with your project's own Compose services and a browser when configured), cross-reviewed by the other provider, and must pass the Quality Gate before a merge can be requested. The operator starts agent executions by hand until the orchestrator arrives (Phase 7); Hermes integration arrives in Phase 9. Evidence: [docs/validation/phase-2.md](docs/validation/phase-2.md), [docs/validation/phase-3.md](docs/validation/phase-3.md), [docs/validation/phase-4.md](docs/validation/phase-4.md), [docs/validation/phase-5.md](docs/validation/phase-5.md), [docs/validation/phase-6.md](docs/validation/phase-6.md).
 
 This README grows with each phase. The full operations guide required by the specification is completed in Phase 11.
 
@@ -128,6 +128,17 @@ ho approval approve <id>    # the merge happens only now, and only if main and t
 
 (`ho` is `docker compose exec control-plane ho`.) The merge never overwrites uncommitted work in your checkout, and post-merge tests run before the task is `DONE`. For GitHub repositories, log in once with `make auth-github` (only Git Service holds the token); then `ho git push T-1`, `ho git pr T-1`, and `ho git checks T-1`, and the approved merge goes through the pull request.
 
+## Verification, review, and the Quality Gate (Phase 6)
+
+```bash
+ho tests show T-1                        # verification runs started by `ho git integrate`: steps, status, risk, test gaps
+ho review run T-1 --provider claude      # cross-review by a provider that did not develop the change
+ho review show T-1                       # verdict and findings
+ho gate evaluate T-1                     # Quality Gate: PASS moves a task in QUALITY_GATE to READY_FOR_MERGE
+```
+
+Configure it in `.hermes/project.yaml`: `commands` (install, build, lint, typecheck, test, security, e2e), `quality_gate`, `test_environment.compose_files` and `services` for test services from your own Compose files, and `browser_tests` (`enabled`, `base_url`) for browser checks. Test runners have no Internet unless `network.testing: allowlist` names `test_allowed_domains`.
+
 ## Development
 
 ```bash
@@ -138,6 +149,7 @@ make smoke             # Phase 2 end-to-end test on a throwaway Compose stack
 make smoke-phase3      # Phase 3 end-to-end test with real workers
 make smoke-phase4      # Phase 4 end-to-end test: adapters, real CLIs (invalid logins), AUTH_REQUIRED, secrets
 make smoke-phase5      # Phase 5 end-to-end test: workspaces, human changes, integration, approved merge
+make smoke-phase6      # Phase 6 end-to-end test: Compose test services, runners, browser, Quality Gate
 make lint validate-schemas
 make test-env-down     # remove the integration test containers
 ```

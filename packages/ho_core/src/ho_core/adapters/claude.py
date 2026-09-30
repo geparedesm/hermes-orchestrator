@@ -73,7 +73,7 @@ class ClaudeAdapter:
             "--permission-mode", "dontAsk",
             "--permission-prompts", "none",
             "--max-turns", str(assignment.max_turns),
-            "--json-schema", json.dumps(result_schema(), separators=(",", ":")),
+            "--json-schema", json.dumps(result_schema(assignment.result_schema), separators=(",", ":")),
         ]
         if assignment.resume_session:
             command += ["--resume", assignment.resume_session]
@@ -120,7 +120,7 @@ class ClaudeAdapter:
 
     # ------------------------------------------------------------------ results
 
-    def collect_result(self, bundle: OutputBundle) -> ExecutionResult:
+    def collect_result(self, bundle: OutputBundle, schema: str = "agent-result") -> ExecutionResult:
         raw, final = self._events(bundle)
         result = ExecutionResult(provider=self.provider, ok=False)
         for event in raw:
@@ -133,7 +133,7 @@ class ClaudeAdapter:
         result.session_id = next((e.get("session_id") for e in raw if e.get("session_id")), None)
         if final is not None:
             result.session_id = final.get("session_id") or result.session_id
-            if not final.get("is_error") and normalize_structured(self.provider, final.get("structured_output"), result):
+            if not final.get("is_error") and normalize_structured(self.provider, final.get("structured_output"), result, schema):
                 result.ok = True
             elif final.get("is_error"):
                 result.error = str(final.get("result") or final.get("subtype"))[:500]

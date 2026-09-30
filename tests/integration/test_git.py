@@ -4,6 +4,7 @@ approval-controlled merges into local repositories."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -98,15 +99,60 @@ def set_state(services, task, state) -> None:
         cur.execute("UPDATE tasks SET state = %s, resume_state = NULL WHERE key = %s", (state, task))
 
 
+def test_results(*steps: tuple[str, str]) -> dict[str, bytes]:
+    """Output of the in-container verification runner (workers/agent-base/ho-verify)."""
+    report = {"schema_version": 1, "steps": [{"name": n, "status": s, "exit_code": 0 if s == "PASSED" else 1, "duration_ms": 5,
+                                              "attempts": 1, "log": f"steps/{n}.log"} for n, s in steps]}
+    return {"test_results.json": json.dumps(report).encode(), **{f"steps/{n}.log": b"output" for n, _ in steps}}
+
+
+def latest_verification(services, task) -> dict:
+    with services.ctx.db.transaction() as cur:
+        cur.execute("SELECT v.* FROM verifications v JOIN tasks t ON t.id = v.task_id WHERE t.key = %s "
+                    "ORDER BY v.created_at DESC LIMIT 1", (task,))
+        return cur.fetchone()
+
+
+def finish_verification(services, agents, task, status="PASSED") -> dict:
+    services.scheduler.run_once()
+    verification = latest_verification(services, task)
+    for execution in verification["execution_ids"]:
+        spec = agents.specs[str(execution)]
+        assert spec["command"] == ["/opt/ho/bin/ho-verify"]
+        steps = [s.split("-", 2)[2][:-3] for s in sorted(spec["inputs"]) if s.startswith("step-") and s.endswith(".sh")]
+        agents.finish(str(execution), 0 if status == "PASSED" else 1, files=test_results(*[(s, status) for s in steps]))
+    services.scheduler.run_once()
+    return latest_verification(services, task)
+
+
 def integrate_and_pass(api, services, agents, task) -> dict:
     result = api.post(f"/v1/tasks/{task}/git/integrate").json()
     assert result["ok"], result
-    retest = result["retest"]["execution"]
-    assert agents.specs[retest]["command"] == ["bash", "-lc", "python -m unittest"]
-    agents.finish(retest, 0)
-    services.scheduler.run_once()
+    verification = finish_verification(services, agents, task)
+    assert verification["state"] == "PASSED"
     assert git_state(api, task)["changes"]["retest_status"] == "PASSED"
     return result
+
+
+REVIEW = {"verdict": "approved", "summary": "Looks right.", "requirements_met": True, "unmet_requirements": [], "findings": []}
+
+
+def review(api, services, agents, task, verdict=REVIEW) -> None:
+    response = api.post(f"/v1/tasks/{task}/reviews", {"provider": "claude"})
+    assert response.status_code == 201, response.text
+    final = {"type": "result", "subtype": "success", "is_error": False, "session_id": "s-review", "num_turns": 3,
+             "structured_output": verdict, "usage": {"input_tokens": 1, "output_tokens": 1}}
+    agents.finish_agent(response.json()["id"], json.dumps(final).encode())
+    services.scheduler.run_once()
+
+
+def pass_gate(api, services, agents, task) -> dict:
+    review(api, services, agents, task)
+    set_state(services, task, "QUALITY_GATE")
+    evaluation = api.post(f"/v1/tasks/{task}/quality-gate").json()
+    assert evaluation["outcome"] == "PASS", evaluation
+    assert api.get(f"/v1/tasks/{task}").json()["state"] == "READY_FOR_MERGE"
+    return evaluation
 
 
 # -------------------------------------------------------------------- workspaces
@@ -191,6 +237,8 @@ def test_integration_keeps_human_changes_and_retests(api, services, repo, agents
     user = commit(repo, "user change", {"README.md": "# user\n"})
     result = integrate_and_pass(api, services, agents, task)
     assert result["target_sha"] == user and result["files_changed"] == 1
+    verification = latest_verification(services, task)
+    assert verification["plan"]["steps"] == ["test"] and verification["plan"]["risk"]["risk"] == "LOW"
     assert sh(repo, "rev-parse", "main") == user  # integration never touches the user's branch
     assert "INTEGRATION_COMPLETED" in events(api, task) and "TEST_PASSED" in events(api, task)
 
@@ -225,7 +273,7 @@ def ready_for_merge(api, services, repo, agents, task) -> dict:
     ws = workspace(api, task)
     commit(clone(repo, ws), "task feature", {"feature.py": "print('feature')\n"})
     integrate_and_pass(api, services, agents, task)
-    set_state(services, task, "READY_FOR_MERGE")
+    pass_gate(api, services, agents, task)
     response = api.post(f"/v1/tasks/{task}/git/merge-request")
     assert response.status_code == 200, response.text
     return response.json()
@@ -243,10 +291,8 @@ def test_approved_merge_is_verified_before_done(api, services, repo, agents, tas
     assert view["state"] == "VERIFYING"
     assert (repo / "feature.py").exists() and (repo / "notes.txt").read_text() == "the user's uncommitted notes\n"
     assert sh(repo, "log", "-1", "--format=%s", "main").startswith(f"Merge {task}")
-    changes = git_state(api, task)["changes"]
-    verification = changes["verification_execution_id"]
-    agents.finish(verification, 0)
-    services.scheduler.run_once()
+    post_merge = finish_verification(services, agents, task)
+    assert post_merge["purpose"] == "POST_MERGE" and post_merge["state"] == "PASSED"
     assert api.get(f"/v1/tasks/{task}").json()["state"] == "DONE"
     history = events(api, task)
     assert history.index("MERGE_COMPLETED") < history.index("POST_MERGE_VERIFIED") < history.index("TASK_COMPLETED")
@@ -257,8 +303,7 @@ def test_approved_merge_is_verified_before_done(api, services, repo, agents, tas
 def test_failed_post_merge_tests_block_the_task(api, services, repo, agents, task):
     approval = ready_for_merge(api, services, repo, agents, task)
     api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
-    agents.finish(git_state(api, task)["changes"]["verification_execution_id"], 1)
-    services.scheduler.run_once()
+    assert finish_verification(services, agents, task, "FAILED")["state"] == "FAILED"
     assert api.get(f"/v1/tasks/{task}").json()["state"] == "BLOCKED"
 
 
@@ -300,12 +345,13 @@ def test_merge_request_rules(api, services, repo, agents, task):
     assert api.post(f"/v1/tasks/{task}/git/merge-request").status_code == 409  # not READY_FOR_MERGE
     ws = workspace(api, task)
     commit(clone(repo, ws), "task feature", {"feature.py": "x\n"})
-    result = api.post(f"/v1/tasks/{task}/git/integrate").json()
+    api.post(f"/v1/tasks/{task}/git/integrate")
     set_state(services, task, "READY_FOR_MERGE")
     response = api.post(f"/v1/tasks/{task}/git/merge-request")
-    assert response.status_code == 409 and "RUNNING" in response.json()["message"]  # retest still running
-    agents.finish(result["retest"]["execution"], 0)
-    services.scheduler.run_once()
+    assert response.status_code == 409 and "RUNNING" in response.json()["message"]  # verification still running
+    finish_verification(services, agents, task)
+    response = api.post(f"/v1/tasks/{task}/git/merge-request")
+    assert response.status_code == 409 and "Quality Gate" in response.json()["message"]  # no passing evaluation
     set_state(services, task, "READY_FOR_MERGE")
     commit(repo, "user moves main", {"README.md": "# moved\n"})
     response = api.post(f"/v1/tasks/{task}/git/merge-request")

@@ -38,6 +38,15 @@ wait_for() {  # wait_for <expected> <command...> ; prints the last value
 task_state() { ho task show "$1" | field 'd["state"]'; }
 git_field() { ho git status "$1" | field "$2"; }
 events_have() { ho task events "$1" | field "'$2' in {e['type'] for e in d['events']}"; }
+gate_pass() {  # gate_pass <task>: stand-in review of the integrated commit, then the Quality Gate (Phase 6)
+  local commit
+  commit="$(git_field "$1" 'd["changes"]["integration_sha"]')"
+  sql "INSERT INTO reviews (id, task_id, execution_id, commit_sha, reviewer_provider, developer_providers, outcome, requirements_met, summary)
+       SELECT gen_random_uuid(), t.id, e.id, '$commit', 'claude', '{}', 'APPROVED', true, 'smoke stand-in review'
+       FROM tasks t JOIN executions e ON e.task_id = t.id WHERE t.key = '$1' ORDER BY e.created_at DESC LIMIT 1" >/dev/null
+  sql "UPDATE tasks SET state = 'QUALITY_GATE', resume_state = NULL WHERE key = '$1'" >/dev/null  # Phase 7 stand-in
+  ho gate evaluate "$1" | field 'd["outcome"]'
+}
 cleanup() {
   if [[ "${KEEP:-0}" != "1" ]]; then
     dc down -v --remove-orphans >/dev/null 2>&1 || true
@@ -100,7 +109,7 @@ check "retest passed" "PASSED" "$(wait_for PASSED git_field "$TASK" 'd["changes"
 check "main still the user's" "User changes the currency" "$(git -C "$REPO" log -1 --format=%s)"
 
 echo "== a merge approval is bound to the exact commits"
-sql "UPDATE tasks SET state = 'READY_FOR_MERGE', resume_state = NULL WHERE key = '$TASK'" >/dev/null  # Phase 7 Quality Gate stand-in
+check "Quality Gate passes" "PASS" "$(gate_pass "$TASK")"
 STALE="$(ho git merge-request "$TASK" | field 'd["id"]')"
 printf '# shop\n\nMaintained by the user. Updated again.\n' > "$REPO/README.md"
 git -C "$REPO" commit -qam "User commits after the merge request"
@@ -124,7 +133,7 @@ check "forged authorization: 403" "403" "$FORGED"
 echo "== reintegrate, approve, merge, verify"
 ho git integrate "$TASK" >/dev/null
 check "retest passed again" "PASSED" "$(wait_for PASSED git_field "$TASK" 'd["changes"]["retest_status"]')"
-sql "UPDATE tasks SET state = 'READY_FOR_MERGE', resume_state = NULL WHERE key = '$TASK'" >/dev/null
+check "Quality Gate passes again" "PASS" "$(gate_pass "$TASK")"
 printf 'draft\n' > "$REPO/notes.txt"  # the user's uncommitted, unrelated work
 MERGE="$(ho git merge-request "$TASK" | field 'd["id"]')"
 ho approval approve "$MERGE" >/dev/null

@@ -90,6 +90,25 @@ def test_result_schema_is_valid_and_has_no_metadata():
     assert not schemas.errors_for("agent-result", RESULT)
 
 
+def test_review_schema_keeps_properties_named_description():
+    """Regression: stripping annotations removed the findings' `description` property, which made
+    the schema impossible to satisfy (found in a real Claude Code review run)."""
+    from jsonschema import Draft202012Validator
+
+    schema = result_schema("review-result")
+
+    def check(node):
+        if isinstance(node, dict):
+            if "required" in node:
+                assert set(node["required"]) <= set(node.get("properties", {})), node["required"]
+            for value in node.values():
+                check(value)
+    check(schema)
+    finding = {"severity": "LOW", "category": "style", "path": None, "line": None, "description": "x"}
+    review = {"verdict": "approved", "summary": "ok", "requirements_met": True, "unmet_requirements": [], "findings": [finding]}
+    assert not list(Draft202012Validator(schema).iter_errors(review))
+
+
 def test_image_suffix_composes_profiles():
     assert image_suffix(["generic"]) == "generic"
     assert image_suffix(["python", "node", "generic"]) == "node-python"

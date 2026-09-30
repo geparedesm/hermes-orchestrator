@@ -38,6 +38,17 @@ machine:
     test: {cpus: 2, memory_gb: 4}
     browser: {cpus: 2, memory_gb: 4}
 
+# Research presets for development executions in ALLOWLIST egress (MASTER_SPEC section 54),
+# enabled per project by network.research. Test runners never receive these.
+research_domains:
+  official_docs: [docs.python.org, peps.python.org, developer.mozilla.org, nodejs.org, docs.npmjs.com, docs.docker.com,
+                  docs.github.com, dart.dev, api.dart.dev, docs.flutter.dev, api.flutter.dev, docs.oracle.com, www.php.net,
+                  getcomposer.org, www.typescriptlang.org, react.dev, docs.djangoproject.com, fastapi.tiangolo.com]
+  package_registries: [registry.npmjs.org, registry.yarnpkg.com, pypi.org, files.pythonhosted.org, repo.maven.apache.org,
+                       repo1.maven.org, plugins.gradle.org, services.gradle.org, repo.packagist.org, packagist.org, pub.dev,
+                       crates.io, index.crates.io, static.crates.io, proxy.golang.org, sum.golang.org]
+  public_github: [github.com, api.github.com, codeload.github.com, raw.githubusercontent.com, objects.githubusercontent.com]
+
 scheduler:
   poll_seconds: 5
   # A waiting task gains one priority level per this many minutes (anti-starvation).

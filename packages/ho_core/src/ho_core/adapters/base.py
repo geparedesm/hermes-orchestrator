@@ -55,6 +55,7 @@ class AgentAssignment:
     resume_session: str | None = None
     max_turns: int = 60
     model: str | None = None
+    result_schema: str = "agent-result"  # or "review-result" for cross-reviews
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ class ExecutionResult:
     error: str | None = None
     high_risk_commands: int = 0
     credential_refreshed: bool = False
+    structured: dict[str, Any] | None = None  # the validated structured answer (any result schema)
     events: list[AdapterEvent] = field(default_factory=list)
 
     def as_json(self) -> dict[str, Any]:
@@ -142,7 +144,7 @@ class AgentAdapter(Protocol):
 
     def build_execution(self, assignment: AgentAssignment) -> ExecutionPlan: ...
     def parse_event(self, event: dict[str, Any]) -> AdapterEvent | None: ...
-    def collect_result(self, bundle: OutputBundle) -> ExecutionResult: ...
+    def collect_result(self, bundle: OutputBundle, schema: str = RESULT_SCHEMA) -> ExecutionResult: ...
     def collect_usage(self, bundle: OutputBundle) -> UsageRecord: ...
     def classify_failure(self, bundle: OutputBundle) -> FailureClass | None: ...
     def health_check(self, *, pinned_images: Iterable[str], credential_present: bool, credential_status: str) -> ProviderHealth: ...
@@ -157,17 +159,27 @@ def image_suffix(profiles: Iterable[str]) -> str:
     return "-".join(chosen) or "generic"
 
 
-def result_schema() -> dict[str, Any]:
-    """The agent result schema as sent to a CLI: without top-level metadata keywords."""
-    schema = copy.deepcopy(json.loads((schemas.schema_dir() / f"{RESULT_SCHEMA}.schema.json").read_text(encoding="utf-8")))
+RESULT_SCHEMAS = (RESULT_SCHEMA, "review-result")
+
+
+def result_schema(name: str = RESULT_SCHEMA) -> dict[str, Any]:
+    """A result schema as sent to a CLI: without metadata keywords."""
+    if name not in RESULT_SCHEMAS:
+        raise ValueError(f"unknown result schema {name!r}")
+    schema = copy.deepcopy(json.loads((schemas.schema_dir() / f"{name}.schema.json").read_text(encoding="utf-8")))
     for key in ("$schema", "$id", "title", "description"):
         schema.pop(key, None)
 
     def strip(node: Any) -> None:
+        """Remove `description` annotations, but never a property that happens to be named "description"."""
         if isinstance(node, dict):
             node.pop("description", None)
-            for value in node.values():
-                strip(value)
+            for key, value in node.items():
+                if key == "properties" and isinstance(value, dict):
+                    for prop in value.values():
+                        strip(prop)
+                else:
+                    strip(value)
 
     strip(schema)
     return schema
@@ -199,7 +211,9 @@ def compose_prompt(assignment: AgentAssignment) -> str:
         lines.append("- There is no Internet access apart from your model provider.")
     lines += [
         "- Never read, print, or copy credentials or files under /run/ho-credentials or /run/ho/secrets into output.",
-        "- Finish with the structured result: status, a short summary, changed files, tests, local commits, follow-ups.",
+        ("- Finish with the structured review: verdict, summary, whether the task's requirements are met, and findings "
+         "with severity, category, path, and line." if assignment.result_schema == "review-result" else
+         "- Finish with the structured result: status, a short summary, changed files, tests, local commits, follow-ups."),
         "",
         "## Assignment",
         "",
@@ -219,10 +233,20 @@ def command_event(event_type: str, command: str, **extra: Any) -> AdapterEvent:
     })
 
 
-def normalize_structured(provider: str, value: Any, result: ExecutionResult) -> bool:
+def normalize_structured(provider: str, value: Any, result: ExecutionResult, schema: str = RESULT_SCHEMA) -> bool:
     """Fill `result` from a structured output object; False if it does not match the schema."""
-    if not isinstance(value, dict) or schemas.errors_for(RESULT_SCHEMA, value):
+    if not isinstance(value, dict) or schemas.errors_for(schema, value):
         return False
+    if schema != RESULT_SCHEMA:
+        clean = json.loads(json.dumps(value))
+        for finding in clean.get("findings", [])[:MAX_ITEMS]:
+            finding["description"] = str(finding["description"])[:2000]
+        clean["findings"] = clean.get("findings", [])[:MAX_ITEMS]
+        result.structured = clean
+        result.status = str(value.get("verdict") or value.get("status") or "")
+        result.summary = str(value.get("summary", ""))[:MAX_SUMMARY]
+        return True
+    result.structured = value
 
     def strings(items: list[Any]) -> list[str]:
         return [str(i)[:500] for i in items[:MAX_ITEMS]]

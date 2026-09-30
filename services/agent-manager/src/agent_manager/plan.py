@@ -107,15 +107,13 @@ class ContainerPlan:
         return f"ho-in-{self.short}"
 
 
-def _workspace_mount(request: dict[str, Any], projects_root: Path, projects_root_host: str, access: str) -> Mount:
-    workspace = request.get("workspace")
-    if not workspace:
-        raise Rejected("grant includes workspace access but no workspace was given")
-    project_path = PurePosixPath(request["project_path"])
+def resolve_workspace(project_path: str, workspace: str, projects_root: Path) -> tuple[PurePosixPath, Path]:
+    """Validate `<project>/.hermes/worktrees/<name>` and return (relative path, resolved path)."""
+    project = PurePosixPath(project_path)
     relative = PurePosixPath(workspace)
     # Only <project>/.hermes/worktrees/<name> may be mounted (ARCHITECTURE.md section 8).
-    if relative.parent != project_path / ".hermes" / "worktrees" or not relative.name or relative.name.startswith("."):
-        raise Rejected(f"workspace must be {project_path}/.hermes/worktrees/<name>")
+    if relative.parent != project / ".hermes" / "worktrees" or not relative.name or relative.name.startswith("."):
+        raise Rejected(f"workspace must be {project}/.hermes/worktrees/<name>")
     try:
         resolved = resolve_inside(projects_root, str(relative))
     except PathOutsideRoot as exc:
@@ -126,6 +124,14 @@ def _workspace_mount(request: dict[str, Any], projects_root: Path, projects_root
         raise Rejected("workspace path must not contain symbolic links")
     if not resolved.is_dir():
         raise Rejected(f"workspace {relative} does not exist")
+    return relative, resolved
+
+
+def _workspace_mount(request: dict[str, Any], projects_root: Path, projects_root_host: str, access: str) -> Mount:
+    workspace = request.get("workspace")
+    if not workspace:
+        raise Rejected("grant includes workspace access but no workspace was given")
+    relative, _ = resolve_workspace(request["project_path"], workspace, projects_root)
     host = f"{projects_root_host.rstrip('/')}/{relative}"
     return Mount("bind", host, "/workspace", read_only=(access == "READ"))
 
@@ -237,7 +243,10 @@ def build_plan(
     mounts.append(Mount("volume", f"ho-out-{short}", "/output", read_only=False))
 
     profile = grant["resources"]["profile"]
-    limits = platform["machine"]["resource_profiles"][profile]
+    # Runners use the machine's runner limits; agent workers their resource profile (section 34).
+    runner_limits = {"TESTER": "test", "BROWSER": "browser"}.get(grant["role"])
+    limits = (platform["machine"]["runners"][runner_limits] if runner_limits
+              else platform["machine"]["resource_profiles"][profile])
     network = caps["network"]
     domains = sorted(set(network.get("allowed_domains", [])))
     if network["egress"] in ("PROVIDER_ONLY", "ALLOWLIST") and grant["provider_credential"]:
