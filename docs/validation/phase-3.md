@@ -20,7 +20,7 @@
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Unit tests (adds egress policy) | `make test-unit` | 107 passed |
+| Unit tests (adds egress policy) | `make test-unit` | 114 passed |
 | Integration tests (adds 14 execution tests with an in-memory Agent Manager) | `make test-integration` | 37 passed |
 | Agent Manager against the real Docker daemon | `make test-docker` | 25 passed |
 | Phase 3 end-to-end on the Compose stack | `make smoke-phase3` | 21 of 21 checks passed |
