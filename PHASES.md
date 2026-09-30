@@ -81,7 +81,7 @@ All code, filenames, comments, configuration documentation, and project document
 - [x] Implement assigned-workspace mounts and project-specific network isolation.
 - [x] Enforce machine-specific CPU/RAM profiles and concurrency limits, including the Mac default of three simultaneous agent workers.
 - [x] Evaluate policy, budget, credentials, resources, and capabilities before launching workers.
-- [ ] Keep workers alive through their logical implement/test/fix/retest/commit cycle. *(Partial: Agent Manager never stops a worker before its command exits or its grant expires. Since Phase 4, one DEVELOPER agent execution runs the whole cycle and commits locally; this is checked once the operator's first real agent run completes.)*
+- [x] Keep workers alive through their logical implement/test/fix/retest/commit cycle. *(Completed in Phase 4: one DEVELOPER agent execution runs the whole cycle and commits locally, confirmed with real Claude Code and Codex runs.)*
 - [x] Prevent worker access to Docker sockets, unrelated host paths/projects, control databases, and GitHub credentials.
 
 **Completion criteria:** Workers can be managed through the private authenticated API, and forbidden mounts, networks, and capabilities are denied.
@@ -96,7 +96,7 @@ All code, filenames, comments, configuration documentation, and project document
 - [x] Support task execution, resume, cancellation, health checks, result collection, and usage collection.
 - [x] Build pinned/versioned agent-base, Claude worker, and Codex worker images for the supported architectures. *(`linux/arm64` built and tested; on `linux/amd64` the Codex image was built and run under emulation, and the Claude Code image still needs a run on an amd64 host.)*
 - [x] Implement composable generic, Node, Python, Flutter, PHP, and Java toolchain profiles.
-- [x] Implement authentication bootstrap using officially supported subscription/interactive flows. *(A login with a real account is part of the operator's review: `make auth-claude`, `make auth-codex`.)*
+- [x] Implement authentication bootstrap using officially supported subscription/interactive flows. *(Validated with the operator's Claude and ChatGPT accounts.)*
 - [x] Implement Credential Broker and separate Secrets Broker interfaces with least-privilege access and redaction.
 - [x] Preserve provider sessions securely across ephemeral worker destruction.
 - [x] Handle expired sessions through `AUTH_REQUIRED`, notification events, re-authentication, and checkpoint resume.
@@ -104,7 +104,7 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Completion criteria:** Both providers execute isolated tasks through the same contract; credentials remain outside Git, PostgreSQL, logs, manifests, and normal backups.
 
-**Status:** Implemented, pending review. 142 unit, 48 integration, and 39 real-Docker tests, plus a 29-check end-to-end smoke test on the Compose stack (macOS, Apple Silicon). The real Claude Code 2.1.280 and Codex 0.159.2 CLIs were run in workers against their providers through the egress proxy, with invalid logins so that no model request was billed; a successful model run needs the operator's own login and is the remaining review step. Evidence, decisions, and limitations: [docs/validation/phase-4.md](docs/validation/phase-4.md).
+**Status:** Implemented, pending review. 142 unit, 48 integration, and 39 real-Docker tests, plus a 29-check end-to-end smoke test on the Compose stack (macOS, Apple Silicon). With the operator's subscription logins, one real Claude Code 2.1.280 and one real Codex 0.159.2 execution each implemented a change, ran the tests, and committed in an isolated workspace, reaching their providers only through the egress proxy. Evidence, decisions, and limitations: [docs/validation/phase-4.md](docs/validation/phase-4.md).
 
 ## Phase 5: Git Isolation
 

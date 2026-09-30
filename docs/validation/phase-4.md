@@ -48,7 +48,22 @@ Every flag, variable, path, and host comes from the providers' current documenta
 
 **Network note.** Two checks fetch `https://example.com` through the egress proxy. On this network the router's DNS server (10.0.0.138) currently answers `NXDOMAIN` for `example.com` (a public resolver, 1.1.1.1, resolves it), so the proxy cannot resolve the name and those two checks fail. Every other egress check passes, including real traffic to OpenAI and Anthropic. Both checks passed in Phase 3 and need no code change; rerun them on a network that resolves `example.com`.
 
-### Real CLIs, real providers, no real login
+### Real runs with the operator's subscriptions
+
+After `make auth-codex` and `make auth-claude` (operator's accounts), one DEVELOPER execution per provider ran on `hello-api`, a small Python library in `~/HermesProjects`, with `PROVIDER_ONLY` egress and the project's `python` toolchain image. Both executions had been started before the logins, failed as `AUTH`, and waited in `AUTH_REQUIRED`; each login resumed its task and reran the assignment automatically.
+
+| | Codex 0.159.2 (`codex-python`) | Claude Code 2.1.280 (`claude-python`) |
+| --- | --- | --- |
+| Assignment | Add `farewell()` with a unit test, run the tests, commit | Add `shout()` with a unit test, run the tests, commit |
+| Execution | `SUCCEEDED`, structured result `completed`, tests passed | `SUCCEEDED`, structured result `completed`, tests passed |
+| Commit in the workspace clone | `f20de8a Add farewell function and unittest` | `e98938a Add shout function with unit test` |
+| Usage recorded | 1 turn, 76,253 input (59,648 cached) and 632 output tokens, 54 s | 9 turns, 1,343 output tokens, 16 s (CLI cost estimate 0.11 USD; subscription, not billed per request) |
+| Egress | Allowed: `chatgpt.com`. Denied at startup: `sdmntpr*.oaiusercontent.com` (5 connections; not in the official host list, not needed for the task) | Allowed: `api.anthropic.com` only |
+| Stored artifacts | `result.json`, `events.jsonl` (commands with their class, file changes, usage counts), `egress.jsonl`; no reasoning, messages, or raw stream | same |
+
+This confirms the implement → test → commit cycle inside one execution for both providers. Neither agent listed its commit SHA in the result's `commits` field although both committed; from Phase 5 the Git Service reads commits from the workspace instead of relying on the agent's report.
+
+### Real CLIs with invalid logins
 
 The pinned CLIs ran inside hardened workers (UID 10001, read-only root, no capabilities) with `PROVIDER_ONLY` egress and deliberately invalid logins (`tests/docker/test_phase4.py`, `scripts/smoke-phase4.sh`):
 
@@ -100,7 +115,8 @@ A successful model run needs a real subscription login, which only the operator 
 
 ## Known limitations
 
-- **No run with a real login yet.** The login scripts follow the documented flows but were not run with real accounts; a successful model execution and the implement → test → fix → commit cycle inside one execution are confirmed in the operator review below.
+- The first Claude login saved a truncated token: terminals wrap the long `setup-token` output, and the script read one line. Fixed: it now joins every pasted line, checks the format, and saves the token only after the verification request succeeds.
+- Codex contacts `*.oaiusercontent.com` at startup; the host is not in its official network documentation, the task succeeded without it, and it stays denied under `PROVIDER_ONLY`.
 - The success fixtures (`tests/fixtures/providers/*-success.jsonl`) were written in the documented formats; replace them with captured runs after the first real login.
 - Whether a Codex token refresh invalidates the copy another running execution holds (OI-03) could not be measured without a real login. The write-back never overwrites a newer stored login; if refreshes invalidate older copies, use one identity per concurrent Codex worker.
 - Codex's device-code login must be enabled for the ChatGPT account; the browser callback flow is not offered because it needs a port on the host.
@@ -114,8 +130,4 @@ A successful model run needs a real subscription login, which only the operator 
 
 ## Operator review
 
-1. `make images` (and `make up` to rebuild the running stack).
-2. `make auth-claude` and `make auth-codex`; then `docker compose exec control-plane ho auth status`.
-3. Create a task on a small repository with a workspace directory, then run one agent per provider:
-   `ho agent run <task> "Add a hello endpoint with a test and commit it" --provider codex --workspace .hermes/worktrees/w1 --workspace-access WRITE`
-4. `ho execution show <id>`: `SUCCEEDED`, a `result` with `status: completed`, a local commit in the workspace, and usage recorded.
+Done on 2026-09-30: stack rebuilt with `make up`, both providers logged in with `make auth-claude` and `make auth-codex`, and one real agent execution per provider succeeded (see *Real runs with the operator's subscriptions*).
