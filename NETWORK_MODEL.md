@@ -1,7 +1,7 @@
 # Network Model
 
 **Phase:** 1 (Architecture)  
-**Status:** Draft for review  
+**Status:** Approved by Gabriel Paredes on 2026-09-30 (PR #2)  
 **Inputs:** [MASTER_SPEC.md](MASTER_SPEC.md) sections 13, 51–55, 62, 82  
 **Related:** [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY_MODEL.md](SECURITY_MODEL.md)
 

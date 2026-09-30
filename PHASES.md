@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture documents and schemas are drafted and awaiting review. Phases 2–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 is in progress; Phases 3–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -50,7 +50,7 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Completion criteria:** Architecture documents and diagrams consistently describe storage, execution, security, networking, and integration responsibilities.
 
-**Status:** Drafted, pending review. Deliverables: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY_MODEL.md](SECURITY_MODEL.md), [DATA_MODEL.md](DATA_MODEL.md), [NETWORK_MODEL.md](NETWORK_MODEL.md), and [schemas/](schemas/) (validated with `scripts/validate_schemas.py`). Open items OI-01 to OI-08 in ARCHITECTURE §15 are assigned to later phases.
+**Status:** Complete. Approved by Gabriel Paredes on 2026-09-30 (PR #2). Deliverables: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY_MODEL.md](SECURITY_MODEL.md), [DATA_MODEL.md](DATA_MODEL.md), [NETWORK_MODEL.md](NETWORK_MODEL.md), and [schemas/](schemas/) (validated with `scripts/validate_schemas.py`). Open items OI-01 to OI-08 in ARCHITECTURE §15 are assigned to later phases.
 
 ## Phase 2: Minimal Control Plane
 

@@ -1,7 +1,7 @@
 # Architecture
 
 **Phase:** 1 (Architecture)  
-**Status:** Draft for review  
+**Status:** Approved by Gabriel Paredes on 2026-09-30 (PR #2)  
 **Inputs:** [MASTER_SPEC.md](MASTER_SPEC.md) (source of truth), [DISCOVERY.md](DISCOVERY.md) (approved 2026-09-30)  
 **Companion documents:** [SECURITY_MODEL.md](SECURITY_MODEL.md), [DATA_MODEL.md](DATA_MODEL.md), [NETWORK_MODEL.md](NETWORK_MODEL.md), [schemas/](schemas/)
 

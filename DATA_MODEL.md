@@ -1,7 +1,7 @@
 # Data Model
 
 **Phase:** 1 (Architecture)  
-**Status:** Draft for review  
+**Status:** Approved by Gabriel Paredes on 2026-09-30 (PR #2)  
 **Inputs:** [MASTER_SPEC.md](MASTER_SPEC.md) sections 14–17, 25, 27–30, 42–49, 60–61, 70, 79–80  
 **Related:** [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY_MODEL.md](SECURITY_MODEL.md), [schemas/](schemas/)
 
