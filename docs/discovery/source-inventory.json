@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "research_date": "2026-09-30",
+  "timezone": "Australia/Perth",
+  "verification_scope": "Documentation and selected source inspection; no upstream code, container image, or provider authentication was executed.",
+  "upstream": {
+    "repository": "https://github.com/NousResearch/hermes-agent",
+    "release_tag": "v2026.9.24",
+    "package_version": "0.21.5",
+    "commit": "f97608f178d1ffeca59860195ab7da295f7c8e5f"
+  },
+  "image": {
+    "repository": "docker.io/nousresearch/hermes-agent",
+    "observed_tag": "v2026.9.24",
+    "index_digest": "sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
+    "platform_manifests": {
+      "linux/amd64": "sha256:2fd023efbb8d3d2b0ce1a73d028b07370cff34f567cfe0e999553e8c327ea283",
+      "linux/arm64": "sha256:93b4e2877a2f48f4474b6dd2b99386ae32c4c552d32639df1a869b3f13c50b5a"
+    },
+    "verification_command": "docker buildx imagetools inspect nousresearch/hermes-agent:v2026.9.24",
+    "runtime_tested": false,
+    "production_pin_approved": false
+  },
+  "source_files": [
+    {
+      "path": "pyproject.toml",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/pyproject.toml",
+      "sha256": "6f969b9fdff95e7269ec808361e3ae8be5357036e6257e53a3306878cf8c41dd"
+    },
+    {
+      "path": "Dockerfile",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/Dockerfile",
+      "sha256": "364c5db9f80bad24173bed91b230354de37058752148155a4544a1a5b05fd80b"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/.github/workflows/docker.yml",
+      "sha256": "45a1190335cc5496162708fcda3d67b29f1172e6a753982252d1c1bfaa81212b"
+    },
+    {
+      "path": "hermes_cli/plugins.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/plugins.py",
+      "sha256": "51c7fdd506b187c8713e706a7b264614902b28039e79875770e4b120180b423c"
+    },
+    {
+      "path": "hermes_cli/config_defaults.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/config_defaults.py",
+      "sha256": "2af916849856bfa39b4903c660301f968a4cec87410cd7023c89ee7b3f3fdc68"
+    },
+    {
+      "path": "hermes_cli/kanban.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/kanban.py",
+      "sha256": "35269c2ad3c37dbf8e1b7165c277f32c56f44d071375e3c6d90504552329d216"
+    },
+    {
+      "path": "hermes_cli/kanban_db.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/kanban_db.py",
+      "sha256": "b51a4ea1d2fe614f9c69c79e8c9a5345e711b2f1171916840a4ada5edb106edf"
+    },
+    {
+      "path": "hermes_cli/kanban_db_dispatch.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/kanban_db_dispatch.py",
+      "sha256": "cae1e2eaa7d95083a2c94e13f6e01a25cc307e88c64be89b123504a2aa80c3f8"
+    },
+    {
+      "path": "hermes_cli/kanban_pr_acceptance.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/kanban_pr_acceptance.py",
+      "sha256": "7ef2e6980c2b7b9336e842844abab0a2768eaf15c9ae7ece7152520d18c28b66"
+    },
+    {
+      "path": "hermes_cli/projects_cmd.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/projects_cmd.py",
+      "sha256": "59a3e989f0eb6ded4f9c233f72400b33d715ef1ea533b93078bacb04623a18c1"
+    },
+    {
+      "path": "hermes_cli/projects_db.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/projects_db.py",
+      "sha256": "4b9fc548bc417cc765ab596d500092d488c21ad75084b026c5f30b91f6e143bf"
+    },
+    {
+      "path": "hermes_cli/web_server.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/web_server.py",
+      "sha256": "dd095ecfe0a8a1dcc9148c170e96efd8eb9a5ce9a3de68d905f0d61024b144a0"
+    },
+    {
+      "path": "hermes_cli/dashboard_auth/public_paths.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/dashboard_auth/public_paths.py",
+      "sha256": "534bbb0bbef3f68c88c292014c2bcd975ec54f3f7aa81d6b1ba61dcbdf0665f0"
+    },
+    {
+      "path": "hermes_cli/dashboard_auth/middleware.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/hermes_cli/dashboard_auth/middleware.py",
+      "sha256": "8b348045422160b96173b59001bc7a705da8eb970f3c61ebaad7984e99d763bd"
+    },
+    {
+      "path": "plugins/kanban/dashboard/manifest.json",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/plugins/kanban/dashboard/manifest.json",
+      "sha256": "2c037543d30ddee524d6a1bd38cbd2345d01f1c8bf678d4ee464da4074266e1e"
+    },
+    {
+      "path": "agent/codex_runtime.py",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/agent/codex_runtime.py",
+      "sha256": "c0f8253c5b3a1473b465037d49df7f9709c18b0e91dc8d310eeb6a047d44fb5f"
+    },
+    {
+      "path": "skills/autonomous-ai-agents/claude-code/SKILL.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/skills/autonomous-ai-agents/claude-code/SKILL.md",
+      "sha256": "ec92e627db1f449ea038e2b756ebbaa067880dd673a35497ea64b7e6391cf519"
+    },
+    {
+      "path": "website/docs/user-guide/docker.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/website/docs/user-guide/docker.md",
+      "sha256": "03a2d8b43acd8bd258395fbac35aefa839caca177fa9002cdea72d89655be0ec"
+    },
+    {
+      "path": "website/docs/user-guide/features/kanban.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/website/docs/user-guide/features/kanban.md",
+      "sha256": "cb373b9c7c2bd1ef5a4d8a0318c1cd71ef72f8ab74f8c121e62f655ad5728744"
+    },
+    {
+      "path": "website/docs/user-guide/features/kanban-worker-lanes.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/website/docs/user-guide/features/kanban-worker-lanes.md",
+      "sha256": "a88c73b55bb15f8d823434d069b0e60b07e0c4c8946949053e723c702331b659"
+    },
+    {
+      "path": "website/docs/user-guide/features/extending-the-dashboard.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/website/docs/user-guide/features/extending-the-dashboard.md",
+      "sha256": "08a9c66e82393803d30f5bb451d4ae6240cc0397e01a9b203ec7a71318baecfb"
+    },
+    {
+      "path": "website/docs/user-guide/features/mcp.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/website/docs/user-guide/features/mcp.md",
+      "sha256": "b1bb6d4173b3b98f040c8dbd8d7627c34ff2fbbef0a0d6bbe454757569f15190"
+    },
+    {
+      "path": "website/docs/user-guide/features/skills.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/website/docs/user-guide/features/skills.md",
+      "sha256": "f3191edcc355229d29686a7693cf862a65a474431ffb501279977edcb3701847"
+    },
+    {
+      "path": "website/docs/user-guide/messaging/webhooks.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/website/docs/user-guide/messaging/webhooks.md",
+      "sha256": "a25fb3b74b8c7f4c978ea98bb9603cf1b59a303c0f51c8ee7a06f2f12d940d8a"
+    },
+    {
+      "path": "website/docs/reference/cli-commands.md",
+      "url": "https://github.com/NousResearch/hermes-agent/blob/f97608f178d1ffeca59860195ab7da295f7c8e5f/website/docs/reference/cli-commands.md",
+      "sha256": "931fed17b034c4d1eac366a7dd663c64d0d250a586b9f76156e3e365a3e515ec"
+    }
+  ],
+  "official_provider_references": [
+    "https://code.claude.com/docs/en/authentication",
+    "https://code.claude.com/docs/en/headless",
+    "https://code.claude.com/docs/en/cli-reference",
+    "https://learn.chatgpt.com/docs/auth",
+    "https://learn.chatgpt.com/docs/non-interactive-mode",
+    "https://cli.github.com/manual/gh_auth_login",
+    "https://cli.github.com/manual/gh_pr_create",
+    "https://cli.github.com/manual/gh_pr_checks",
+    "https://cli.github.com/manual/gh_pr_merge"
+  ]
+}
