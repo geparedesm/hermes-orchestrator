@@ -1,0 +1,9 @@
+# Optional local overrides. Copy to compose.override.yaml (untracked).
+# Example: publish the Task API on loopback for local debugging only.
+services:
+  control-plane:
+    ports: ["127.0.0.1:8080:8080"]
+    networks: [ho-data, ho-control, ho-edge, ho-debug]
+
+networks:
+  ho-debug: {}

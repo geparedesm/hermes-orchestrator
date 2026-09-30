@@ -55,6 +55,8 @@ erDiagram
 
 ## 3. Tables
 
+Migration `0001` (Phase 2) creates `projects`, `project_configs`, `onboarding_scans`, `artifacts`, `tasks`, `task_relationships`, `budgets`, `approvals`, `policy_decisions`, `events`, `notifications`, `idempotency_keys`, and `operation_intents`. Later phases add the remaining tables with their own migrations.
+
 Conventions: primary keys are UUIDv7 (`id`) unless stated. Human-facing identifiers (`T-284`, `T-284-02`) are unique per installation and generated from sequences. All timestamps are `timestamptz` in UTC. `jsonb` payloads have a JSON Schema in `schemas/` or in the Phase 2 contract package. Every mutable row has `created_at`, `updated_at`, and `version` (optimistic concurrency).
 
 ### 3.1 Projects and configuration
@@ -222,6 +224,7 @@ stateDiagram-v2
     READY_FOR_MERGE --> FIX_REQUIRED: rejected by human
     READY_FOR_MERGE --> RUNNING: base moved, reintegration needed
     MERGING --> VERIFYING: merge confirmed
+    MERGING --> BLOCKED: merge failed or could not be confirmed
     VERIFYING --> DONE: post-merge checks pass
     VERIFYING --> BLOCKED: post-merge checks fail
     DONE --> [*]
@@ -240,10 +243,10 @@ Cross-cutting transitions (not drawn):
 | Any active state | `BLOCKED` | Both providers failed, hard conflict, recovery failure | Human command: retry to `READY` or `resume_state`, or cancel |
 | Any non-terminal state except `MERGING`, `VERIFYING` | `CANCELLED` | User cancel (graceful, §69) | Terminal |
 | `MERGING`, `VERIFYING` | — | Cancel is rejected; the merge must be reconciled first | — |
-| Any active state | `FAILED` | Unrecoverable platform error or policy terminal failure | `READY` via explicit retry (new attempt) |
-| `FAILED`, `CANCELLED` | `READY` | Explicit retry or replay creates a new task linked by `task_relationships` | Replay never reopens old grants |
+| Any active or waiting state | `FAILED` | Unrecoverable platform error or policy terminal failure | Explicit retry creates a new linked task |
+| `FAILED`, `CANCELLED` | — | Explicit retry or replay creates a **new** task (starting in `BACKLOG`) linked by a `RELATED` relationship; the original stays terminal | Replay never reopens old grants |
 
-"Active states" are `READY` through `READY_FOR_MERGE` in the diagram. Waiting states persist across restarts and never time out into approval.
+"Active states" are `READY` through `READY_FOR_MERGE` in the diagram; `BACKLOG` may also be paused or cancelled. Waiting states persist across restarts and never time out into approval. The implementation is `packages/ho_core/src/ho_core/statemachine.py`; transitions that can only be caused by the control plane (`READY_FOR_MERGE`, `MERGING`, `VERIFYING`, `DONE`) reject the orchestrator as trigger, and `MERGING` requires a consumed merge approval.
 
 `READY_FOR_MERGE` is not `DONE`. `TASK_COMPLETED` is emitted only on the `VERIFYING → DONE` transition (§28).
 

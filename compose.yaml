@@ -1,0 +1,118 @@
+# Hermes Orchestrator platform services (ARCHITECTURE.md section 4, NETWORK_MODEL.md section 3).
+#
+# Phase 2 services: postgres, redis, migrate (one-shot), control-plane, git-service.
+# Phase 3 adds agent-manager; Phase 9 adds the official Hermes service with the plugin.
+#
+# Setup: cp .env.example .env && edit it; ./scripts/init-secrets.sh; docker compose up -d --build
+name: hermes-orchestrator
+
+x-hardening: &hardening
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  tmpfs: ["/tmp:size=64m"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "5"}
+
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_USER: ho_owner
+      POSTGRES_DB: ho
+      POSTGRES_PASSWORD_FILE: /run/secrets/ho_owner_db_password
+    secrets: [ho_owner_db_password, ho_app_db_password]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+    networks: [ho-data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ho_owner -d ho"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8.2-alpine@sha256:b51665e66f00759be7c3152ad5ac3c66fb2f619c13ef62dea7cc1f9914524635
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    # Transient coordination only (DATA_MODEL.md section 6): no persistence, reconstructable.
+    entrypoint: ["sh", "-c", "exec redis-server --save '' --appendonly no --requirepass \"$$(cat /run/secrets/ho_redis_password)\""]
+    secrets: [ho_redis_password]
+    networks: [ho-data]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/ho_redis_password)\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: hermes-orchestrator/control-plane:${HO_VERSION:-dev}
+    build: {context: ., dockerfile: services/control-plane/Dockerfile}
+    <<: *hardening
+    restart: "no"
+    command: ["ho-migrate"]
+    environment:
+      HO_DB_OWNER_PASSWORD_FILE: /run/secrets/ho_owner_db_password
+    secrets: [ho_owner_db_password]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [ho-data]
+
+  control-plane:
+    image: hermes-orchestrator/control-plane:${HO_VERSION:-dev}
+    build: {context: ., dockerfile: services/control-plane/Dockerfile}
+    <<: *hardening
+    environment:
+      HO_MACHINE_PROFILE: ${HO_MACHINE_PROFILE:?set HO_MACHINE_PROFILE in .env}
+      HO_PROJECTS_ROOT_HOST: ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}
+      HO_DB_PASSWORD_FILE: /run/secrets/ho_app_db_password
+      HO_REDIS_PASSWORD_FILE: /run/secrets/ho_redis_password
+      HO_PLUGIN_TOKEN_FILE: /run/secrets/ho_plugin_token
+      HO_OPERATOR_TOKEN_FILE: /run/secrets/ho_operator_token
+      HO_GIT_SERVICE_TOKEN_FILE: /run/secrets/ho_git_service_token
+      HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
+    secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token]
+    volumes:
+      - ./config:/app/config:ro
+      - artifacts:/var/lib/ho/artifacts
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      git-service: {condition: service_healthy}
+    networks: [ho-data, ho-control, ho-edge]
+
+  git-service:
+    image: hermes-orchestrator/git-service:${HO_VERSION:-dev}
+    build: {context: ., dockerfile: services/git-service/Dockerfile}
+    <<: *hardening
+    environment:
+      HO_GIT_SERVICE_TOKEN_FILE: /run/secrets/ho_git_service_token
+      HO_PROJECTS_ROOT: /projects
+      HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
+    secrets: [ho_git_service_token]
+    volumes:
+      # Read-only until Phase 5 adds workspace and integration operations.
+      - ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}:/projects:ro
+    networks: [ho-control]
+
+networks:
+  ho-data: {internal: true}
+  ho-control: {internal: true}
+  ho-edge: {internal: true}
+
+volumes:
+  pg-data:
+  artifacts:
+
+secrets:
+  ho_owner_db_password: {file: ./secrets/ho_owner_db_password}
+  ho_app_db_password: {file: ./secrets/ho_app_db_password}
+  ho_redis_password: {file: ./secrets/ho_redis_password}
+  ho_plugin_token: {file: ./secrets/ho_plugin_token}
+  ho_operator_token: {file: ./secrets/ho_operator_token}
+  ho_git_service_token: {file: ./secrets/ho_git_service_token}

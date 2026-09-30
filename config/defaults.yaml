@@ -1,0 +1,78 @@
+# Platform defaults (ARCHITECTURE.md section 9). Machine profiles override these.
+# Schema: schemas/platform.schema.json. Never put secrets in this file.
+version: 1
+
+platform:
+  # Bumped whenever hard-policy behavior changes; recorded in approvals and manifests.
+  policy_version: "2026.09.1"
+  # Host directory that contains registered projects (the host view of the git-service mount).
+  projects_root_host: /path/to/HermesProjects
+  # Principals allowed to decide approvals (SECURITY_MODEL.md section 6.1).
+  approvers:
+    - host-cli:operator
+  approval_ttl_hours:
+    default: 72
+    MERGE: 72
+    PROJECT_READY: 168
+
+machine:
+  name: generic
+  max_agent_workers: 2
+  starting_mix: {claude: 1, codex: 1}
+  max_execution_minutes: 240
+  resource_profiles:
+    LIGHT: {cpus: 1, memory_gb: 2}
+    NORMAL: {cpus: 2, memory_gb: 4}
+    HEAVY: {cpus: 4, memory_gb: 8}
+  runners:
+    test: {cpus: 2, memory_gb: 4}
+    browser: {cpus: 2, memory_gb: 4}
+
+scheduler:
+  poll_seconds: 5
+  # A waiting task gains one priority level per this many minutes (anti-starvation).
+  aging_minutes: 30
+
+# Budget profile limits (MASTER_SPEC section 70). null = not limited by that counter.
+budgets:
+  SMALL: {runtime_minutes: 120, agent_launches: 6, retries: 2, review_cycles: 2, subtasks: 3, provider_usage_units: null}
+  NORMAL: {runtime_minutes: 480, agent_launches: 20, retries: 6, review_cycles: 4, subtasks: 10, provider_usage_units: null}
+  LARGE: {runtime_minutes: 1440, agent_launches: 60, retries: 15, review_cycles: 8, subtasks: 30, provider_usage_units: null}
+  thresholds: {warning_percent: 70, optimize_percent: 85}
+
+# Defaults layer below .hermes/project.yaml (same shape as schemas/project.schema.json).
+project_defaults:
+  autonomy: BALANCED
+  agents:
+    allowed_providers: [claude, codex]
+    preferred: {planning: claude, implementation: codex, debugging: claude, tests: codex}
+    orchestrator_may_develop: true
+  review: {cycle_limit: 2, on_limit: ALTERNATE_DEVELOPER}
+  retries: {transient: 2, fix_attempts: 2, alternate_developer: true}
+  resources: {default_profile: NORMAL, max_profile: HEAVY}
+  network:
+    development: standard
+    testing: isolated
+    research: {official_docs: true, package_registries: true, public_github: true}
+  quality_gate:
+    tests: true
+    full_suite: true
+    build: true
+    lint: true
+    typecheck: false
+    security_checks: false
+    browser_tests: false
+    ci_checks: true
+    docs_updated: false
+    block_on_findings: [HIGH, CRITICAL]
+  budget: {profile: NORMAL}
+  expansion: {profile: NORMAL}
+  git:
+    protected_branches: [main, master]
+    branch_prefix: hermes/
+    merge_method: merge
+    require_pull_request: true
+    delete_remote_branch_after_merge: true
+  browser_tests: {enabled: false}
+  config_drift: {auto_update_trivial: false}
+  retention: {artifacts_days: 30, failed_workspace_days: 14}

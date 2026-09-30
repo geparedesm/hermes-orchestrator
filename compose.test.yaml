@@ -1,0 +1,24 @@
+# Throwaway PostgreSQL and Redis for integration tests (make test-integration).
+# Published on loopback only, with test-only credentials. Never use for real data.
+name: ho-test
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_USER: ho_test_admin
+      POSTGRES_PASSWORD: ho_test_admin
+      POSTGRES_DB: postgres
+    ports: ["127.0.0.1:55432:5432"]
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ho_test_admin"]
+      interval: 2s
+      retries: 30
+  redis:
+    image: redis:8.2-alpine@sha256:b51665e66f00759be7c3152ad5ac3c66fb2f619c13ef62dea7cc1f9914524635
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports: ["127.0.0.1:56379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30

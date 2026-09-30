@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ho-git-service"
+version = "0.1.0"
+description = "Hermes Orchestrator Git Service: the only holder of GitHub credentials and main-repository write access."
+requires-python = ">=3.12"
+dependencies = [
+  "ho-core",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.32,<1",
+]
+
+[project.scripts]
+git-service = "git_service.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/git_service"]

@@ -73,6 +73,17 @@ def main() -> int:
         else:
             failures.append(f"{example.relative_to(ROOT)} was accepted but must be rejected")
 
+    # Every machine profile must merge with defaults into a valid platform configuration.
+    sys.path.insert(0, str(ROOT / "packages" / "ho_core" / "src"))
+    from ho_core.config import load_platform_config  # noqa: E402
+
+    for profile in sorted(p.stem for p in (ROOT / "config").glob("*.yaml") if p.stem not in ("defaults", "local")):
+        try:
+            load_platform_config(ROOT / "config", profile)
+            print(f"ok      profile  config/{profile}.yaml")
+        except Exception as exc:  # noqa: BLE001 - report every failure
+            failures.append(f"config/{profile}.yaml: {exc}")
+
     for failure in failures:
         print(f"FAIL    {failure}", file=sys.stderr)
     return 1 if failures else 0
