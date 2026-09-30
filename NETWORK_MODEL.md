@@ -41,17 +41,15 @@ flowchart TB
             GS2[git-service]
         end
     end
-    subgraph Task[Per-task networks, created by agent-manager]
-        subgraph agent[ho-t-TASK-agent: internal]
-            OR[orchestrator execution]
-            DEV[developer executions]
-            REV[reviewer executions]
-            PX1[egress proxy]
+    subgraph Dynamic[Dynamic networks, created by agent-manager]
+        subgraph agent[ho-e-EXECUTION: internal, one per agent execution]
+            DEV[agent execution]
+            PX1[its egress proxy]
         end
-        subgraph proxy_out[ho-t-TASK-out: bridge]
-            PX2[egress proxy]
+        subgraph proxy_out[ho-egress: bridge, shared by proxies only]
+            PX2[egress proxies]
         end
-        subgraph svc[ho-t-TASK-svc: internal]
+        subgraph svc[ho-t-TASK-svc: internal, one per task]
             DEV2[developer executions]
             TR[test runner]
             BR[browser runner]
@@ -77,25 +75,27 @@ Nodes that appear more than once are the same container attached to several netw
 
 `agent-manager` has no Internet access. Image pulls are performed by the Docker daemon, not by the agent-manager container. `control-plane` has no Internet access. Update detection (§3, §19) runs in a component with egress. Phase 11 chooses between Git Service and a host-side operator script.
 
-## 4. Per-Task Networks
+## 4. Dynamic Networks
 
-Agent Manager creates these networks when a task first needs them and removes them when the task reaches a terminal state or its retention ends. Names include the task key. Labels (`ho.task`, `ho.project`) allow reconciliation.
+Agent Manager creates these networks on demand. Labels (`ho.task`, `ho.project`, `ho.execution`) allow reconciliation.
 
-| Network | `internal` | Members | Purpose |
-| --- | --- | --- | --- |
-| `ho-t-<task>-agent` | yes | Orchestrator, developer, and reviewer executions; the task's egress proxy | Agent executions reach the Internet only through the proxy |
-| `ho-t-<task>-out` | no | The task's egress proxy only | The proxy's route out |
-| `ho-t-<task>-svc` | yes | Developer executions (when services are needed), test runner, browser runner, ephemeral services, project Compose services | Private test services; no Internet (§51, §53) |
+| Network | `internal` | Members | Lifetime | Purpose |
+| --- | --- | --- | --- | --- |
+| `ho-e-<execution>` | yes | One agent execution and its own egress proxy | The execution | The execution reaches the Internet only through its proxy |
+| `ho-egress` | no | Egress proxies only | Shared, persistent | The proxies' route out |
+| `ho-t-<task>-svc` | yes | Executions with `test_services`, test and browser runners, ephemeral services, project Compose services | The task | Private test services; no Internet (§51, §53) |
 
-A task's networks belong to exactly one project. Two tasks never share a network, so containers of different tasks or projects cannot reach each other.
+**Change from the Phase 1 design (made in Phase 3):** the design had one agent network and one proxy per task. Executions of the same task can hold different egress grants (a reviewer is `PROVIDER_ONLY` while the developer is `STANDARD`), and a shared proxy could only enforce one policy. Each agent execution therefore gets its own internal network and its own proxy, configured from that execution's grant. The proxies share the `ho-egress` bridge; a proxy refuses private destinations, so it cannot be used to reach another proxy or anything else on that bridge.
+
+Two tasks never share an internal network, so containers of different tasks or projects cannot reach each other.
 
 The test runner and browser runner attach only to `ho-t-<task>-svc`. They have no route to the Internet, the proxy, or the host.
 
 ## 5. Egress Modes
 
-All egress from agent executions passes through the per-task egress proxy. Workers get `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` environment variables. Direct connections fail because `ho-t-<task>-agent` is internal. Tools that ignore proxy settings lose network access; this is intended.
+All egress from agent executions passes through the execution's egress proxy. Workers get `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` environment variables pointing at the proxy's IP address. Direct connections fail because `ho-e-<execution>` is internal. Workers use `127.0.0.1` as their only DNS server, so they cannot resolve external names at all; the proxy resolves destinations. Tools that ignore proxy settings lose network access; this is intended.
 
-The capability grant expresses this as `network.egress` plus a separate `network.test_services` flag, which attaches the execution to `ho-t-<task>-svc` ([schemas/capability.schema.json](schemas/capability.schema.json)).
+The capability grant expresses this as `network.egress` plus a separate `network.test_services` flag, which attaches the execution to `ho-t-<task>-svc` ([schemas/capability.schema.json](schemas/capability.schema.json)). An agent execution never has `NONE` egress: it needs at least its provider's API, so the Policy Engine raises it to `PROVIDER_ONLY`.
 
 | `network.egress` | Allowed destinations | Typical roles |
 | --- | --- | --- |
@@ -108,12 +108,14 @@ Rules enforced by the proxy in every mode:
 
 - Deny private, loopback, link-local, and unique-local ranges after DNS resolution: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, `100.64.0.0/10`, `::1/128`, `fc00::/7`, `fe80::/10`. This blocks the host, Docker Desktop's VM network, cloud metadata services, and the LAN.
 - Deny `host.docker.internal`, `gateway.docker.internal`, and other names that resolve to the ranges above.
-- Deny destinations listed as production in the project's `environments` configuration unless the execution holds an approved `PROD_READ` or `PROD_WRITE` grant.
-- Log destination host, port, bytes, and decision per execution. The control plane ingests the logs for provenance (§54) and audit.
+- Deny destinations listed as production in the project's `environments` configuration. (Unlocking them with an approved `PROD_READ`/`PROD_WRITE` grant arrives with environment access in Phase 4; until then production hosts are always denied.)
+- Accept only `CONNECT host:443`. Plain HTTP requests, other ports, and IP-literal destinations are refused.
+- Connect to the address that was checked; the name is not resolved twice, so DNS rebinding cannot redirect the connection.
+- Log destination host, port, bytes, and decision per execution. Agent Manager returns these logs with the execution's output and the control plane stores them as the `egress.jsonl` artifact for provenance (§54) and audit.
 
 Provider API endpoints are not hardcoded here. Phase 4 records them from each provider's official network documentation for the pinned CLI version. They are kept in the machine profile, not in project configuration.
 
-The proxy image and its allowlist mechanism are chosen in Phase 3 (OI-05). The proxy must support HTTP CONNECT, hostname allowlists, IP checks after resolution (to prevent DNS rebinding), and structured logs. It runs non-root with the same container baseline as workers (SECURITY_MODEL §8.1).
+**OI-05 (resolved in Phase 3):** the proxy is a small purpose-built service, [services/egress-proxy](services/egress-proxy/) (about 200 lines, standard library only), rather than a general proxy such as Squid. It implements exactly the rules above and nothing else, which keeps its behavior easy to review and test. It runs non-root with the same container baseline as workers (SECURITY_MODEL §8.1), 64 MiB of memory, and 0.25 CPU.
 
 ## 6. Access Matrix
 
@@ -162,7 +164,7 @@ Agent Manager runs Compose through its own Docker access. The project's Compose 
 
 ## 10. Verification Plan
 
-Phase 3 implements these as automated tests; Phase 11 reruns them on both platforms.
+Phase 3 implements these as automated tests; Phase 11 reruns them on both platforms. Phase 3 results (macOS, Docker Desktop): N01–N06 and N08 pass (`make test-docker`, `make smoke-phase3`); N07 needs project Compose support (Phase 6); N09 needs the Hermes service (Phase 9). See [docs/validation/phase-3.md](docs/validation/phase-3.md).
 
 | ID | Test | Expected |
 | --- | --- | --- |
@@ -173,5 +175,5 @@ Phase 3 implements these as automated tests; Phase 11 reruns them on both platfo
 | N05 | From the test runner, resolve and connect to a public domain | Fails |
 | N06 | From task A's container, reach task B's container or services | Fails |
 | N07 | Project Compose override with `ports:` or `network_mode: host` | Rejected before start |
-| N08 | DNS queries for arbitrary external names from internal networks | Measured. Docker's embedded DNS may forward queries, which is a potential exfiltration channel. If it does, Phase 3 must add a mitigation (for example, a DNS configuration on internal networks that resolves only local names) or record the residual risk. |
+| N08 | DNS queries for arbitrary external names from internal networks | Fails. Workers use `127.0.0.1` as their DNS server, so Docker's embedded resolver has nowhere to forward external names (verified in Phase 3); names on attached internal networks still resolve. |
 | N09 | Host port scan of published ports | Only loopback-bound Hermes ports |

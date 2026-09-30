@@ -8,20 +8,23 @@ COMPOSE := docker compose
 TEST_DB := postgresql://ho_test_admin:ho_test_admin@127.0.0.1:55432/postgres
 TEST_REDIS := redis://127.0.0.1:56379/15
 
-.PHONY: help venv secrets up down ps logs cli test test-unit test-integration test-env test-env-down smoke lint validate-schemas
+.PHONY: help venv secrets images up down ps logs cli test test-unit test-integration test-docker test-env test-env-down smoke smoke-phase3 lint validate-schemas
 
 help:
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
 venv: ## Create the local Python 3.12 environment for development and tests
 	$(PYTHON) -m venv $(VENV)
-	$(VENV)/bin/pip install -c requirements.lock -e packages/ho_core -e services/control-plane -e services/git-service
+	$(VENV)/bin/pip install -c requirements.lock -e packages/ho_core -e services/control-plane -e services/git-service -e services/agent-manager -e services/egress-proxy
 	$(VENV)/bin/pip install pytest ruff
 
 secrets: ## Generate service passwords and tokens in ./secrets (idempotent)
 	./scripts/init-secrets.sh
 
-up: secrets ## Build and start the platform (needs .env)
+images: ## Build execution images and pin them in config/images.lock.yaml
+	./scripts/build-images.sh
+
+up: secrets images ## Build and start the platform (needs .env)
 	$(COMPOSE) up -d --build --wait
 
 down: ## Stop the platform (keeps data volumes)
@@ -50,8 +53,14 @@ test-env-down: ## Remove the integration test containers
 test-integration: test-env ## Run integration tests against real PostgreSQL and Redis
 	HO_TEST_DATABASE_URL=$(TEST_DB) HO_TEST_REDIS_URL=$(TEST_REDIS) $(VENV)/bin/pytest tests/integration -q -p no:warnings
 
-smoke: secrets ## End-to-end Phase 2 smoke test on a throwaway Compose stack
+test-docker: images ## Agent Manager tests against the real Docker daemon (needs Internet for egress tests)
+	HO_TEST_DOCKER=1 $(VENV)/bin/pytest tests/docker -q -p no:warnings
+
+smoke: secrets images ## End-to-end Phase 2 smoke test on a throwaway Compose stack
 	./scripts/smoke-phase2.sh
+
+smoke-phase3: secrets images ## End-to-end Phase 3 smoke test (real workers)
+	./scripts/smoke-phase3.sh
 
 lint: ## Static checks
 	$(VENV)/bin/ruff check packages services tests migrations scripts

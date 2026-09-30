@@ -18,7 +18,7 @@ FAILURES=0
 
 dc() { docker compose -p "$PROJECT" --env-file "$ENV_FILE" "$@"; }
 ho() { dc exec -T control-plane ho "$@"; }
-field() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1], {}, {'d': d}))" "$1"; }
+field() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1], {'d': d}))" "$1"; }
 check() {  # check <description> <expected> <actual>
   if [[ "$2" == "$3" ]]; then echo "  ok    $1"; else echo "  FAIL  $1: expected '$2', got '$3'"; FAILURES=$((FAILURES + 1)); fi
 }

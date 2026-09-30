@@ -8,7 +8,7 @@ A local-first multi-agent development platform built around the official [Hermes
 
 ## Current status
 
-Phase 2 (minimal control plane) is implemented: project registration and read-only onboarding, configuration proposals with hard-policy enforcement, approvals, tasks with deterministic states, a scheduler queue, and an operator CLI. **No agent executes work yet.** Workers arrive in Phases 3–4 and Hermes integration in Phase 9. Evidence: [docs/validation/phase-2.md](docs/validation/phase-2.md).
+Phases 2–3 are implemented: project registration and read-only onboarding, configuration proposals with hard-policy enforcement, approvals, tasks with deterministic states, a scheduler queue, an operator CLI, and the **Agent Manager**, which runs commands in isolated, resource-limited worker containers with per-execution egress control. **Claude Code and Codex do not run yet** (Phase 4), and Hermes integration arrives in Phase 9. Evidence: [docs/validation/phase-2.md](docs/validation/phase-2.md), [docs/validation/phase-3.md](docs/validation/phase-3.md).
 
 This README grows with each phase. The full operations guide required by the specification is completed in Phase 11.
 
@@ -17,7 +17,7 @@ This README grows with each phase. The full operations guide required by the spe
 | | macOS (Apple Silicon) | Linux |
 | --- | --- | --- |
 | Docker | Docker Desktop with Compose v2 | Docker Engine with the Compose v2 plugin |
-| Memory for Docker | 8 GB minimum now; 16 GB+ recommended once workers exist (Settings → Resources) | Size to your workload |
+| Memory for Docker | 16 GB+ recommended (Settings → Resources). With 8 GB, Agent Manager refuses executions that do not fit | Size to your workload |
 | Tools | `git`, `openssl`, `make`; `python3.12` for development | same |
 
 ## Setup
@@ -46,7 +46,7 @@ make up
 docker compose exec control-plane ho health
 ```
 
-Review `config/linux.yaml` and set worker limits for your hardware first. `make up` creates random service passwords and tokens in `./secrets/` (never committed).
+Review `config/linux.yaml` and set worker limits for your hardware first, and set `HO_DOCKER_GID` in `.env` to your Docker socket's group (`getent group docker | cut -d: -f3`). `make up` creates random service passwords and tokens in `./secrets/` (never committed) and builds and pins the execution images.
 
 ## First project
 
@@ -69,6 +69,22 @@ docker compose exec control-plane ho task list
 docker compose exec control-plane ho task queue
 ```
 
+## Isolated executions (Phase 3)
+
+Until the orchestrator exists, the operator can run commands in workers directly. Workspaces must already exist under the project's `.hermes/worktrees/` (Git Service creates them from Phase 5).
+
+```bash
+mkdir -p ~/HermesProjects/my-app/.hermes/worktrees/w1
+
+# A test runner: no network, no provider credential
+docker compose exec control-plane ho execution run T-1 'id; ls /workspace' --workspace .hermes/worktrees/w1 --workspace-access READ
+
+# Egress through the execution's proxy (agent roles need a provider credential volume, set up in Phase 4)
+docker compose exec control-plane ho execution list --task T-1
+docker compose exec control-plane ho execution show <execution-id>   # state, grant, artifacts
+docker compose exec control-plane ho workers                          # capacity and managed containers
+```
+
 If the repository has its own `.hermes/project.yaml`, the scan uses it (validated against [schemas/project.schema.json](schemas/project.schema.json)). An untracked `.hermes.local.yaml` can tighten settings but never weaken them.
 
 ## Development
@@ -76,11 +92,13 @@ If the repository has its own `.hermes/project.yaml`, the scan uses it (validate
 ```bash
 make venv              # Python 3.12 environment with all packages in editable mode
 make test              # unit tests + integration tests (starts throwaway PostgreSQL/Redis)
-make smoke             # end-to-end test on a throwaway Compose stack
+make test-docker       # Agent Manager against the real Docker daemon (needs Internet)
+make smoke             # Phase 2 end-to-end test on a throwaway Compose stack
+make smoke-phase3      # Phase 3 end-to-end test with real workers
 make lint validate-schemas
 make test-env-down     # remove the integration test containers
 ```
 
 ## Repository layout
 
-See [ARCHITECTURE.md §12](ARCHITECTURE.md#12-repository-layout). The main pieces today are `packages/ho_core` (shared contracts and policy), `services/control-plane`, `services/git-service`, `migrations/`, `schemas/`, and `config/`.
+See [ARCHITECTURE.md §12](ARCHITECTURE.md#12-repository-layout). The main pieces today are `packages/ho_core` (shared contracts and policy), `services/control-plane`, `services/git-service`, `services/agent-manager`, `services/egress-proxy`, `workers/agent-base`, `migrations/`, `schemas/`, and `config/`.

@@ -55,7 +55,7 @@ erDiagram
 
 ## 3. Tables
 
-Migration `0001` (Phase 2) creates `projects`, `project_configs`, `onboarding_scans`, `artifacts`, `tasks`, `task_relationships`, `budgets`, `approvals`, `policy_decisions`, `events`, `notifications`, `idempotency_keys`, and `operation_intents`. Later phases add the remaining tables with their own migrations.
+Migration `0001` (Phase 2) creates `projects`, `project_configs`, `onboarding_scans`, `artifacts`, `tasks`, `task_relationships`, `budgets`, `approvals`, `policy_decisions`, `events`, `notifications`, `idempotency_keys`, and `operation_intents`. Migration `0002` (Phase 3) adds `executions` and `capability_grants` and links `policy_decisions` to executions. In `0002`, `executions` also stores the exact request sent to Agent Manager (`spec`, which contains no secrets), `dispatch_attempts`, and failure classes `CAPACITY`, `POLICY`, `TIMEOUT`, `LOST`, and `CANCELLED` in addition to the adapter classes; subtask references arrive with the DAG in Phase 7. Later phases add the remaining tables with their own migrations.
 
 Conventions: primary keys are UUIDv7 (`id`) unless stated. Human-facing identifiers (`T-284`, `T-284-02`) are unique per installation and generated from sequences. All timestamps are `timestamptz` in UTC. `jsonb` payloads have a JSON Schema in `schemas/` or in the Phase 2 contract package. Every mutable row has `created_at`, `updated_at`, and `version` (optimistic concurrency).
 

@@ -16,12 +16,14 @@ from pydantic import BaseModel, Field
 from .approvals import Approvals
 from .auth import PRINCIPAL_HEADER, Authenticator, Identity, Principal
 from .context import Context, UnitOfWork
-from .errors import ApiError, Conflict
+from .agentmgr import AgentManagerError
+from .errors import ApiError, Conflict, Forbidden, UpstreamError
 from .idempotency import run_idempotent
 from .projects import Projects
+from .executions import BudgetExhausted, ExecutionRequest, Executions
 from .scheduler import Scheduler
 from .tasks import Tasks
-from .views import approval_view, config_view, project_view
+from .views import approval_view, config_view, execution_view, project_view
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ class Services:
     projects: Projects
     tasks: Tasks
     scheduler: Scheduler
+    executions: Executions
     run_scheduler: bool = True
 
 
@@ -41,8 +44,9 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     approvals = Approvals(ctx)
     projects = Projects(ctx, approvals)
     tasks = Tasks(ctx, projects, approvals)
-    scheduler = Scheduler(ctx, tasks, approvals, dispatcher)
-    return Services(ctx, auth, approvals, projects, tasks, scheduler, run_scheduler)
+    executions = Executions(ctx, tasks)
+    scheduler = Scheduler(ctx, tasks, approvals, dispatcher, executions)
+    return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler)
 
 
 # ------------------------------------------------------------------ request models
@@ -57,6 +61,22 @@ class RegisterProject(BaseModel):
 class Decision(BaseModel):
     decision: Literal["APPROVE", "REJECT"]
     note: str | None = Field(default=None, max_length=1000)
+
+
+class CreateExecution(BaseModel):
+    role: Literal["ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER", "BROWSER"]
+    command: list[str] = Field(min_length=1, max_length=64)
+    provider: Literal["claude", "codex"] | None = None
+    image: str = Field(default="agent-base", pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    workspace: str | None = Field(default=None, description=".hermes/worktrees/<name> inside the project")
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    resource_profile: Literal["LIGHT", "NORMAL", "HEAVY"] | None = None
+    timeout_minutes: int = Field(default=60, ge=1, le=1440)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class StopExecution(BaseModel):
+    reason: str = Field(default="stopped by operator", max_length=300)
 
 
 class CommandCheck(BaseModel):
@@ -111,6 +131,8 @@ def create_app(services: Services) -> FastAPI:
     @app.get("/health/ready")
     def ready() -> JSONResponse:
         checks = {"postgres": ctx.db.ping(), "redis": ctx.coordinator.ping(), "git_service": ctx.git.ping()}
+        if ctx.agents is not None:
+            checks["agent_manager"] = ctx.agents.ping()
         # Redis is not authoritative: its loss degrades, it does not fail readiness.
         healthy = checks["postgres"] and checks["git_service"]
         body = {"status": "ok" if healthy and checks["redis"] else "degraded" if healthy else "unavailable", "checks": checks}
@@ -193,6 +215,63 @@ def create_app(services: Services) -> FastAPI:
 
     for action in ("pause", "resume", "cancel", "retry"):
         app.post(f"/v1/tasks/{{key}}/{action}", name=f"{action}_task")(task_command(action))
+
+    # ------------------------------------------------------------ executions
+
+    @app.post("/v1/tasks/{key}/executions", status_code=201)
+    def create_execution(key: str, body: CreateExecution, who_identity: Identity = Depends(identity),
+                         who: Principal = Depends(principal), idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        # Phase 3: operators start executions by hand to exercise Agent Manager. From Phase 4/7
+        # the orchestrator requests them through accepted action proposals instead.
+        if who_identity.name != "operator":
+            raise Forbidden("only the operator can start executions directly")
+        request = ExecutionRequest(**body.model_dump())
+
+        def command(uow: UnitOfWork):
+            row = services.executions.request(uow, principal=who, task_key=key, req=request)
+            return 201, execution_view(row)
+        try:
+            return idempotent(idempotency_key, who, {"op": "execution", "task": key, **body.model_dump()}, command)
+        except BudgetExhausted as exc:
+            services.executions.pause_for_budget(key, str(exc))
+            raise
+
+    @app.get("/v1/executions")
+    def list_executions(_: Identity = Depends(identity), task: str | None = None, state: str | None = None) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return {"executions": [execution_view(r) for r in services.executions.list(uow, task=task, state=state)]}
+
+    @app.get("/v1/executions/{execution_id}")
+    def get_execution(execution_id: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            row = services.executions.get(uow, execution_id)
+            return execution_view(row, grant=services.executions.grant(uow, row["id"]))
+
+    @app.post("/v1/executions/{execution_id}/stop")
+    def stop_execution(execution_id: str, body: StopExecution, who: Principal = Depends(principal),
+                       idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            return 200, execution_view(services.executions.stop(uow, execution_id, actor=who.value, reason=body.reason))
+        return idempotent(idempotency_key, who, {"op": "stop", "id": execution_id, **body.model_dump()}, command)
+
+    @app.post("/v1/executions/{execution_id}/replace", status_code=201)
+    def replace_execution(execution_id: str, body: StopExecution, who_identity: Identity = Depends(identity),
+                          who: Principal = Depends(principal), idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        if who_identity.name != "operator":
+            raise Forbidden("only the operator can replace executions directly")
+
+        def command(uow: UnitOfWork):
+            return 201, execution_view(services.executions.replace(uow, execution_id, principal=who, reason=body.reason))
+        return idempotent(idempotency_key, who, {"op": "replace", "id": execution_id, **body.model_dump()}, command)
+
+    @app.get("/v1/workers")
+    def workers(_: Identity = Depends(identity)) -> dict[str, Any]:
+        if ctx.agents is None:
+            raise UpstreamError("agent-manager is not configured")
+        try:
+            return {"capacity": ctx.agents.capacity(), "managed": ctx.agents.managed()}
+        except AgentManagerError as exc:
+            raise UpstreamError(str(exc)) from exc
 
     @app.get("/v1/queue")
     def queue(_: Identity = Depends(identity)) -> dict[str, Any]:

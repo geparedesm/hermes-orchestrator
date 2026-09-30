@@ -104,7 +104,7 @@ The human talks to Hermes. Hermes talks to the control plane only through the pl
 | --- | --- | --- | --- | --- |
 | `hermes` | Official `nousresearch/hermes-agent`, pinned by digest after Phase 2 validation | Hermes state, channel credentials, the plugin | Docker socket, project mounts, GitHub credentials, provider sessions of managed workers | Upstream component with its own agent runtime and shell tools. |
 | `control-plane` | Built from `services/control-plane` | PostgreSQL/Redis credentials, service tokens for Agent Manager and Git Service, the webhook HMAC key, the artifact volume | Docker socket, GitHub credentials, provider session contents | Business logic; runs no model-controlled code. |
-| `agent-manager` | Built from `services/agent-manager` | Docker socket (read/write), provider credential **volume names** (not contents), read-only access to the project secrets directory to deliver granted secrets | Database credentials, GitHub credentials | Docker access is root-equivalent; kept in the smallest possible codebase. |
+| `agent-manager` | Built from `services/agent-manager` | Docker socket (read/write, through the socket's group; the process is not root), provider credential **volume names** (not contents), read-only access to the projects root (path validation only) and, from Phase 4, the project secrets directory | Database credentials, GitHub credentials | Docker access is root-equivalent; kept in the smallest possible codebase. |
 | `git-service` | Built from `services/git-service` | `gh` configuration volume, read/write bind mount of the projects root | Docker socket, database credentials | GitHub credential and main-repository write access must be unreachable from model-controlled code. |
 | `postgres` | Official PostgreSQL, pinned | Durable execution state | — | Standard dependency. |
 | `redis` | Official Redis, pinned | Transient coordination data | Anything not reconstructable | Standard dependency. |
@@ -272,6 +272,8 @@ Callable only by the control plane (service token; mTLS optional later). Every r
 | `stream_events(id)` / `collect_output(id)` | Stdout events and output directory contents. |
 
 Agent Manager re-checks hard invariants independently of the Policy Engine (SECURITY_MODEL §8). Its state is the set of labeled Docker objects, so it can be restarted without losing information.
+
+Implemented routes (Phase 3): `POST /v1/executions`, `GET /v1/executions/{id}`, `POST /v1/executions/{id}/stop`, `POST /v1/executions/{id}/collect`, `DELETE /v1/executions/{id}`, `DELETE /v1/tasks/{task}/environment`, `GET /v1/managed`, `GET /v1/capacity`. Requests name images symbolically (`agent-base`); Agent Manager resolves them to the local image IDs pinned in `config/images.lock.yaml` (written by `make images`). Callers cannot pass Docker options: every mount, network, and security setting is built by Agent Manager from the grant. A background reaper stops workers whose grant expired even if the control plane is down. Test environments with ephemeral services (`create_environment`) arrive in Phase 6.
 
 ### 7.4 Git Service API (private)
 
@@ -453,7 +455,7 @@ Details belong to Phase 8 (`docs/recovery.md`). The architecture guarantees the 
 | OI-02 | Confirm official Claude Code and Codex settings that restrict repository-defined hooks, MCP servers, and project configuration in non-interactive mode (D05). | 4 |
 | OI-03 | Confirm credential refresh behavior when several containers share one provider identity volume; otherwise use one identity per concurrent slot or serialize (D06). | 4 |
 | OI-04 | Confirm Dashboard plugin route authentication with unauthorized requests (D08). | 9 |
-| OI-05 | Choose the egress proxy image and allowlist mechanism for restricted networks (NETWORK_MODEL §5). | 3 |
+| OI-05 | Choose the egress proxy image and allowlist mechanism for restricted networks (NETWORK_MODEL §5). **Resolved in Phase 3:** purpose-built CONNECT-only proxy (`services/egress-proxy`), one per agent execution. | 3 |
 | OI-06 | Measure the disk and time cost of isolated clones on large repositories; evaluate the read-only `--reference` optimization. | 5 |
 | OI-07 | Validate the pinned Hermes image boots with the plugin on both architectures, and that SQLite state uses a container-native volume (D07, D09). **Phase 2 result:** the pinned index digest boots on `linux/arm64` and on `linux/amd64` (emulated) with a named volume at `HERMES_HOME=/opt/data`, reports `v0.21.5 (2026.9.24) · upstream f97608f1`, and its OCI revision label matches the inspected commit. Booting *with the plugin* moves to Phase 9, when the plugin exists. See [docs/validation/phase-2.md](docs/validation/phase-2.md). | 2, 9 |
 | OI-08 | Decide whether a read-only projection into the native Kanban board is worth adding after v1 (AD-02). | 10 |

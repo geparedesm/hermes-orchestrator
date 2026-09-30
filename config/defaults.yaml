@@ -20,6 +20,11 @@ machine:
   max_agent_workers: 2
   starting_mix: {claude: 1, codex: 1}
   max_execution_minutes: 240
+  # Memory kept free for platform services; Agent Manager refuses executions beyond the rest.
+  docker_memory_reserve_gb: 2
+  # Provider API hostnames for PROVIDER_ONLY/ALLOWLIST egress. Recorded in Phase 4 from each
+  # provider's official network documentation for the pinned CLI version; empty until then.
+  provider_domains: {claude: [], codex: []}
   resource_profiles:
     LIGHT: {cpus: 1, memory_gb: 2}
     NORMAL: {cpus: 2, memory_gb: 4}

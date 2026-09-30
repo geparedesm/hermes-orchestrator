@@ -212,6 +212,10 @@ Agent Manager enforces these invariants regardless of what the Policy Engine sen
 | Resources | CPU, memory, PIDs, and ephemeral storage limits from the resource profile; wall-clock timeout from the grant. |
 | Networks | Only the networks in the execution's network plan (NETWORK_MODEL §4). |
 | Labels | `ho.task`, `ho.execution`, `ho.project`, `ho.role`, `ho.epoch` on every object for reconciliation. |
+| DNS | Workers use `127.0.0.1` as DNS server: no external name resolution; the egress proxy resolves destinations. |
+| Workspace paths | Only `<project>/.hermes/worktrees/<name>`; every path component below the projects root is checked for symbolic links before the bind mount is requested. |
+
+Implementation notes (Phase 3): Agent Manager runs as a non-root user with the Docker socket's group; images are resolved from a pinned local allowlist; requests that include secrets are rejected until the Secrets Broker exists (Phase 4); provider credential volumes must exist and carry the `ho.credential` label, otherwise the launch fails as `AUTH_REQUIRED`. The container baseline is verified against real containers by `tests/docker`.
 
 ### 8.2 Role grants
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import uvicorn
 from ho_core.logs import configure
 
+from .agentmgr import AgentManagerClient
 from .app import build_services, create_app
 from .artifacts import ArtifactStore
 from .auth import Authenticator
@@ -26,6 +27,8 @@ def build_app(settings: Settings):
         coordinator=Coordinator(settings.redis_url),
         artifacts=ArtifactStore(settings.artifact_dir),
         git=GitServiceClient(settings.git_service_url, settings.git_service_token),
+        agents=(AgentManagerClient(settings.agent_manager_url, settings.agent_manager_token or "")
+                if settings.agent_manager_url else None),
     )
     services = build_services(ctx, Authenticator(settings.tokens), run_scheduler=settings.run_scheduler)
     return create_app(services)
