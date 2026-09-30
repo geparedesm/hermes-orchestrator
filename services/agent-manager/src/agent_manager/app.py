@@ -123,7 +123,15 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
 
     @app.delete("/v1/tasks/{task}/environment", dependencies=[Depends(authorized)])
     def remove_environment(task: str) -> dict[str, Any]:
-        return {"networks_removed": ops.remove_task_environment(task)}
+        return {"removed": ops.remove_task_environment(task)}
+
+    @app.get("/v1/credentials", dependencies=[Depends(authorized)])
+    def credentials() -> dict[str, Any]:
+        return {"credentials": ops.credentials()}
+
+    @app.get("/v1/images", dependencies=[Depends(authorized)])
+    def images_view() -> dict[str, Any]:
+        return ops.images()
 
     @app.get("/v1/managed", dependencies=[Depends(authorized)])
     def managed() -> dict[str, Any]:

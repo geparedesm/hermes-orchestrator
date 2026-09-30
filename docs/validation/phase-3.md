@@ -2,6 +2,7 @@
 
 **Date:** 2026-09-30  
 **Machine:** MacBook Pro (Apple Silicon), Docker Desktop 29.4.0, `linux/arm64`, Docker VM with 12 CPUs and 8 GB RAM  
+**Status:** Approved by Gabriel Paredes on 2026-09-30 (PR #4)  
 **Scope:** PHASES.md Phase 3 and its completion criteria: *workers can be managed through the private authenticated API, and forbidden mounts, networks, and capabilities are denied.*
 
 ## What was built

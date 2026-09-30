@@ -171,6 +171,19 @@ No autonomy profile, project configuration, or task override can remove these (�
 
 **Residual risk R-01:** the provider CLI needs its session inside the container where the model also runs shell commands, so a malicious or injected model could read and exfiltrate its own provider session. Mitigations: a dedicated identity used only by the platform (revocable independently of the user's personal login), no other credentials in the container, network restrictions when a project requires them, egress audit, and short container lifetimes. Phase 4 must verify whether the CLIs offer a supported way to keep credentials outside the command sandbox (OI-02, OI-03). If they do, it becomes the default.
 
+**Phase 4 result for R-01:** neither pinned CLI documents a way to keep its credential outside the process that runs model commands. Claude Code's options that isolate commands (its own sandbox) and Codex's (bubblewrap) both need kernel features that a container without capabilities does not have; Codex's documentation names `danger-full-access` inside a container as the option when the container is the security boundary, and warns that credentials inside it can then be exfiltrated. R-01 therefore stays open, with these additional mitigations: the advisory classifier flags any command that touches `/run/ho-credentials` (rule CMD-H11, surfaced as a `COMMAND_HIGH_RISK` event), and `PROVIDER_ONLY` egress limits where a stolen credential could be sent.
+
+**Implementation (Phase 4):**
+
+| Aspect | Claude Code | Codex CLI |
+| --- | --- | --- |
+| Bootstrap | `make auth-claude IDENTITY=<id>` runs the documented `claude setup-token` (subscription token for scripts); the operator pastes the printed token, which is saved as `oauth_token` (mode 0600) and verified with a one-turn request. | `make auth-codex IDENTITY=<id>` runs the documented `codex login --device-auth` with file storage and ChatGPT login forced; `auth.json` (mode 0600) is saved. |
+| Mount | `/run/ho-credentials/claude`, read-only | `/run/ho-credentials/codex`, read-write |
+| Use | The runner exports `CLAUDE_CODE_OAUTH_TOKEN`; the configuration directory is a fresh in-memory directory per execution. | The runner copies `auth.json` into a fresh in-memory `CODEX_HOME`; a refreshed login is written back under a file lock only if the stored copy is unchanged. |
+| Expiry | Token lifetime one year (documented). A 401 is classified `AUTH`. | Refreshed during use. A 401 is classified `AUTH`. |
+
+After `AUTH`, the identity's reference is `AUTH_REQUIRED`, the task waits in `AUTH_REQUIRED` (attention notification), and `ho auth ready <provider>` (run automatically at the end of `make auth-<provider>`) marks it `READY`, resumes the waiting tasks, and continues each interrupted execution once: from its provider session when one was captured, otherwise by running the assignment again. The login containers use the pinned worker image with only the credential volume mounted and the default network (the login needs the provider's website). `HO_PROVIDER_IDENTITY` selects the identity a stack uses; the smoke tests use throwaway identities so they never touch the operator's login.
+
 ### 7.2 GitHub credentials
 
 - `gh auth login` runs once via a host operator command in a git-service bootstrap container, storing configuration in the `gh-config` volume (§40).
@@ -185,6 +198,8 @@ No autonomy profile, project configuration, or task override can remove these (�
 - A grant lists secret references. Agent Manager materializes only those secrets as files in a per-execution tmpfs mount; environment variables are used only when a tool requires them.
 - Agent Manager, which already holds the delivered values, replaces them in everything it collects from the execution (stdout events and output files) before forwarding. The control plane then applies generic token and credential patterns to all ingested output, artifacts, events, and error messages.
 - Production secrets require `ENVIRONMENT_ACCESS` approval every time; they are never granted to test runners or reviewers.
+
+Implementation (Phase 4): the store is `HO_PROJECT_SECRETS_HOST` (default `./project-secrets`, created with mode 0700 by `make secrets`), one file per secret at `<project>/<environment>/<NAME>`, mounted read-only at `/var/lib/ho/project-secrets` in agent-manager only. On Linux the files must be readable by UID 10003. The Policy Engine grants references only for secrets declared in the project configuration, for the granted environments, and for roles allowed to hold secrets. Agent Manager reads a value only when the container starts: file delivery writes it into an in-memory `/run/ho/secrets` mount (mode 0600, owned by the worker) through a short exec process whose environment carries the value, and the command waits until delivery finishes (`ho-wait-secrets`); `delivery: env` in the project configuration sets an environment variable instead. At collection, Agent Manager replaces each delivered value in logs and output files with `[REDACTED:<NAME>]`. Secret values never appear in the execution spec stored in PostgreSQL, the container's command line, or its image. A missing secret fails the launch as a policy error.
 
 ### 7.4 Environment access
 
@@ -215,7 +230,7 @@ Agent Manager enforces these invariants regardless of what the Policy Engine sen
 | DNS | Workers use `127.0.0.1` as DNS server: no external name resolution; the egress proxy resolves destinations. |
 | Workspace paths | Only `<project>/.hermes/worktrees/<name>`; every path component below the projects root is checked for symbolic links before the bind mount is requested. |
 
-Implementation notes (Phase 3): Agent Manager runs as a non-root user with the Docker socket's group; images are resolved from a pinned local allowlist; requests that include secrets are rejected until the Secrets Broker exists (Phase 4); provider credential volumes must exist and carry the `ho.credential` label, otherwise the launch fails as `AUTH_REQUIRED`. The container baseline is verified against real containers by `tests/docker`.
+Implementation notes (Phase 3): Agent Manager runs as a non-root user with the Docker socket's group; images are resolved from a pinned local allowlist; requests that include secrets are rejected until the Secrets Broker exists (Phase 4); provider credential volumes must exist and carry the `ho.credential` label, otherwise the launch fails as `AUTH_REQUIRED`. The container baseline is verified against real containers by `tests/docker`. Phase 4 adds: secrets are delivered as described in §7.3; a provider image (`claude-*`, `codex-*`) runs only for an execution holding that provider's credential, and runners cannot use provider images; each provider's credential volume is mounted only at its own path.
 
 ### 8.2 Role grants
 
@@ -244,7 +259,7 @@ Repository content is attacker-controllable. Rules:
 2. **The main repository's `.git` is never writable from a container.** Isolated clones (AD-06) keep hooks and configuration of the main repository out of reach.
 3. **Git Service treats task clones as hostile.** It only fetches from them with hooks disabled (`core.hooksPath` pointed to an empty directory), `core.fsmonitor` off, `protocol.file.allow` restricted to the clone path, and no porcelain commands (`status`, `checkout`, `diff` with external tools) inside the clone. `safe.directory` is set per path, never `*`.
 4. **Git Service never executes repository scripts.** Builds and tests always run in runners.
-5. **Provider CLI project configuration** (`.claude/settings.json` hooks, `.mcp.json`, Codex project configuration, `AGENTS.md`, `CLAUDE.md`) executes only inside the worker container. Phase 4 must configure the pinned CLIs with managed or command-line settings that disable or restrict repository-defined hooks and MCP servers where officially supported (OI-02). Instruction files are context, not policy.
+5. **Provider CLI project configuration** (`.claude/settings.json` hooks, `.mcp.json`, Codex project configuration, `AGENTS.md`, `CLAUDE.md`) executes only inside the worker container. Phase 4 must configure the pinned CLIs with managed or command-line settings that disable or restrict repository-defined hooks and MCP servers where officially supported (OI-02). Instruction files are context, not policy. **Phase 4:** done through documented command-line options (ARCHITECTURE §7.5): Claude Code reads neither the repository's settings nor its `.mcp.json` (`--setting-sources user`), hooks are disabled, and only MCP servers passed on the command line (none) are used; Codex treats the workspace as untrusted, so the repository's `.codex/` configuration, hooks, and rules are skipped. `CLAUDE.md` and `AGENTS.md` are still read as instructions.
 6. **Onboarding is read-only.** The scan runs in a Git Service read-only mode or in an ORCHESTRATOR execution with READ only; proposals are written to artifacts and applied only after approval (§15).
 7. **Generated Compose overrides** for project services are rendered by the control plane from the project's Compose files, with hard-policy validation: no privileged services, no host mounts outside the workspace, no host networking, no Docker socket, and only the task's private networks.
 
@@ -254,7 +269,7 @@ All data returning from executions passes through the control plane's ingestion 
 
 1. Size limits per file and per execution; excess is truncated and flagged.
 2. Schema validation for `result.json`, review findings, test results, and action proposals.
-3. Event allowlist: adapters keep only known operational event types. Provider reasoning items and raw transcripts are dropped (D11, §86).
+3. Event allowlist: adapters keep only known operational event types. Provider reasoning items and raw transcripts are dropped (D11, §86). Phase 4: the raw CLI stream written to `/output/ho/` is parsed by the adapter and never stored; only the normalized `result.json` and the allowlisted `events.jsonl` (session start, commands with their advisory class, file changes, tool names, provider errors, usage) become artifacts.
 4. Redaction: literal secret values were already replaced by Agent Manager during collection (§7.3); the control plane applies generic token and credential patterns.
 5. Content hash recorded; artifacts are stored under the task's project partition.
 6. Paths in results are resolved relative to the workspace; references outside it are rejected.

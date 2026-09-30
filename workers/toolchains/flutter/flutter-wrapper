@@ -1,0 +1,20 @@
+#!/bin/bash
+# Flutter rewrites stamp and lock files in bin/cache on every run, but worker root
+# filesystems are read-only. bin/cache therefore points to /tmp/flutter-cache, which
+# this wrapper builds once per container: small files are copied (so Flutter can
+# rewrite them), large ones (the Dart SDK, engine artifacts) are linked read-only.
+set -euo pipefail
+cache=/tmp/flutter-cache
+if [[ ! -d $cache ]]; then
+  staging="$(mktemp -d /tmp/flutter-cache.XXXXXX)"
+  for entry in /opt/flutter-cache/* /opt/flutter-cache/.[!.]*; do
+    [[ -e $entry ]] || continue
+    if [[ -f $entry && $(stat -c %s "$entry") -lt 1048576 ]]; then
+      cp -p "$entry" "$staging/"
+    else
+      ln -s "$entry" "$staging/$(basename "$entry")"
+    fi
+  done
+  mv -T "$staging" "$cache" 2>/dev/null || rm -rf "$staging"  # another process won the race
+fi
+exec "/opt/flutter/bin/$(basename "$0")" "$@"

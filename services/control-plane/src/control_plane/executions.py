@@ -20,11 +20,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
+from ho_core.adapters import AgentAssignment, ExecutionResult, FailureClass, OutputBundle, adapter_for, image_suffix
 from ho_core.enums import ProjectStatus, Role, TaskState
 from ho_core.ids import uuid7
 from ho_core.policy.engine import GrantRequest, evaluate_grant
 from ho_core.redact import redact
-from ho_core.statemachine import ACTIVE_STATES
+from ho_core.statemachine import ACTIVE_STATES, TERMINAL_STATES, Trigger
 
 from .agentmgr import AgentManagerError
 from .auth import Principal
@@ -51,15 +52,23 @@ class BudgetExhausted(Conflict):
 
 @dataclass
 class ExecutionRequest:
+    """One execution. Agent roles take a `prompt` (run through the provider's adapter);
+    any role may instead run a raw `command` (operator diagnostics)."""
+
     role: str
-    command: list[str]
+    command: list[str] = field(default_factory=list)
+    prompt: str | None = None
     provider: str | None = None
-    image: str = "agent-base"
+    image: str | None = None  # default: <provider>-<toolchains> or runner-<toolchains>
     workspace: str | None = None
     capabilities: dict[str, Any] = field(default_factory=dict)
     resource_profile: str | None = None
     timeout_minutes: int = 60
     env: dict[str, str] = field(default_factory=dict)
+    secrets: list[str] = field(default_factory=list)  # secret NAMEs from the project configuration
+    resume: str | None = None  # execution whose provider session to continue
+    max_turns: int = 60
+    model: str | None = None
 
 
 class Executions:
@@ -106,7 +115,7 @@ class Executions:
     # ----------------------------------------------------------------- request
 
     def request(self, uow: UnitOfWork, *, principal: Principal, task_key: str, req: ExecutionRequest,
-                replacing: UUID | None = None) -> Row:
+                replacing: UUID | None = None, retry_of: UUID | None = None) -> Row:
         if self.ctx.agents is None:
             raise UpstreamError("agent-manager is not configured")
         task = self.tasks.get(uow, task_key, lock=True)
@@ -133,12 +142,32 @@ class Executions:
         elif req.provider not in (None, "none"):
             raise BadRequest(f"{role.value} executions do not use a provider")
         provider = req.provider if role in AGENT_ROLES else None
+        if bool(req.prompt) == bool(req.command):
+            raise BadRequest("give either a prompt (agent roles) or a command")
+        if req.prompt and role not in AGENT_ROLES:
+            raise BadRequest(f"{role.value} executions run commands; only agent roles take a prompt")
+
+        resume_row = None
+        if req.resume:
+            if not req.prompt:
+                raise BadRequest("resuming a provider session needs a prompt")
+            resume_row = self.get(uow, req.resume)
+            if resume_row["task_id"] != task["id"] or resume_row["provider"] != provider or not resume_row["agent_run"]:
+                raise BadRequest("only an agent execution of the same task and provider can be resumed")
+            if resume_row["state"] not in TERMINAL:
+                raise Conflict("the execution to resume is still active")
+            if not resume_row["provider_session_id"]:
+                raise Conflict("that execution has no provider session to resume")
+            if req.workspace is None and resume_row["workspace"]:
+                req.workspace = resume_row["workspace"][len(project["relative_path"]) + 1:]
 
         workspace = None
         if req.workspace:
             if not _WORKSPACE.match(req.workspace):
                 raise BadRequest("workspace must be .hermes/worktrees/<name>")
             workspace = f"{project['relative_path']}/{req.workspace}"
+        toolchain = image_suffix((config.get("toolchain") or {}).get("profiles") or ["generic"])
+        image = req.image or (f"{provider}-{toolchain}" if provider else f"runner-{toolchain}")
 
         self._check_capacity(uow, config, role, replacing=replacing)
         self._charge_budget(uow, task)
@@ -162,6 +191,7 @@ class Executions:
             egress=caps.get("egress", "NONE"),
             test_services=bool(caps.get("test_services", False)),
             allowed_domains=caps.get("allowed_domains", ()),
+            secrets=req.secrets,
             environments=caps.get("environments", ()),
             production=caps.get("production", "NONE"),
             tests=caps.get("tests", "NONE"),
@@ -169,12 +199,28 @@ class Executions:
             project_read=[project["slug"]] if caps.get("project_read") else (),
             resource_profile=req.resource_profile or config["resources"]["default_profile"],
             timeout_minutes=req.timeout_minutes,
+            provider_identity=self.ctx.provider_identity,
         )
         try:
             grant, reductions = evaluate_grant(grant_request, config, self.ctx.platform, now=datetime.now(timezone.utc))
         except (KeyError, ValueError) as exc:
             raise BadRequest(f"invalid capability request: {exc}") from exc
 
+        command = list(req.command)
+        inputs: dict[str, str] = {}
+        if req.prompt:
+            assert provider is not None
+            caps_granted = grant["capabilities"]
+            plan = adapter_for(provider).build_execution(AgentAssignment(
+                role=role, prompt=req.prompt, toolchain=toolchain, egress=caps_granted["network"]["egress"],
+                workspace=caps_granted["workspace"], git=caps_granted["git"],
+                resume_session=resume_row["provider_session_id"] if resume_row else None,
+                max_turns=req.max_turns, model=req.model,
+            ))
+            command, inputs = plan.command, plan.inputs
+            image = req.image or plan.image
+
+        delivery = {s["name"]: s.get("delivery", "file") for s in config.get("secrets", [])}
         production_hosts = config.get("environments", {}).get("production", {}).get("hosts", [])
         spec: dict[str, Any] = {
             "execution_id": str(execution_id),
@@ -182,12 +228,19 @@ class Executions:
             "project": project["slug"],
             "project_path": project["relative_path"],
             "role": role.value,
-            "image": req.image,
-            "command": req.command,
+            "image": image,
+            "command": command,
             "env": req.env,
             "grant": grant,
             "denied_domains": production_hosts,
+            "secret_env": [ref for ref in grant["capabilities"]["secrets"] if delivery.get(ref.rsplit("/", 1)[1]) == "env"],
         }
+        if req.prompt:
+            spec["inputs"] = inputs
+            spec["session"] = True
+            # What the agent was asked, so a replacement or resume can be rebuilt (no secrets here).
+            spec["assignment"] = {"prompt": req.prompt, "max_turns": req.max_turns, "model": req.model,
+                                  "secrets": list(req.secrets), "resume_of": str(resume_row["id"]) if resume_row else None}
         if workspace:
             spec["workspace"] = workspace
         if grant["capabilities"]["project_read"]:
@@ -196,13 +249,14 @@ class Executions:
         uow.cur.execute(
             """
             INSERT INTO executions (id, task_id, project_id, role, provider, provider_identity, image, command, workspace,
-                                    resource_profile, state, spec, requested_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'REQUESTED', %s, %s)
+                                    resource_profile, state, spec, requested_by, agent_run, resume_of)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'REQUESTED', %s, %s, %s, %s)
             RETURNING *
             """,
             (execution_id, task["id"], project["id"], role.value, provider or "none",
              grant["provider_credential"]["identity"] if grant["provider_credential"] else None,
-             req.image, jsonb(req.command), workspace, grant["resources"]["profile"], jsonb(spec), principal.value),
+             image, jsonb(command), workspace, grant["resources"]["profile"], jsonb(spec), principal.value,
+             bool(req.prompt), resume_row["id"] if resume_row else retry_of),
         )
         row = uow.cur.fetchone()
         assert row is not None
@@ -302,8 +356,7 @@ class Executions:
                 failure = _FAILURE_BY_CODE.get(exc.code, "UNKNOWN")
                 self._finish(uow, row, "FAILED", failure_class=failure, reason=exc.message)
                 if failure == "AUTH":
-                    record_event(uow.cur, "AUTH_REQUIRED", actor="agent-manager", project_id=row["project_id"], task_id=row["task_id"],
-                                 summary=exc.message, data={"execution_id": str(row["id"])}, pending=uow.events)
+                    self._auth_required(uow, row, exc.message)
             return
         with self.ctx.unit_of_work() as uow:
             row = self.get(uow, execution_id, lock=True)
@@ -360,23 +413,61 @@ class Executions:
         uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (old["task_id"],))
         task_key = uow.cur.fetchone()["key"]  # type: ignore[index]
         self.stop(uow, old["id"], actor=principal.value, reason=f"replaced: {reason}")
+        assignment = spec.get("assignment") or {}
         request = ExecutionRequest(
             role=old["role"],
-            command=list(old["command"]),
+            command=[] if old["agent_run"] else list(old["command"]),
+            prompt=assignment.get("prompt") if old["agent_run"] else None,
             provider=None if old["provider"] == "none" else old["provider"],
-            image=old["image"],
+            image=None if old["agent_run"] else old["image"],
             workspace=workspace[len(project_prefix):] if workspace else None,
             capabilities=requested,
             resource_profile=old["resource_profile"],
             timeout_minutes=max(1, round((datetime.fromisoformat(spec["grant"]["expires_at"])
                                           - datetime.fromisoformat(spec["grant"]["issued_at"])).total_seconds() / 60)),
             env=spec.get("env") or {},
+            secrets=list(assignment.get("secrets") or []),
+            max_turns=int(assignment.get("max_turns") or 60),
+            model=assignment.get("model"),
         )
         new = self.request(uow, principal=principal, task_key=task_key, req=request, replacing=old["id"])
         record_event(uow.cur, "WORKER_REPLACED", actor=principal.value, project_id=old["project_id"], task_id=old["task_id"],
                      summary=f"execution {str(old['id'])[:8]} replaced by {str(new['id'])[:8]}: {reason}",
                      data={"old": str(old["id"]), "new": str(new["id"])}, pending=uow.events)
         return new
+
+    CONTINUE_PROMPT = ("Continue the assignment from where you stopped. The previous run was interrupted because "
+                       "the model provider login had expired; it has been renewed.")
+
+    def retry_after_auth(self, uow: UnitOfWork, row: Row) -> Row | None:
+        """After re-authentication, continue an agent execution that failed with AUTH:
+        resume its provider session when one exists, otherwise run the assignment again."""
+        assignment = (row["spec"] or {}).get("assignment")
+        if not row["agent_run"] or not assignment:
+            return None
+        uow.cur.execute("SELECT requested FROM capability_grants WHERE execution_id = %s", (row["id"],))
+        requested = uow.cur.fetchone()["requested"]  # type: ignore[index]
+        uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (row["task_id"],))
+        task_key = uow.cur.fetchone()["key"]  # type: ignore[index]
+        spec = row["spec"]
+        prefix = spec["project_path"] + "/"
+        req = ExecutionRequest(
+            role=row["role"],
+            prompt=self.CONTINUE_PROMPT if row["provider_session_id"] else assignment["prompt"],
+            provider=row["provider"],
+            workspace=row["workspace"][len(prefix):] if row["workspace"] else None,
+            capabilities=requested,
+            resource_profile=row["resource_profile"],
+            timeout_minutes=max(1, round((datetime.fromisoformat(spec["grant"]["expires_at"])
+                                          - datetime.fromisoformat(spec["grant"]["issued_at"])).total_seconds() / 60)),
+            env=spec.get("env") or {},
+            secrets=list(assignment.get("secrets") or []),
+            resume=str(row["id"]) if row["provider_session_id"] else None,
+            max_turns=int(assignment.get("max_turns") or 60),
+            model=assignment.get("model"),
+        )
+        return self.request(uow, principal=Principal("control-plane", "auth-resume"), task_key=task_key, req=req,
+                            retry_of=None if row["provider_session_id"] else row["id"])
 
     def _send_stop(self, execution_id: str) -> None:
         try:
@@ -425,7 +516,34 @@ class Executions:
                     stats["timed_out"] += 1
             except AgentManagerError as exc:
                 log.warning("sync of execution %s deferred: %s", row["id"], exc)
+        stats["released"] = self._release_task_environments()
         return stats
+
+    def _release_task_environments(self) -> int:
+        """Remove service networks and session volumes of tasks that ended (their workers are gone)."""
+        with self.ctx.unit_of_work() as uow:
+            uow.cur.execute(
+                """
+                SELECT t.id, t.key FROM tasks t
+                WHERE t.state = ANY(%s) AND t.environment_released_at IS NULL
+                  AND EXISTS (SELECT 1 FROM executions e WHERE e.task_id = t.id)
+                  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = t.id AND e.state = ANY(%s))
+                LIMIT 20
+                """,
+                ([s.value for s in TERMINAL_STATES], list(ACTIVE)),
+            )
+            tasks = uow.cur.fetchall()
+        released = 0
+        for task in tasks:
+            try:
+                self.agents.remove_task_environment(task["key"])
+            except AgentManagerError as exc:
+                log.warning("environment of %s not released yet: %s", task["key"], exc)
+                continue
+            with self.ctx.unit_of_work() as uow:
+                uow.cur.execute("UPDATE tasks SET environment_released_at = now() WHERE id = %s", (task["id"],))
+            released += 1
+        return released
 
     def _finalize(self, execution_id: UUID, status: dict[str, Any]) -> None:
         collected: dict[str, Any] = {}
@@ -434,25 +552,85 @@ class Executions:
                 collected = self.agents.collect(str(execution_id))
             except AgentManagerError as exc:
                 log.warning("could not collect output of %s: %s", execution_id, exc)
+        files = {path: base64.b64decode(encoded) for path, encoded in (collected.get("files") or {}).items()}
         with self.ctx.unit_of_work() as uow:
             row = self.get(uow, execution_id, lock=True)
             if row["state"] in TERMINAL:
                 return
-            artifact_ids = self._store_outputs(uow, row, collected)
+            result: ExecutionResult | None = None
+            if row["agent_run"] and status["state"] == "exited":
+                adapter = adapter_for(row["provider"])
+                bundle = OutputBundle(files=files, logs=collected.get("logs") or "", exit_code=status.get("exit_code"),
+                                      oom_killed=bool(status.get("oom_killed")))
+                result = adapter.collect_result(bundle)
+                self._record_agent_result(uow, row, result, adapter.collect_usage(bundle).units)
+            artifact_ids = self._store_outputs(uow, row, files, collected, result)
             if status["state"] == "absent":
                 state, failure, reason = "LOST", "LOST", "container disappeared without a result"
             elif row["state"] == "STOPPING":
                 timed_out = row["failure_class"] == "TIMEOUT"
                 state, failure, reason = ("FAILED" if timed_out else "CANCELLED"), ("TIMEOUT" if timed_out else "CANCELLED"), row["failure_reason"]
+            elif result is not None:
+                if status.get("exit_code") == 0 and result.ok:
+                    state, failure, reason = "SUCCEEDED", None, None
+                else:
+                    state = "FAILED"
+                    failure = (result.failure_class or FailureClass.TASK).value
+                    reason = "out of memory" if status.get("oom_killed") else (result.error or f"exit code {status.get('exit_code')}")
             elif status.get("exit_code") == 0:
                 state, failure, reason = "SUCCEEDED", None, None
             else:
                 state, failure = "FAILED", "TASK"
                 reason = "out of memory" if status.get("oom_killed") else f"exit code {status.get('exit_code')}"
-            self._finish(uow, row, state, failure_class=failure, reason=reason, exit_code=status.get("exit_code"),
-                         artifacts=artifact_ids)
+            self._finish(uow, row, state, failure_class=failure, reason=redact(reason)[0] if reason else None,
+                         exit_code=status.get("exit_code"), artifacts=artifact_ids)
+            if failure == "AUTH":
+                self._auth_required(uow, row, reason or "provider authentication failed")
             exec_id = str(row["id"])
             uow.after_commit.append(lambda: self._remove(exec_id))
+
+    def _record_agent_result(self, uow: UnitOfWork, row: Row, result: ExecutionResult, units: dict[str, Any]) -> None:
+        clean = json.loads(redact(json.dumps(result.as_json()))[0])
+        uow.cur.execute("UPDATE executions SET provider_session_id = %s, result = %s WHERE id = %s",
+                        (result.session_id, jsonb(clean), row["id"]))
+        wall = int((datetime.now(timezone.utc) - row["started_at"]).total_seconds()) if row["started_at"] else None
+        uow.cur.execute(
+            "INSERT INTO usage_records (id, execution_id, task_id, project_id, provider, units, wall_seconds) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (execution_id) DO NOTHING",
+            (uuid7(), row["id"], row["task_id"], row["project_id"], row["provider"], jsonb(units), wall),
+        )
+        if result.ok:
+            self._set_credential(uow, row["provider"], row["provider_identity"] or "default", "READY", None)
+        if result.high_risk_commands:
+            record_event(uow.cur, "COMMAND_HIGH_RISK", actor="agent-manager", project_id=row["project_id"], task_id=row["task_id"],
+                         summary=f"{result.high_risk_commands} high-risk command(s) observed in execution {str(row['id'])[:8]} (advisory)",
+                         data={"execution_id": str(row["id"])}, pending=uow.events)
+
+    def _set_credential(self, uow: UnitOfWork, provider: str, identity: str, status: str, error: str | None) -> None:
+        uow.cur.execute(
+            """
+            INSERT INTO credential_refs (provider, identity, status, last_verified_at, last_error, updated_at)
+            VALUES (%s, %s, %s, CASE WHEN %s = 'READY' THEN now() END, %s, now())
+            ON CONFLICT (provider, identity) DO UPDATE SET status = EXCLUDED.status, last_error = EXCLUDED.last_error,
+                last_verified_at = COALESCE(EXCLUDED.last_verified_at, credential_refs.last_verified_at), updated_at = now()
+            """,
+            (provider, identity, status, status, error),
+        )
+
+    def _auth_required(self, uow: UnitOfWork, row: Row, reason: str) -> None:
+        """Provider session expired or missing: mark the identity and wait for re-authentication (section 20)."""
+        identity = f"{row['provider']}/{row['provider_identity'] or 'default'}"
+        self._set_credential(uow, row["provider"], row["provider_identity"] or "default", "AUTH_REQUIRED", redact(reason)[0][:300])
+        uow.cur.execute("SELECT * FROM tasks WHERE id = %s FOR UPDATE", (row["task_id"],))
+        task = uow.cur.fetchone()
+        assert task is not None
+        if TaskState(task["state"]) in ACTIVE_STATES:
+            self.tasks.transition(uow, task, TaskState.AUTH_REQUIRED, trigger=Trigger.SYSTEM, actor="control-plane",
+                                  reason=f"{identity} needs re-authentication (make auth-{row['provider']})")
+            uow.cur.execute("UPDATE tasks SET waiting_on_credential = %s WHERE id = %s", (identity, task["id"]))
+        else:
+            record_event(uow.cur, "AUTH_REQUIRED", actor="control-plane", project_id=row["project_id"], task_id=row["task_id"],
+                         summary=f"{identity} needs re-authentication", data={"execution_id": str(row["id"])}, pending=uow.events)
 
     def _remove(self, execution_id: str) -> None:
         try:
@@ -460,7 +638,8 @@ class Executions:
         except AgentManagerError as exc:
             log.warning("cleanup of %s deferred: %s", execution_id, exc)
 
-    def _store_outputs(self, uow: UnitOfWork, row: Row, collected: dict[str, Any]) -> list[UUID]:
+    def _store_outputs(self, uow: UnitOfWork, row: Row, files: dict[str, bytes], collected: dict[str, Any],
+                       result: ExecutionResult | None) -> list[UUID]:
         ids: list[UUID] = []
 
         def store(name: str, content: bytes, media_type: str) -> None:
@@ -468,14 +647,20 @@ class Executions:
                                                 kind=f"executions/{row['id']}", name=name, content=content, media_type=media_type)
             ids.append(artifact.id)
 
-        for path, encoded in sorted((collected.get("files") or {}).items()):
-            content = base64.b64decode(encoded)
+        for path, content in sorted(files.items()):
+            if row["agent_run"] and path.startswith("ho/"):
+                continue  # raw provider stream: parsed by the adapter, never stored (section 86)
             safe = re.sub(r"[^A-Za-z0-9._-]", "_", path.replace("/", "__"))[:120] or "output"
             try:
                 text, _ = redact(content.decode("utf-8"))
                 store(safe.lstrip("."), text.encode(), "text/plain")
             except UnicodeDecodeError:
                 store(safe.lstrip("."), content, "application/octet-stream")
+        if result is not None:
+            store("result.json", redact(json.dumps(result.as_json(), indent=2, sort_keys=True))[0].encode(), "application/json")
+            if result.events:
+                lines = "\n".join(json.dumps({"type": e.type, **e.data}, sort_keys=True) for e in result.events)
+                store("events.jsonl", redact(lines)[0].encode(), "application/x-ndjson")
         if collected.get("logs"):
             text, _ = redact(collected["logs"])
             store("logs.txt", text.encode(), "text/plain")

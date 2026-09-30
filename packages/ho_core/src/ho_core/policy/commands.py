@@ -49,7 +49,7 @@ _RULES: tuple[_Rule, ...] = (
     _rule("CMD-H08", H, r"\b(terraform\s+(apply|destroy)|pulumi\s+(up|destroy)|cdk\s+deploy|serverless\s+deploy)\b", "Infrastructure change"),
     _rule("CMD-H09", H, r"\b(sudo|su\s|chmod\s+(-R\s+)?[0-7]*7[0-7]{2}\b|chown\s+-R|setcap|mount\s)", "Privilege or permission change"),
     _rule("CMD-H10", H, r"\b(aws|gcloud|az)\s+\S*\s*(delete|remove|rm|destroy|deploy)\b", "Cloud destructive or deploy operation"),
-    _rule("CMD-H11", H, r"(/run/secrets|\.ssh/|\.aws/credentials|\.config/gh|\.codex/auth|\.claude/\.credentials)", "Credential material access"),
+    _rule("CMD-H11", H, r"(/run/secrets|/run/ho-credentials|/run/ho/secrets|\.ssh/|\.aws/credentials|\.config/gh|\.codex/auth|\.claude/\.credentials)", "Credential material access"),
     _rule("CMD-C01", C, r"\b(npm|pnpm|yarn|bun)\s+(i|install|add|ci|update|upgrade)\b", "Package install"),
     _rule("CMD-C02", C, r"\b(pip|pip3|uv|poetry|pipenv)\s+(install|add|sync|lock|update)\b", "Package install"),
     _rule("CMD-C03", C, r"\b(apt|apt-get|apk|brew|gem|cargo\s+install|go\s+install|composer\s+(require|install|update)|flutter\s+pub\s+(get|upgrade)|dart\s+pub\s+(get|upgrade))\b", "Package install"),

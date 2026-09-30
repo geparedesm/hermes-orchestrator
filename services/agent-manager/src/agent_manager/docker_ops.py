@@ -23,7 +23,8 @@ from docker.errors import APIError, NotFound
 from docker.types import Mount as DockerMount
 
 from . import images
-from .plan import PROXY_PORT, WORKER_UID, ContainerPlan, Rejected
+from .plan import INPUT_MOUNT, PROXY_PORT, SECRETS_MOUNT, WORKER_UID, ContainerPlan, Rejected
+from .secrets import SecretStore
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,16 @@ class CredentialMissing(RuntimeError):
     pass
 
 
+def _tar(files: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, content in files.items():
+            info = tarfile.TarInfo(name)
+            info.size, info.mode, info.uid, info.gid = len(content), 0o644, WORKER_UID, WORKER_UID
+            archive.addfile(info, io.BytesIO(content))
+    return buffer.getvalue()
+
+
 @dataclass
 class ExecutionStatus:
     execution: str
@@ -58,10 +69,12 @@ class ExecutionStatus:
 
 
 class DockerOps:
-    def __init__(self, platform: dict[str, Any], config_dir: Path, client: docker.DockerClient | None = None) -> None:
+    def __init__(self, platform: dict[str, Any], config_dir: Path, client: docker.DockerClient | None = None,
+                 secrets: SecretStore | None = None) -> None:
         self.platform = platform
         self.config_dir = config_dir
         self.client = client or docker.from_env(timeout=60)
+        self.secrets = secrets or SecretStore(None)
         self._lock = threading.Lock()  # serialize capacity checks and creation
 
     # ----------------------------------------------------------------- helpers
@@ -139,11 +152,16 @@ class DockerOps:
             if volume.attrs.get("Labels", {}).get("ho.credential") is None:
                 raise CredentialMissing(f"volume {plan.credential_volume} is not a platform credential volume")
 
+        # Read granted secret values now, so a missing secret fails before anything is created.
+        secret_values = {ref: self.secrets.read(ref) for ref in plan.secrets}
+
         with self._lock:
             self._check_capacity(plan)
             created: list[Any] = []
             try:
                 env = dict(plan.env)
+                env.update({name: secret_values[ref] for ref, (name, delivery) in plan.secrets.items() if delivery == "env"})
+                file_secrets = {name: secret_values[ref] for ref, (name, delivery) in plan.secrets.items() if delivery == "file"}
                 networks: list[str] = []
                 if plan.egress != "NONE":
                     exec_net = self._ensure_network(plan.execution_network, self._labels(plan, "network"), internal=True)
@@ -166,16 +184,27 @@ class DockerOps:
                     DockerMount(m.target, m.source, type=m.kind, read_only=m.read_only)
                     for m in plan.mounts
                 ]
+                if plan.inputs:
+                    self.client.volumes.create(plan.input_volume, labels=self._labels(plan, "input"))
+                    mounts.append(DockerMount(INPUT_MOUNT, plan.input_volume, type="volume"))
+                if plan.session_volume:
+                    self._ensure_session_volume(plan)
+                tmpfs = {"/tmp": "rw,nosuid,size=512m", "/home/agent": f"rw,nosuid,size=256m,uid={WORKER_UID},gid={WORKER_UID}"}
+                command = list(plan.command)
+                if file_secrets:
+                    # Secret files live only in memory; the command waits until they are delivered.
+                    tmpfs[SECRETS_MOUNT] = f"rw,nosuid,nodev,noexec,size=1m,mode=0700,uid={WORKER_UID},gid={WORKER_UID}"
+                    command = ["/opt/ho/bin/ho-wait-secrets", *command]
                 container = self.client.containers.create(
                     image_id,
-                    command=plan.command,
+                    command=command,
                     name=plan.worker_name,
                     user=f"{WORKER_UID}:{WORKER_UID}",
                     working_dir="/workspace",
                     environment=env,
                     labels=self._labels(plan, "worker"),
                     mounts=mounts,
-                    tmpfs={"/tmp": "rw,nosuid,size=512m", "/home/agent": f"rw,nosuid,size=256m,uid={WORKER_UID},gid={WORKER_UID}"},
+                    tmpfs=tmpfs,
                     nano_cpus=int(plan.cpus * 1e9),
                     mem_limit=plan.memory_bytes,
                     memswap_limit=plan.memory_bytes,
@@ -190,12 +219,47 @@ class DockerOps:
                 created.append(container)
                 for extra in networks[1:]:
                     self.client.networks.get(extra).connect(container)
+                if plan.inputs:
+                    container.put_archive(INPUT_MOUNT, _tar({k: v.encode() for k, v in plan.inputs.items()}))
                 container.start()
+                if file_secrets:
+                    self._deliver_secrets(container, file_secrets)
             except Exception:
                 self._remove_objects(plan)
                 raise
         log.info("execution started", extra={"execution": plan.execution, "task": plan.task, "event": "WORKER_CREATED"})
         return self.status(plan.execution)
+
+    def _ensure_session_volume(self, plan: ContainerPlan) -> None:
+        """Per-task, per-provider session store for resume; removed with the task environment."""
+        assert plan.session_volume is not None
+        try:
+            volume = self.client.volumes.get(plan.session_volume)
+        except NotFound:
+            labels = {"ho.managed": "true", "ho.kind": "session", "ho.task": plan.task, "ho.project": plan.project,
+                      "ho.provider": plan.provider or ""}
+            self.client.volumes.create(plan.session_volume, labels=labels)
+            return
+        labels = volume.attrs.get("Labels") or {}
+        if labels.get("ho.kind") != "session" or labels.get("ho.task") != plan.task:
+            raise Rejected(f"volume {plan.session_volume} exists but is not this task's session store")
+
+    def _deliver_secrets(self, container: Any, files: dict[str, str]) -> None:
+        """Write secret files into the container's in-memory mount, then release the command.
+
+        The value travels in the environment of a short exec process (never in a
+        command line, image, or volume) and is written with mode 0600.
+        """
+        for name, value in files.items():
+            result = container.exec_run(
+                ["/bin/sh", "-c", 'umask 077 && printf %s "$HO_SECRET_VALUE" > "$0/$1"', SECRETS_MOUNT, name],
+                environment={"HO_SECRET_VALUE": value}, user=f"{WORKER_UID}:{WORKER_UID}",
+            )
+            if result.exit_code != 0:
+                raise RuntimeError(f"could not deliver secret {name}")
+        result = container.exec_run(["/bin/sh", "-c", f"touch {SECRETS_MOUNT}/.ready"], user=f"{WORKER_UID}:{WORKER_UID}")
+        if result.exit_code != 0:
+            raise RuntimeError("could not release the execution after delivering secrets")
 
     def _start_proxy(self, plan: ContainerPlan) -> Any:
         image_id = images.resolve(self.config_dir, "egress-proxy")
@@ -273,7 +337,8 @@ class DockerOps:
             data = b"".join(stream)
             with tarfile.open(fileobj=io.BytesIO(data)) as archive:
                 total = 0
-                for member in archive.getmembers():
+                # Smallest first: result files survive when a large log fills the limit.
+                for member in sorted(archive.getmembers(), key=lambda m: m.size):
                     if not member.isfile():
                         continue
                     if len(files) >= MAX_OUTPUT_FILES or total + member.size > MAX_OUTPUT_BYTES:
@@ -288,6 +353,16 @@ class DockerOps:
         except (NotFound, APIError, tarfile.TarError):
             pass
         logs = container.logs(stdout=True, stderr=True, tail=2000)[-MAX_LOG_BYTES:].decode("utf-8", "replace")
+        # Replace delivered secret values in everything returned (SECURITY_MODEL.md section 7.3).
+        refs = [r for r in (container.labels.get("ho.secrets") or "").split(",") if r]
+        if refs:
+            values = self.secrets.values_for(refs)
+            logs = self.secrets.redact(logs, values)
+            for name, encoded in list(files.items()):
+                raw = base64.b64decode(encoded)
+                redacted = self.secrets.redact_bytes(raw, values)
+                if redacted != raw:
+                    files[name] = base64.b64encode(redacted).decode()
         egress: list[dict[str, Any]] = []
         proxy = self._find(f"ho-p-{execution.replace('-', '')[-12:]}")
         if proxy is not None:
@@ -314,9 +389,10 @@ class DockerOps:
             if network.name == f"ho-e-{short}":
                 network.remove()
                 removed["networks"] += 1
-        for volume in self.client.volumes.list(filters={"label": [f"ho.execution={execution}", "ho.kind=output"]}):
-            volume.remove(force=True)
-            removed["volumes"] += 1
+        for kind in ("output", "input"):
+            for volume in self.client.volumes.list(filters={"label": [f"ho.execution={execution}", f"ho.kind={kind}"]}):
+                volume.remove(force=True)
+                removed["volumes"] += 1
         return removed
 
     def remove_task_environment(self, task: str) -> int:
@@ -327,7 +403,23 @@ class DockerOps:
                 raise Rejected(f"network {network.name} still has containers attached")
             network.remove()
             count += 1
+        for volume in self.client.volumes.list(filters={"label": [f"ho.task={task}", "ho.kind=session"]}):
+            volume.remove(force=True)
+            count += 1
         return count
+
+    def credentials(self) -> list[dict[str, str]]:
+        """Provider credential volumes (names and labels only; contents are never read here)."""
+        result = []
+        for volume in self.client.volumes.list(filters={"label": "ho.credential"}):
+            provider, _, identity = (volume.attrs.get("Labels") or {}).get("ho.credential", "").partition("/")
+            if volume.name == f"cred-{provider}-{identity}":
+                result.append({"provider": provider, "identity": identity, "volume": volume.name,
+                               "created_at": volume.attrs.get("CreatedAt", "")})
+        return sorted(result, key=lambda c: c["volume"])
+
+    def images(self) -> dict[str, Any]:
+        return {"images": sorted(images.load_allowlist(self.config_dir)), "versions": images.load_versions(self.config_dir)}
 
     def reap_expired(self) -> list[str]:
         """Defense in depth: stop workers whose grant expired, even if the control plane is down."""

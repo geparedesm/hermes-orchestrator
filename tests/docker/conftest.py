@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from agent_manager.app import create_app
 from agent_manager.docker_ops import DockerOps
+from agent_manager.secrets import SecretStore
 from ho_core.config import build_project_config, load_platform_config
 from ho_core.enums import Role
 from ho_core.policy.engine import GrantRequest, evaluate_grant
@@ -67,19 +68,38 @@ def projects_root(tmp_path: Path) -> Path:
     return root
 
 
+def credential_volume(client: docker.DockerClient, provider: str, identity: str, files: dict[str, str] | None = None) -> str:
+    """Create (or reset) a credential volume like scripts/auth-login.sh does, optionally with files."""
+    name = f"cred-{provider}-{identity}"
+    try:
+        client.volumes.get(name).remove(force=True)
+    except docker.errors.NotFound:
+        pass
+    client.volumes.create(name, labels={"ho.credential": f"{provider}/{identity}"})
+    script = "chown 10001:10001 /c && chmod 700 /c"
+    for path, content in (files or {}).items():
+        script += f" && printf %s '{content}' > /c/{path} && chown 10001:10001 /c/{path} && chmod 600 /c/{path}"
+    client.containers.run("debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251",
+                          ["sh", "-c", script], volumes={name: {"bind": "/c", "mode": "rw"}}, remove=True, network_mode="none")
+    return name
+
+
 @pytest.fixture
 def credential(client: docker.DockerClient) -> Iterator[str]:
-    name = "cred-codex-hotest"
-    try:
-        client.volumes.get(name)
-    except docker.errors.NotFound:
-        client.volumes.create(name, labels={"ho.credential": "codex/hotest"})
+    credential_volume(client, "codex", "hotest")
     yield "hotest"
 
 
 @pytest.fixture
-def ops(platform: dict[str, Any], client: docker.DockerClient) -> DockerOps:
-    return DockerOps(platform, ROOT / "config", client=client)
+def secrets_dir(tmp_path: Path) -> Path:
+    root = tmp_path / "project-secrets"
+    (root / "proj-a" / "test").mkdir(parents=True)
+    return root
+
+
+@pytest.fixture
+def ops(platform: dict[str, Any], client: docker.DockerClient, secrets_dir: Path) -> DockerOps:
+    return DockerOps(platform, ROOT / "config", client=client, secrets=SecretStore(secrets_dir))
 
 
 @pytest.fixture
@@ -133,9 +153,11 @@ class Api:
         )
         for key, value in (grant_overrides or {}).items():
             grant[key] = value
+        # Provider executions run in that provider's image; runners in agent-base.
+        image = f"{grant['provider_credential']['provider']}-generic" if grant["provider_credential"] else "agent-base"
         body: dict[str, Any] = {
             "execution_id": execution, "task": task, "project": project, "role": role.value,
-            "image": "agent-base", "command": ["bash", "-c", command], "grant": grant, "project_path": project,
+            "image": image, "command": ["bash", "-c", command], "grant": grant, "project_path": project,
         }
         if workspace_path:
             body["workspace"] = workspace_path

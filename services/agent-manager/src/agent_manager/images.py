@@ -34,6 +34,15 @@ def load_allowlist(config_dir: Path) -> dict[str, str]:
     return allowlist
 
 
+def load_versions(config_dir: Path) -> dict[str, str]:
+    """Pinned CLI versions recorded by the build (informational)."""
+    path = config_dir / LOCK_FILE
+    if not path.is_file():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return {str(k): str(v) for k, v in (data.get("versions") or {}).items()}
+
+
 def resolve(config_dir: Path, name: str) -> str:
     if not _NAME.match(name or ""):
         raise ImageNotAllowed(f"invalid image name {name!r}")

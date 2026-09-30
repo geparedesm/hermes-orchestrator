@@ -18,6 +18,8 @@ class FakeAgentManager:
         self.fail_with: AgentManagerError | None = None
         self.stopped: list[str] = []
         self.removed: list[str] = []
+        self.released: list[str] = []
+        self.volumes: set[tuple[str, str]] = {("claude", "default"), ("codex", "default")}
 
     def create(self, spec: dict[str, Any]) -> dict[str, Any]:
         if self.fail_with:
@@ -30,6 +32,16 @@ class FakeAgentManager:
 
     def finish(self, execution: str, exit_code: int = 0, files: dict[str, bytes] | None = None, logs: str = "") -> None:
         self.containers[execution].update(state="exited", exit_code=exit_code, files=files or {}, logs=logs)
+
+    def finish_agent(self, execution: str, events: bytes, *, exit_code: int = 0, reason: str = "cli_exited",
+                     extra: dict[str, bytes] | None = None) -> None:
+        """Simulate the in-container runner's output files (see workers/providers/*/ho-agent-run)."""
+        files = {"ho/events.jsonl": events,
+                 "ho/runner.json": f'{{"exit_code": {exit_code}, "reason": "{reason}"}}'.encode(), **(extra or {})}
+        lines = [line for line in events.splitlines() if line.strip()]
+        if lines:
+            files["ho/final.json"] = lines[-1]
+        self.finish(execution, exit_code, files=files)
 
     def vanish(self, execution: str) -> None:
         self.containers.pop(execution)
@@ -67,6 +79,17 @@ class FakeAgentManager:
 
     def managed(self) -> dict[str, Any]:
         return {"containers": [], "networks": [], "volumes": []}
+
+    def remove_task_environment(self, task: str) -> dict[str, int]:
+        self.released.append(task)
+        return {"removed": 1}
+
+    def credentials(self) -> dict[str, Any]:
+        return {"credentials": [{"provider": p, "identity": i, "volume": f"cred-{p}-{i}", "created_at": ""}
+                                for p, i in sorted(self.volumes)]}
+
+    def images(self) -> dict[str, Any]:
+        return {"images": ["agent-base", "claude-generic", "codex-generic", "runner-generic"], "versions": {}}
 
     def ping(self) -> bool:
         return self.fail_with is None or self.fail_with.status != 0

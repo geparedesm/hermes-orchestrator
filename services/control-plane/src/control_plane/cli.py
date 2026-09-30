@@ -78,19 +78,34 @@ def main(argv: list[str] | None = None) -> int:
         a.add_argument("id")
         a.add_argument("--note")
 
-    execution = sub.add_parser("execution", help="Phase 3: run a command in an isolated worker").add_subparsers(dest="cmd", required=True)
-    e = execution.add_parser("run", help="start an execution for a task")
+    def execution_options(e: argparse.ArgumentParser, *, default_role: str) -> None:
+        e.add_argument("--role", default=default_role, choices=["ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER", "BROWSER"])
+        e.add_argument("--provider", choices=["claude", "codex"])
+        e.add_argument("--workspace", help=".hermes/worktrees/<name> inside the project")
+        e.add_argument("--workspace-access", default="NONE", choices=["NONE", "READ", "WRITE"])
+        e.add_argument("--egress", default="NONE", choices=["NONE", "PROVIDER_ONLY", "ALLOWLIST", "STANDARD"])
+        e.add_argument("--allow-domain", action="append", default=[])
+        e.add_argument("--test-services", action="store_true")
+        e.add_argument("--secret", action="append", default=[], help="secret NAME from .hermes/project.yaml (repeatable)")
+        e.add_argument("--profile", choices=["LIGHT", "NORMAL", "HEAVY"])
+        e.add_argument("--timeout", type=int, default=30, help="minutes")
+
+    agent = sub.add_parser("agent", help="run Claude Code or Codex on an assignment").add_subparsers(dest="cmd", required=True)
+    a = agent.add_parser("run", help="start an agent execution for a task")
+    a.add_argument("task")
+    a.add_argument("prompt", help="the assignment")
+    execution_options(a, default_role="DEVELOPER")
+    a.add_argument("--max-turns", type=int, default=60)
+    a.add_argument("--model")
+
+    execution = sub.add_parser("execution", help="executions (agent runs and raw commands)").add_subparsers(dest="cmd", required=True)
+    e = execution.add_parser("run", help="run a raw command in an isolated worker")
     e.add_argument("task")
     e.add_argument("command", help="shell command run with bash -c inside the worker")
-    e.add_argument("--role", default="TESTER", choices=["ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER", "BROWSER"])
-    e.add_argument("--provider", choices=["claude", "codex"])
-    e.add_argument("--workspace", help=".hermes/worktrees/<name> inside the project")
-    e.add_argument("--workspace-access", default="NONE", choices=["NONE", "READ", "WRITE"])
-    e.add_argument("--egress", default="NONE", choices=["NONE", "PROVIDER_ONLY", "ALLOWLIST", "STANDARD"])
-    e.add_argument("--allow-domain", action="append", default=[])
-    e.add_argument("--test-services", action="store_true")
-    e.add_argument("--profile", choices=["LIGHT", "NORMAL", "HEAVY"])
-    e.add_argument("--timeout", type=int, default=30, help="minutes")
+    execution_options(e, default_role="TESTER")
+    r = execution.add_parser("resume", help="continue an agent execution's provider session")
+    r.add_argument("id")
+    r.add_argument("prompt")
     el = execution.add_parser("list")
     el.add_argument("--task")
     el.add_argument("--state")
@@ -98,6 +113,12 @@ def main(argv: list[str] | None = None) -> int:
     execution.add_parser("stop").add_argument("id")
     execution.add_parser("replace", help="stop an execution and start a fresh one with the same request").add_argument("id")
     sub.add_parser("workers", help="Agent Manager capacity and managed containers")
+
+    auth = sub.add_parser("auth", help="provider logins (Credential Broker)").add_subparsers(dest="cmd", required=True)
+    auth.add_parser("status", help="provider health and credential status")
+    ready = auth.add_parser("ready", help="confirm a new login (after make auth-<provider>) and resume waiting tasks")
+    ready.add_argument("provider", choices=["claude", "codex"])
+    ready.add_argument("--identity", default="default")
 
     policy = sub.add_parser("policy").add_subparsers(dest="cmd", required=True)
     c = policy.add_parser("check", help="classify a command")
@@ -150,18 +171,31 @@ def main(argv: list[str] | None = None) -> int:
             return _call("GET", f"/v1/approvals/{args.id}")
         decision = "APPROVE" if cmd == "approve" else "REJECT"
         return _call("POST", f"/v1/approvals/{args.id}/decision", body={"decision": decision, "note": args.note}, mutate=True)
+    def execution_body(extra: dict[str, Any]) -> dict[str, Any]:
+        caps: dict[str, Any] = {"workspace": args.workspace_access, "egress": args.egress,
+                                "test_services": args.test_services, "tests": "EXECUTE", "artifacts": "WRITE"}
+        if args.workspace_access == "WRITE":
+            caps["git"] = "LOCAL_COMMIT"
+        elif args.workspace_access == "READ":
+            caps["git"] = "READ"
+        if args.allow_domain:
+            caps["allowed_domains"] = args.allow_domain
+        return {"role": args.role, "provider": args.provider, "workspace": args.workspace, "capabilities": caps,
+                "resource_profile": args.profile, "timeout_minutes": args.timeout, "secrets": args.secret, **extra}
+
+    if g == "agent":
+        body = execution_body({"prompt": args.prompt, "max_turns": args.max_turns, "model": args.model})
+        return _call("POST", f"/v1/tasks/{args.task}/executions", body=body, mutate=True)
+    if g == "auth":
+        if cmd == "status":
+            return _call("GET", "/v1/credentials")
+        return _call("POST", f"/v1/credentials/{args.provider}/{args.identity}/ready", mutate=True)
     if g == "execution":
         if cmd == "run":
-            caps: dict[str, Any] = {"workspace": args.workspace_access, "egress": args.egress,
-                                    "test_services": args.test_services, "tests": "EXECUTE", "artifacts": "WRITE"}
-            if args.workspace_access == "WRITE":
-                caps["git"] = "LOCAL_COMMIT"
-            if args.allow_domain:
-                caps["allowed_domains"] = args.allow_domain
-            body = {"role": args.role, "command": ["bash", "-c", args.command], "provider": args.provider,
-                    "workspace": args.workspace, "capabilities": caps, "resource_profile": args.profile,
-                    "timeout_minutes": args.timeout}
+            body = execution_body({"command": ["bash", "-c", args.command]})
             return _call("POST", f"/v1/tasks/{args.task}/executions", body=body, mutate=True)
+        if cmd == "resume":
+            return _call("POST", f"/v1/executions/{args.id}/resume", body={"prompt": args.prompt}, mutate=True)
         if cmd == "list":
             return _call("GET", "/v1/executions", params={k: v for k, v in (("task", args.task), ("state", args.state)) if v})
         if cmd == "show":

@@ -11,6 +11,7 @@ from ho_core.logs import configure
 
 from .app import create_app
 from .docker_ops import DockerOps
+from .secrets import SecretStore
 
 
 def main() -> None:
@@ -22,7 +23,9 @@ def main() -> None:
     projects_root_host = os.environ["HO_PROJECTS_ROOT_HOST"]
     if not projects_root.is_dir():
         raise SystemExit(f"projects root {projects_root} is not mounted")
-    app = create_app(DockerOps(platform, config_dir), token=token, projects_root=projects_root,
+    secrets_dir = Path(os.environ.get("HO_PROJECT_SECRETS_DIR", "/var/lib/ho/project-secrets"))
+    ops = DockerOps(platform, config_dir, secrets=SecretStore(secrets_dir if secrets_dir.is_dir() else None))
+    app = create_app(ops, token=token, projects_root=projects_root,
                      projects_root_host=projects_root_host)
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("HO_PORT", "8082")), log_config=None,
                 access_log=False, server_header=False)

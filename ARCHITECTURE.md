@@ -32,7 +32,7 @@ Each decision references the Discovery finding it resolves. Rejected alternative
 | AD-08 | Leader leases, the task queue, and idempotency are enforced in PostgreSQL (row locks, `SKIP LOCKED`, fencing epochs). Redis carries wake-ups, heartbeats, and event fan-out, all reconstructable. | §6, §61 | Redis locks as the leadership authority. |
 | AD-09 | Services are written in Python 3.12 with typed models (Pydantic), FastAPI, psycopg 3, and Alembic migrations. The Hermes plugin targets the Python range of the pinned Hermes release (`>=3.11,<3.14` at the inspected release). A shared package holds contracts and schemas. | §94 | Multiple languages; a separate plugin contract library. |
 | AD-10 | Human-only actions (approve, reject, raise budget, authorize `UNLIMITED`, grant production access) are never registered as LLM-callable tools. They are available only through slash commands, the Dashboard, or the host operator CLI, and the control plane verifies the principal. | §25, D08 | Exposing approvals as Hermes tools guarded by prompts. |
-| AD-11 | Credential Broker v1 stores each provider session in a dedicated Docker named volume per provider identity. The volume is mounted only into containers of that provider's role. Login runs through a host operator command in an interactive bootstrap container. | §20, D06 | Mounting the user's personal `~/.claude` or `~/.codex`; reading the macOS Keychain from Linux containers. |
+| AD-11 | Credential Broker v1 stores each provider session in a dedicated Docker named volume per provider identity. The volume is mounted only into containers of that provider's role. Login runs through a host operator command in an interactive bootstrap container. Phase 4: the volume holds only the login material (Claude: a `claude setup-token` subscription token, mounted read-only; Codex: `auth.json`, mounted read-write for token refresh). Each CLI's configuration directory is created fresh per execution in memory, so nothing in the volume can carry settings, hooks, or instructions between executions. | §20, D06 | Mounting the user's personal `~/.claude` or `~/.codex`; reading the macOS Keychain from Linux containers; a writable provider home shared by all executions. |
 | AD-12 | Notifications are written to a durable outbox and delivered to a Hermes webhook route (HMAC-signed, `deliver_only`). | §64, §74 | A second notification stack; polling Hermes. |
 | AD-13 | Artifacts live on a filesystem volume, partitioned by project. PostgreSQL stores their metadata and SHA-256. | §47, §60 | Large blobs in PostgreSQL. |
 | AD-14 | Command policy is enforced by keeping high-risk capabilities out of workers entirely. High-risk operations exist only as control-plane actions. In-worker command classification is advisory and audited. | §24, D14 | Relying on a shell command classifier inside a model-controlled container. |
@@ -273,7 +273,7 @@ Callable only by the control plane (service token; mTLS optional later). Every r
 
 Agent Manager re-checks hard invariants independently of the Policy Engine (SECURITY_MODEL §8). Its state is the set of labeled Docker objects, so it can be restarted without losing information.
 
-Implemented routes (Phase 3): `POST /v1/executions`, `GET /v1/executions/{id}`, `POST /v1/executions/{id}/stop`, `POST /v1/executions/{id}/collect`, `DELETE /v1/executions/{id}`, `DELETE /v1/tasks/{task}/environment`, `GET /v1/managed`, `GET /v1/capacity`. Requests name images symbolically (`agent-base`); Agent Manager resolves them to the local image IDs pinned in `config/images.lock.yaml` (written by `make images`). Callers cannot pass Docker options: every mount, network, and security setting is built by Agent Manager from the grant. A background reaper stops workers whose grant expired even if the control plane is down. Test environments with ephemeral services (`create_environment`) arrive in Phase 6.
+Implemented routes (Phase 3): `POST /v1/executions`, `GET /v1/executions/{id}`, `POST /v1/executions/{id}/stop`, `POST /v1/executions/{id}/collect`, `DELETE /v1/executions/{id}`, `DELETE /v1/tasks/{task}/environment`, `GET /v1/managed`, `GET /v1/capacity`. Phase 4 adds `GET /v1/credentials` (credential volume names only) and `GET /v1/images`, and these request fields: `inputs` (small text files such as the prompt, written into `/run/ho-input`), `session` (mount the task's session volume), and `secret_env` (granted secrets delivered as environment variables instead of files). Requests name images symbolically (`agent-base`); Agent Manager resolves them to the local image IDs pinned in `config/images.lock.yaml` (written by `make images`). Callers cannot pass Docker options: every mount, network, and security setting is built by Agent Manager from the grant. A background reaper stops workers whose grant expired even if the control plane is down. Test environments with ephemeral services (`create_environment`) arrive in Phase 6.
 
 ### 7.4 Git Service API (private)
 
@@ -291,19 +291,32 @@ Implemented routes (Phase 3): `POST /v1/executions`, `GET /v1/executions/{id}`, 
 
 ### 7.5 AgentAdapter
 
+Implemented in Phase 4 in [packages/ho_core/src/ho_core/adapters/](packages/ho_core/src/ho_core/adapters/).
+
 ```python
 class AgentAdapter(Protocol):
-    provider: ProviderId
+    provider: str
 
-    def build_execution(self, request: ExecutionRequest) -> ExecutionSpec: ...
-    def parse_event(self, raw_line: bytes) -> AdapterEvent | None: ...   # allowlist; drops reasoning items
-    def collect_result(self, output: OutputBundle) -> ExecutionResult: ...
-    def collect_usage(self, output: OutputBundle) -> UsageRecord: ...
-    def classify_failure(self, output: OutputBundle) -> FailureClass: ...  # TRANSIENT, AUTH, QUOTA, TASK, UNKNOWN
-    def health_check(self) -> ProviderHealth: ...
+    def build_execution(self, assignment: AgentAssignment) -> ExecutionPlan: ...      # image, command, input files
+    def parse_event(self, event: dict) -> AdapterEvent | None: ...                    # allowlist; drops reasoning and messages
+    def collect_result(self, bundle: OutputBundle) -> ExecutionResult: ...           # normalized agent-result
+    def collect_usage(self, bundle: OutputBundle) -> UsageRecord: ...
+    def classify_failure(self, bundle: OutputBundle) -> FailureClass | None: ...     # TRANSIENT, AUTH, QUOTA, TASK, UNKNOWN
+    def health_check(self, *, pinned_images, credential_present, credential_status) -> ProviderHealth: ...
 ```
 
-The specification's conceptual operations map as follows. `execute_task` is `build_execution` followed by `create_execution`. `resume_task` is `build_execution` with a resume reference. `cancel_task` is `stop_execution`. The adapter runs on the trusted side. The in-container runner only launches the CLI and writes files; its output is never trusted. Exact CLI flags come from the versions pinned in Phase 4 (for example, `claude -p` JSON output and `codex exec` JSONL with schema-constrained output, both documented in Discovery).
+The specification's conceptual operations map as follows. `execute_task` is `build_execution` followed by `create_execution`. `resume_task` is `build_execution` with the provider session ID of an earlier execution. `cancel_task` is `stop_execution`. The adapter runs on the trusted side. The in-container runner (`/opt/ho/bin/ho-agent-run` in the provider images) only prepares the CLI's home, runs the CLI with the adapter's arguments, and writes raw output to `/output/ho/`; its output is never trusted.
+
+| | ClaudeAdapter | CodexAdapter |
+| --- | --- | --- |
+| Command | `claude -p --output-format stream-json --verbose` | `codex exec --json` (`codex exec resume <id>` to resume) |
+| Structured result | `--json-schema` (schemas/agent-result.schema.json) | `--output-schema` and `-o` |
+| Repository configuration (OI-02) | `--setting-sources user` with an empty per-execution config dir, `--settings {"disableAllHooks": true}`, `--strict-mcp-config` | Workspace marked `untrusted` (project `.codex/` config, hooks, and rules skipped), `--ignore-user-config`, `--ignore-rules` |
+| Permissions | Role-scoped `--tools`/`--allowedTools`, `--permission-mode dontAsk`, `--permission-prompts none` | `sandbox_mode="danger-full-access"`, `approval_policy="never"`: the container is the sandbox |
+| Authentication | `CLAUDE_CODE_OAUTH_TOKEN` from the credential volume (subscription token from `claude setup-token`) | `auth.json` (ChatGPT login, `forced_login_method="chatgpt"`) copied into a per-execution `CODEX_HOME`; refreshed tokens are written back only if the stored copy did not change meanwhile |
+| Resume | `--resume <session_id>`; transcripts in the task's session volume | `exec resume <thread_id>`; sessions in the task's session volume |
+
+Every agent assignment must end with the structured result defined by [schemas/agent-result.schema.json](schemas/agent-result.schema.json): `status` (completed, blocked, failed), `summary`, `changed_files`, `tests`, `commits`, `follow_ups`, and `blocked_reason`. An execution succeeds only when the CLI exits 0 and returns a valid result.
 
 ## 8. Workspaces and Git
 
@@ -357,6 +370,8 @@ A machine profile sets values that must not be hardcoded: the projects root, max
 
 Images are built for `linux/arm64` and `linux/amd64`, tagged by content version, and referenced by digest in the machine profile. Promotion follows §19: detect, notify, approval, build candidate, smoke test, promote, or roll back. Only digests listed in the active machine profile can be launched (Agent Manager invariant).
 
+**As implemented (Phase 4).** [scripts/build-images.sh](scripts/build-images.sh) builds a chain for each toolchain set in `HO_TOOLCHAINS` (default `generic node python`): `agent-base` ([workers/agent-base](workers/agent-base/)), then one layer per profile ([workers/toolchains](workers/toolchains/)), then one layer per provider ([workers/providers](workers/providers/)). The lock records `runner-<set>`, `claude-<set>`, and `codex-<set>`, where `<set>` is the sorted profiles joined by `-` (for example `codex-node-python`); the control plane picks the set from the project's `toolchain.profiles`. The provider CLIs come from their official npm packages at the versions in [workers/versions.env](workers/versions.env) (Claude Code 2.1.280, Codex 0.159.2); Claude Code ships a native binary, Codex runs through its npm launcher with a private Node.js runtime. Automatic updates are disabled in the images. Flutter's SDK cache is kept read-only and exposed through a per-container `/tmp` copy of its small stamp files, because the root filesystem is read-only. Images are pinned by local image ID in the untracked `config/images.lock.yaml`, which the operator regenerates with `make images`; the §19 approval-and-promotion workflow is Phase 11.
+
 ## 11. Persistent Volumes
 
 | Volume | Mounted in | Backed up | Notes |
@@ -365,7 +380,8 @@ Images are built for `linux/arm64` and `linux/amd64`, tagged by content version,
 | `pg-data` | postgres | Yes (logical dump) | |
 | `redis-data` | redis | No | Optional; state is reconstructable |
 | `artifacts` | control-plane (RW), agent-manager (RW, output collection) | Configurable | Partitioned `/<project_id>/<task_id>/` |
-| `cred-<provider>-<identity>` | agent-manager mounts into matching provider containers only | **Never** | Provider session material |
+| `cred-<provider>-<identity>` | agent-manager mounts into matching provider containers only | **Never** | Provider login material; created by `make auth-<provider>` |
+| `ho-sess-<task>-<provider>` | That task's executions of that provider | **Never** | Provider session transcripts for resume; removed when the task ends |
 | Secrets directory (bind, read-only) | agent-manager | **Never** | Project secret values (SECURITY_MODEL §7.3) |
 | `gh-config` | git-service | **Never** | GitHub CLI credentials |
 | `cache-<machine>-<ecosystem>-<project>` | Workers of that project | No | Download caches only (§71) |
@@ -452,8 +468,8 @@ Details belong to Phase 8 (`docs/recovery.md`). The architecture guarantees the 
 | ID | Item | Phase |
 | --- | --- | --- |
 | OI-01 | Confirm slash command handlers receive a verifiable sender identity (AD-10). | 9 |
-| OI-02 | Confirm official Claude Code and Codex settings that restrict repository-defined hooks, MCP servers, and project configuration in non-interactive mode (D05). | 4 |
-| OI-03 | Confirm credential refresh behavior when several containers share one provider identity volume; otherwise use one identity per concurrent slot or serialize (D06). | 4 |
+| OI-02 | Confirm official Claude Code and Codex settings that restrict repository-defined hooks, MCP servers, and project configuration in non-interactive mode (D05). **Resolved in Phase 4:** Claude Code `--setting-sources user` (documented to read neither project settings nor `.mcp.json`), `--settings {"disableAllHooks": true}`, `--strict-mcp-config`; Codex `projects."/workspace".trust_level="untrusted"` (documented to skip project `.codex/` config, hooks, and rules), `--ignore-user-config`, `--ignore-rules`. See §7.5. | 4 |
+| OI-03 | Confirm credential refresh behavior when several containers share one provider identity volume; otherwise use one identity per concurrent slot or serialize (D06). **Phase 4:** Claude's `setup-token` token does not refresh, so sharing it is safe (read-only). Codex refreshes during use; each execution works on its own copy and writes a refreshed login back under a lock only if the stored copy is unchanged. Whether a refresh invalidates the copy another running execution holds could not be measured without a real login and is recorded as a limitation; `HO_PROVIDER_IDENTITY` allows one identity per machine or stack. | 4 |
 | OI-04 | Confirm Dashboard plugin route authentication with unauthorized requests (D08). | 9 |
 | OI-05 | Choose the egress proxy image and allowlist mechanism for restricted networks (NETWORK_MODEL §5). **Resolved in Phase 3:** purpose-built CONNECT-only proxy (`services/egress-proxy`), one per agent execution. | 3 |
 | OI-06 | Measure the disk and time cost of isolated clones on large repositories; evaluate the read-only `--reference` optimization. | 5 |

@@ -77,7 +77,7 @@ def main() -> int:
     sys.path.insert(0, str(ROOT / "packages" / "ho_core" / "src"))
     from ho_core.config import load_platform_config  # noqa: E402
 
-    for profile in sorted(p.stem for p in (ROOT / "config").glob("*.yaml") if p.stem not in ("defaults", "local")):
+    for profile in sorted(p.stem for p in (ROOT / "config").glob("*.yaml") if p.stem not in ("defaults", "local", "images.lock")):
         try:
             load_platform_config(ROOT / "config", profile)
             print(f"ok      profile  config/{profile}.yaml")

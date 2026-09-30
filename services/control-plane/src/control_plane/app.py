@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from .approvals import Approvals
 from .auth import PRINCIPAL_HEADER, Authenticator, Identity, Principal
 from .context import Context, UnitOfWork
+from .credentials import Credentials
 from .agentmgr import AgentManagerError
 from .errors import ApiError, Conflict, Forbidden, UpstreamError
 from .idempotency import run_idempotent
@@ -38,6 +39,7 @@ class Services:
     scheduler: Scheduler
     executions: Executions
     run_scheduler: bool = True
+    credentials: Credentials | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None) -> Services:
@@ -46,7 +48,8 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     tasks = Tasks(ctx, projects, approvals)
     executions = Executions(ctx, tasks)
     scheduler = Scheduler(ctx, tasks, approvals, dispatcher, executions)
-    return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler)
+    credentials = Credentials(ctx, tasks, executions)
+    return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials)
 
 
 # ------------------------------------------------------------------ request models
@@ -65,14 +68,23 @@ class Decision(BaseModel):
 
 class CreateExecution(BaseModel):
     role: Literal["ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER", "BROWSER"]
-    command: list[str] = Field(min_length=1, max_length=64)
+    prompt: str | None = Field(default=None, min_length=1, max_length=100_000,
+                               description="Agent assignment, run through the provider's adapter (agent roles)")
+    command: list[str] = Field(default_factory=list, max_length=64, description="Raw command instead of a prompt")
     provider: Literal["claude", "codex"] | None = None
-    image: str = Field(default="agent-base", pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    image: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
     workspace: str | None = Field(default=None, description=".hermes/worktrees/<name> inside the project")
     capabilities: dict[str, Any] = Field(default_factory=dict)
     resource_profile: Literal["LIGHT", "NORMAL", "HEAVY"] | None = None
     timeout_minutes: int = Field(default=60, ge=1, le=1440)
     env: dict[str, str] = Field(default_factory=dict)
+    secrets: list[str] = Field(default_factory=list, max_length=32, description="Secret NAMEs from the project configuration")
+    max_turns: int = Field(default=60, ge=1, le=500)
+    model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
+
+
+class ResumeExecution(BaseModel):
+    prompt: str = Field(min_length=1, max_length=100_000)
 
 
 class StopExecution(BaseModel):
@@ -263,6 +275,46 @@ def create_app(services: Services) -> FastAPI:
         def command(uow: UnitOfWork):
             return 201, execution_view(services.executions.replace(uow, execution_id, principal=who, reason=body.reason))
         return idempotent(idempotency_key, who, {"op": "replace", "id": execution_id, **body.model_dump()}, command)
+
+    @app.post("/v1/executions/{execution_id}/resume", status_code=201)
+    def resume_execution(execution_id: str, body: ResumeExecution, who_identity: Identity = Depends(identity),
+                         who: Principal = Depends(principal), idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        """Continue a finished agent execution's provider session with a new prompt (resume_task)."""
+        if who_identity.name != "operator":
+            raise Forbidden("only the operator can start executions directly")
+
+        def command(uow: UnitOfWork):
+            old = services.executions.get(uow, execution_id)
+            uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (old["task_id"],))
+            task_key = uow.cur.fetchone()["key"]  # type: ignore[index]
+            uow.cur.execute("SELECT requested FROM capability_grants WHERE execution_id = %s", (old["id"],))
+            requested = uow.cur.fetchone()["requested"]  # type: ignore[index]
+            assignment = (old["spec"] or {}).get("assignment") or {}
+            request = ExecutionRequest(role=old["role"], prompt=body.prompt, provider=old["provider"], resume=str(old["id"]),
+                                       capabilities=requested, resource_profile=old["resource_profile"],
+                                       secrets=list(assignment.get("secrets") or []),
+                                       max_turns=int(assignment.get("max_turns") or 60), model=assignment.get("model"))
+            return 201, execution_view(services.executions.request(uow, principal=who, task_key=task_key, req=request))
+        return idempotent(idempotency_key, who, {"op": "resume", "id": execution_id, **body.model_dump()}, command)
+
+    # ---------------------------------------------------------- credentials
+
+    @app.get("/v1/credentials")
+    def credentials(_: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return services.credentials.status(uow)
+
+    @app.post("/v1/credentials/{provider}/{credential_identity}/ready")
+    def credential_ready(provider: str, credential_identity: str, who_identity: Identity = Depends(identity),
+                         who: Principal = Depends(principal), idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        # A human operator attests that they completed the provider login on the host.
+        if who_identity.name != "operator":
+            raise Forbidden("only the operator can confirm a provider login")
+
+        def command(uow: UnitOfWork):
+            return 200, services.credentials.mark_ready(uow, provider, credential_identity, principal=who)
+        return idempotent(idempotency_key, who, {"op": "credential-ready", "provider": provider, "identity": credential_identity},
+                          command)
 
     @app.get("/v1/workers")
     def workers(_: Identity = Depends(identity)) -> dict[str, Any]:

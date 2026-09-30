@@ -31,6 +31,16 @@ _ENV_DENYLIST = {
     "LD_PRELOAD", "LD_LIBRARY_PATH", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY",
 }
 _ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_INPUT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+MAX_INPUT_BYTES = 512 * 1024
+PROVIDERS = ("claude", "codex")
+# Where each provider's credential volume is mounted, and whether the runner may write
+# to it: Codex refreshes its ChatGPT login during use; Claude's setup-token does not refresh.
+CREDENTIAL_MOUNT = "/run/ho-credentials"
+CREDENTIAL_WRITABLE = {"claude": False, "codex": True}
+SESSION_MOUNT = "/run/ho-sessions"
+INPUT_MOUNT = "/run/ho-input"
+SECRETS_MOUNT = "/run/ho/secrets"
 
 
 class Rejected(ValueError):
@@ -66,6 +76,11 @@ class ContainerPlan:
     denied_domains: list[str] = field(default_factory=list)
     test_services: bool = False
     credential_volume: str | None = None
+    provider: str | None = None
+    inputs: dict[str, str] = field(default_factory=dict)
+    # Secret reference -> (NAME, delivery "file" or "env"); values are read only when the container starts.
+    secrets: dict[str, tuple[str, str]] = field(default_factory=dict)
+    session_volume: str | None = None
 
     @property
     def worker_name(self) -> str:
@@ -86,6 +101,10 @@ class ContainerPlan:
     @property
     def output_volume(self) -> str:
         return f"ho-out-{self.short}"
+
+    @property
+    def input_volume(self) -> str:
+        return f"ho-in-{self.short}"
 
 
 def _workspace_mount(request: dict[str, Any], projects_root: Path, projects_root_host: str, access: str) -> Mount:
@@ -157,16 +176,24 @@ def build_plan(
         raise Rejected("capability grant has expired")
     if grant.get("revoked_at"):
         raise Rejected("capability grant was revoked")
-    if caps["secrets"]:
-        raise Rejected("secret delivery is not available until the Secrets Broker (Phase 4)")
+    secrets: dict[str, tuple[str, str]] = {}
+    env_delivery = set(request.get("secret_env") or [])
+    if not env_delivery <= set(caps["secrets"]):
+        raise Rejected("secret_env may only name secrets in the grant")
+    for ref in caps["secrets"]:
+        project, _environment, name = ref.split("/")
+        if project != grant["project"]:
+            raise Rejected(f"secret {ref} belongs to another project")
+        secrets[ref] = (name, "env" if ref in env_delivery else "file")
 
     command = request.get("command") or []
     if not isinstance(command, list) or not command or not all(isinstance(c, str) and len(c) < 8192 for c in command):
         raise Rejected("command must be a non-empty list of strings")
 
     env: dict[str, str] = {}
+    secret_names = {name for name, _ in secrets.values()}
     for key, value in (request.get("env") or {}).items():
-        if not _ENV_KEY.match(key) or key in _ENV_DENYLIST or key.startswith("HO_"):
+        if not _ENV_KEY.match(key) or key in _ENV_DENYLIST or key.startswith("HO_") or key in secret_names:
             raise Rejected(f"environment variable {key} is not allowed")
         if not isinstance(value, str) or len(value) > 4096:
             raise Rejected(f"environment variable {key} must be a short string")
@@ -179,11 +206,32 @@ def build_plan(
         raise Rejected("the grant does not allow workspace access")
     mounts += _project_read_mounts(request, projects_root, projects_root_host, caps.get("project_read", []))
 
-    credential_volume = None
+    image = request.get("image", "")
+    credential_volume = provider = None
     if grant["provider_credential"]:
         provider = grant["provider_credential"]["provider"]
         credential_volume = f"cred-{provider}-{grant['provider_credential']['identity']}"
-        mounts.append(Mount("volume", credential_volume, f"/home/agent/.ho-credentials/{provider}", read_only=False))
+        mounts.append(Mount("volume", credential_volume, f"{CREDENTIAL_MOUNT}/{provider}",
+                            read_only=not CREDENTIAL_WRITABLE[provider]))
+    # Provider images run a provider CLI; they are only for executions holding that provider's credential.
+    image_provider = next((p for p in PROVIDERS if image.startswith(f"{p}-")), None)
+    if image_provider != provider:
+        raise Rejected(f"image {image!r} does not match the grant's provider ({provider or 'none'})")
+
+    session_volume = None
+    if request.get("session"):
+        if provider is None:
+            raise Rejected("only provider executions keep a session store")
+        session_volume = f"ho-sess-{grant['task'].lower()}-{provider}"
+        mounts.append(Mount("volume", session_volume, SESSION_MOUNT, read_only=False))
+
+    inputs: dict[str, str] = {}
+    for name, content in (request.get("inputs") or {}).items():
+        if not _INPUT_NAME.match(str(name)) or not isinstance(content, str):
+            raise Rejected(f"invalid input file {name!r}")
+        inputs[name] = content
+    if sum(len(c.encode()) for c in inputs.values()) > MAX_INPUT_BYTES:
+        raise Rejected(f"input files exceed {MAX_INPUT_BYTES // 1024} KiB")
 
     short = execution.replace("-", "")[-12:]
     mounts.append(Mount("volume", f"ho-out-{short}", "/output", read_only=False))
@@ -206,6 +254,8 @@ def build_plan(
         "ho.epoch": str(grant["lease_epoch"]),
         "ho.grant": grant["grant_id"],
         "ho.expires_at": expires_at.isoformat(),
+        # References only (never values): used to redact delivered values from collected output.
+        "ho.secrets": ",".join(sorted(secrets)),
     }
     return ContainerPlan(
         execution=execution,
@@ -213,7 +263,7 @@ def build_plan(
         task=grant["task"],
         project=grant["project"],
         role=grant["role"],
-        image=request.get("image", ""),
+        image=image,
         command=command,
         env=env,
         labels=labels,
@@ -227,4 +277,8 @@ def build_plan(
         denied_domains=sorted(set(request.get("denied_domains") or [])),
         test_services=bool(network["test_services"]),
         credential_volume=credential_volume,
+        provider=provider,
+        inputs=inputs,
+        secrets=secrets,
+        session_volume=session_volume,
     )

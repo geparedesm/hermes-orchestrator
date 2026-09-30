@@ -17,6 +17,8 @@ _PATTERNS = [
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{40,}\b"),
     re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    # JSON Web Tokens (for example OAuth access and ID tokens).
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
     re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}\b"),
     re.compile(r"(?i)(\bauthorization:\s*bearer\s+)[A-Za-z0-9._~+/=-]{16,}"),
     re.compile(r"(?i)(\b(?:api[_-]?key|token|secret|password)\s*[=:]\s*[\"']?)[^\s\"']{12,}"),
