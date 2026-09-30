@@ -37,6 +37,7 @@ APP_PASSWORD = "ho_app_test_password"
 OPERATOR_TOKEN = "operator-test-token-0123456789"
 PLUGIN_TOKEN = "plugin-test-token-0123456789"
 GIT_TOKEN = "git-test-token-0123456789"
+MERGE_KEY = b"merge-test-key-0123456789"
 
 pytestmark = pytest.mark.integration
 
@@ -121,7 +122,7 @@ def projects_root(tmp_path: Path) -> Path:
 def services(database: str, projects_root: Path, tmp_path: Path) -> Iterator[Services]:
     platform = load_platform_config(ROOT / "config", "mac-m2-pro")
     platform["platform"]["projects_root_host"] = str(projects_root)
-    git_client = TestClient(create_git_app(projects_root, GIT_TOKEN))
+    git_client = TestClient(create_git_app(projects_root, GIT_TOKEN, MERGE_KEY))
     db = Database(database, max_size=5)
     db.open()
     redis.Redis.from_url(REDIS_URL).flushdb()
@@ -131,6 +132,7 @@ def services(database: str, projects_root: Path, tmp_path: Path) -> Iterator[Ser
         coordinator=Coordinator(REDIS_URL),
         artifacts=ArtifactStore(tmp_path / "artifacts"),
         git=GitServiceClient("http://git-service", GIT_TOKEN, client=git_client),
+        merge_key=MERGE_KEY,
     )
     auth = Authenticator({OPERATOR_TOKEN: "operator", PLUGIN_TOKEN: "hermes-plugin"})
     yield build_services(ctx, auth, run_scheduler=False)

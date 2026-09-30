@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")/.."
 umask 077
 mkdir -p secrets
-for name in ho_owner_db_password ho_app_db_password ho_redis_password ho_plugin_token ho_operator_token ho_git_service_token ho_agent_manager_token; do
+for name in ho_owner_db_password ho_app_db_password ho_redis_password ho_plugin_token ho_operator_token ho_git_service_token ho_agent_manager_token ho_merge_key; do
   if [ ! -s "secrets/$name" ]; then
     openssl rand -hex 32 > "secrets/$name"
     echo "created secrets/$name"

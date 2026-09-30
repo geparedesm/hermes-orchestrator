@@ -93,8 +93,9 @@ try:
     urllib.request.urlopen('https://example.com', timeout=5); print('reachable')
 except Exception:
     print('blocked')")"
-check "projects root is read-only in git-service" "read-only" \
-  "$(dc exec -T git-service sh -c 'touch /projects/sample-app/x 2>/dev/null && echo writable || echo read-only')"
+# Since Phase 5 git-service is the only writer of project repositories; nothing else mounts them writable.
+check "projects root read-only outside git-service" "absent|read-only" \
+  "$(dc exec -T control-plane sh -c 'test -e /projects && echo present || echo absent')|$(dc exec -T agent-manager sh -c 'touch /projects/x 2>/dev/null && echo writable || echo read-only')"
 check "services run as non-root" "10001" "$(dc exec -T control-plane id -u)"
 
 echo "== audit trail"

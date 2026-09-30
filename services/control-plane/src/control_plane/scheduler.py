@@ -83,6 +83,8 @@ class Scheduler:
         self.approvals = approvals
         self.executions = executions
         self.dispatcher = dispatcher or NoWorkersDispatcher()
+        # Extra reconciliation passes run on every tick (for example Git merges and verification).
+        self.hooks: list[Any] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -113,6 +115,11 @@ class Scheduler:
         stats = {"expired": 0, "promoted": 0, "dispatched": 0, "executions_finished": 0}
         if self.executions is not None:
             stats["executions_finished"] = self.executions.sync()["finished"]
+        for hook in self.hooks:
+            try:
+                hook()
+            except Exception:  # noqa: BLE001 - one failing hook must not stop scheduling
+                log.exception("scheduler hook %s failed", getattr(hook, "__qualname__", hook))
         with self.ctx.unit_of_work() as uow:
             stats["expired"] = self.approvals.expire_due(uow)
         with self.ctx.unit_of_work() as uow:

@@ -114,6 +114,23 @@ def main(argv: list[str] | None = None) -> int:
     execution.add_parser("replace", help="stop an execution and start a fresh one with the same request").add_argument("id")
     sub.add_parser("workers", help="Agent Manager capacity and managed containers")
 
+    git = sub.add_parser("git", help="task workspaces, integration, pull requests, and merge requests").add_subparsers(dest="cmd", required=True)
+    w = git.add_parser("workspace", help="create an isolated clone and branch for a task")
+    w.add_argument("task")
+    w.add_argument("--suffix", help="workspace suffix (default w1, w2, ...)")
+    git.add_parser("status", help="workspaces, integration, divergence, PR, and merge state").add_argument("task")
+    for name, text in (("collect", "read commits from the task's workspaces"),
+                       ("divergence", "classify human changes on the target since the task's base"),
+                       ("integrate", "merge collected work onto the current target and retest it"),
+                       ("push", "push the integrated change to the task's branch (GitHub)"),
+                       ("pr", "create or update the task's pull request (GitHub)"),
+                       ("checks", "CI status of the task's pull request"),
+                       ("merge-request", "request the human MERGE approval (task must be READY_FOR_MERGE)")):
+        git.add_parser(name, help=text).add_argument("task")
+    rs = git.add_parser("resolve", help="let an agent resolve an integration conflict")
+    rs.add_argument("task")
+    rs.add_argument("--provider", required=True, choices=["claude", "codex"])
+
     auth = sub.add_parser("auth", help="provider logins (Credential Broker)").add_subparsers(dest="cmd", required=True)
     auth.add_parser("status", help="provider health and credential status")
     ready = auth.add_parser("ready", help="confirm a new login (after make auth-<provider>) and resume waiting tasks")
@@ -186,6 +203,14 @@ def main(argv: list[str] | None = None) -> int:
     if g == "agent":
         body = execution_body({"prompt": args.prompt, "max_turns": args.max_turns, "model": args.model})
         return _call("POST", f"/v1/tasks/{args.task}/executions", body=body, mutate=True)
+    if g == "git":
+        if cmd == "workspace":
+            return _call("POST", f"/v1/tasks/{args.task}/git/workspaces", body={"suffix": args.suffix}, mutate=True)
+        if cmd == "status":
+            return _call("GET", f"/v1/tasks/{args.task}/git")
+        if cmd == "resolve":
+            return _call("POST", f"/v1/tasks/{args.task}/git/resolve", body={"provider": args.provider}, mutate=True)
+        return _call("POST", f"/v1/tasks/{args.task}/git/{cmd}", mutate=True)
     if g == "auth":
         if cmd == "status":
             return _call("GET", "/v1/credentials")

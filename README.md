@@ -8,7 +8,7 @@ A local-first multi-agent development platform built around the official [Hermes
 
 ## Current status
 
-Phases 2–4 are implemented: project registration and read-only onboarding, configuration proposals with hard-policy enforcement, approvals, tasks with deterministic states, a scheduler queue, an operator CLI, the **Agent Manager**, which runs isolated, resource-limited worker containers with per-execution egress control, and **Claude Code and Codex workers** that sign in with your subscriptions, return structured results, and pause in `AUTH_REQUIRED` when a login expires. The operator starts agent executions by hand until the orchestrator arrives (Phase 7); Hermes integration arrives in Phase 9. Evidence: [docs/validation/phase-2.md](docs/validation/phase-2.md), [docs/validation/phase-3.md](docs/validation/phase-3.md), [docs/validation/phase-4.md](docs/validation/phase-4.md).
+Phases 2–5 are implemented: project registration and read-only onboarding, configuration proposals with hard-policy enforcement, approvals, tasks with deterministic states, a scheduler queue, an operator CLI, the **Agent Manager**, which runs isolated, resource-limited worker containers with per-execution egress control, and **Claude Code and Codex workers** that sign in with your subscriptions, return structured results, and pause in `AUTH_REQUIRED` when a login expires, and **Git isolation**: each task works in isolated clones, human changes are detected and never overwritten, and nothing merges into a protected branch without an explicit human approval. The operator starts agent executions by hand until the orchestrator arrives (Phase 7); Hermes integration arrives in Phase 9. Evidence: [docs/validation/phase-2.md](docs/validation/phase-2.md), [docs/validation/phase-3.md](docs/validation/phase-3.md), [docs/validation/phase-4.md](docs/validation/phase-4.md), [docs/validation/phase-5.md](docs/validation/phase-5.md).
 
 This README grows with each phase. The full operations guide required by the specification is completed in Phase 11.
 
@@ -99,11 +99,12 @@ docker compose exec control-plane ho auth status
 
 Codex's device-code login must be allowed for your ChatGPT account. When a login expires, affected tasks wait in `AUTH_REQUIRED`; run the same `make auth-*` command again and they resume.
 
-Run an agent on a task (the workspace must exist under `.hermes/worktrees/` until Phase 5):
+Run an agent on a task in its own workspace:
 
 ```bash
+docker compose exec control-plane ho git workspace T-1                          # isolated clone, e.g. .hermes/worktrees/t-1-w1
 docker compose exec control-plane ho agent run T-1 "Add a health check endpoint with tests" \
-  --provider codex --workspace .hermes/worktrees/w1 --workspace-access WRITE
+  --provider codex --workspace .hermes/worktrees/t-1-w1 --workspace-access WRITE
 docker compose exec control-plane ho execution show <execution-id>          # state, result, usage, artifacts
 docker compose exec control-plane ho execution resume <execution-id> "Also update the README"
 ```
@@ -111,6 +112,21 @@ docker compose exec control-plane ho execution resume <execution-id> "Also updat
 The image follows the project's `toolchain.profiles` (for example `codex-node`); build extra profiles with `make images HO_TOOLCHAINS="generic node python php java flutter"`.
 
 Project secrets are declared by name in `.hermes/project.yaml` and stored as files under `./project-secrets/<project>/<environment>/<NAME>` (mode 0600). Request them with `--secret NAME`; they are delivered into the worker's memory and redacted from everything collected.
+
+## Git: integration and approved merges (Phase 5)
+
+Agents commit only in their workspace clones; Git Service is the only writer of your repository.
+
+```bash
+ho git collect T-1          # read the workspace commits
+ho git divergence T-1       # what you changed on main since the task started: NONE, LOW, MEDIUM, HIGH, CRITICAL
+ho git integrate T-1        # merge the work onto the current main (without touching your checkout) and retest it
+ho git resolve T-1 --provider claude   # if integration conflicts: an agent resolves it in a fresh clone
+ho git merge-request T-1    # when the task is READY_FOR_MERGE: asks for your MERGE approval
+ho approval approve <id>    # the merge happens only now, and only if main and the change are exactly as approved
+```
+
+(`ho` is `docker compose exec control-plane ho`.) The merge never overwrites uncommitted work in your checkout, and post-merge tests run before the task is `DONE`. For GitHub repositories, log in once with `make auth-github` (only Git Service holds the token); then `ho git push T-1`, `ho git pr T-1`, and `ho git checks T-1`, and the approved merge goes through the pull request.
 
 ## Development
 
@@ -121,6 +137,7 @@ make test-docker       # Agent Manager against the real Docker daemon (needs Int
 make smoke             # Phase 2 end-to-end test on a throwaway Compose stack
 make smoke-phase3      # Phase 3 end-to-end test with real workers
 make smoke-phase4      # Phase 4 end-to-end test: adapters, real CLIs (invalid logins), AUTH_REQUIRED, secrets
+make smoke-phase5      # Phase 5 end-to-end test: workspaces, human changes, integration, approved merge
 make lint validate-schemas
 make test-env-down     # remove the integration test containers
 ```

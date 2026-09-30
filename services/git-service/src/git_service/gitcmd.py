@@ -22,39 +22,61 @@ class GitError(RuntimeError):
     pass
 
 
-def _environment() -> dict[str, str]:
-    return {
+IDENTITY = ("Hermes Orchestrator", "hermes-orchestrator@localhost")
+
+
+def _environment(extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": "/nonexistent",
+        "HOME": os.environ.get("HO_GIT_HOME", "/nonexistent"),
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_OPTIONAL_LOCKS": "0",  # read-only operations must not write the index
         "GIT_PAGER": "cat",
+        "GIT_AUTHOR_NAME": IDENTITY[0], "GIT_AUTHOR_EMAIL": IDENTITY[1],
+        "GIT_COMMITTER_NAME": IDENTITY[0], "GIT_COMMITTER_EMAIL": IDENTITY[1],
         "LC_ALL": "C",
     }
+    if os.environ.get("GH_CONFIG_DIR"):
+        env["GH_CONFIG_DIR"] = os.environ["GH_CONFIG_DIR"]
+    env.update(extra or {})
+    return env
 
 
-def git(repo: Path, *args: str) -> str:
-    command = [
-        "git",
-        "-c", f"safe.directory={repo}",
+def run(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...] = (), trusted: tuple[Path, ...] = (),
+        env: dict[str, str] | None = None, timeout: int = GIT_TIMEOUT_SECONDS, input_text: str | None = None,
+        ok_codes: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
+    """Run git with the hardening above. `protocols` names the transports this call may use
+    ("never" for local-only work); `trusted` adds other exact safe.directory paths (for example
+    the untrusted clone a fetch reads from, which is never checked out or run here)."""
+    command = ["git", "-c", f"safe.directory={repo}"]
+    for path in trusted:
+        command += ["-c", f"safe.directory={path}"]
+    command += [
         "-c", f"core.hooksPath={_EMPTY_HOOKS_DIR}",
         "-c", "core.fsmonitor=false",
         "-c", "core.untrackedCache=false",
         "-c", "diff.external=",
-        "-c", "protocol.allow=never",  # no network or file transports from read paths
-        "-C", str(repo),
-        *args,
+        "-c", "protocol.allow=never",
     ]
+    for proto in ([] if protocols == "never" else protocols.split(",")):
+        command += ["-c", f"protocol.{proto}.allow=always"]
+    for item in config:
+        command += ["-c", item]
+    command += ["-C", str(repo), *args]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS,
-                                env=_environment(), check=False)
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=_environment(env),
+                                check=False, input=input_text)
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {args[0]} timed out") from exc
-    if result.returncode != 0:
+    if result.returncode not in ok_codes:
         raise GitError(result.stderr.strip()[:500] or f"git {args[0]} failed")
-    return result.stdout.strip()
+    return result
+
+
+def git(repo: Path, *args: str, **kwargs) -> str:
+    return run(repo, *args, **kwargs).stdout.strip()
 
 
 def try_git(repo: Path, *args: str) -> str | None:

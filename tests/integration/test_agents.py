@@ -54,9 +54,19 @@ def task(api, services, projects_root, agents) -> str:
     return ready_task(api, services, projects_root)
 
 
+def workspace(api, task) -> str:
+    """The task's registered workspace (created through Git Service on first use)."""
+    existing = api.get(f"/v1/tasks/{task}/git").json()["workspaces"]
+    if not existing:
+        response = api.post(f"/v1/tasks/{task}/git/workspaces", {"suffix": "w1"})
+        assert response.status_code == 201, response.text
+        return response.json()["path"]
+    return existing[0]["path"]
+
+
 def run_agent(api, task, provider="codex", **body):
     payload = {"role": "DEVELOPER", "provider": provider, "prompt": "Add OAuth login",
-               "capabilities": {"workspace": "WRITE", "git": "LOCAL_COMMIT"}, "workspace": ".hermes/worktrees/w1", **body}
+               "capabilities": {"workspace": "WRITE", "git": "LOCAL_COMMIT"}, "workspace": workspace(api, task), **body}
     return api.post(f"/v1/tasks/{task}/executions", payload)
 
 
@@ -142,7 +152,7 @@ def test_resume_continues_the_provider_session(api, services, agents, task):
     second = response.json()
     cmd = agents.specs[second["id"]]["command"]
     assert cmd[cmd.index("--resume") + 1] == "5f0c7a9e-1111-4222-8333-944455556666"
-    assert second["resume_of"] == first and second["workspace"].endswith(".hermes/worktrees/w1")
+    assert second["resume_of"] == first and second["workspace"].endswith(f".hermes/worktrees/{task.lower()}-w1")
     assert "Also add tests" in agents.specs[second["id"]]["inputs"]["prompt.md"]
 
 

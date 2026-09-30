@@ -71,7 +71,7 @@ Nodes that appear more than once are the same container attached to several netw
 | `ho-edge` | bridge / yes | hermes, control-plane | Plugin → Task API; control plane → Hermes webhook |
 | `ho-control` | bridge / yes | control-plane, agent-manager, git-service | Private service APIs |
 | `ho-data` | bridge / yes | control-plane, postgres, redis | Databases reachable only by the control plane |
-| `ho-git-egress` | bridge / no | git-service | GitHub over HTTPS |
+| `ho-git-egress` | bridge / no | git-service | GitHub over HTTPS (Phase 5: a plain bridge network; git-service is its only member. Restricting it to GitHub's hosts through a proxy is Phase 11 hardening.) |
 
 `agent-manager` has no Internet access. Image pulls are performed by the Docker daemon, not by the agent-manager container. `control-plane` has no Internet access. Update detection (§3, §19) runs in a component with egress. Phase 11 chooses between Git Service and a host-side operator script.
 

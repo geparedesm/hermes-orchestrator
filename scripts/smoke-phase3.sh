@@ -39,7 +39,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== setup"
-mkdir -p "$ROOT/sample-app/.hermes/worktrees/w1"
+mkdir -p "$ROOT/sample-app"
 echo '{"name": "sample-app", "scripts": {"test": "true"}}' > "$ROOT/sample-app/package.json"
 git -C "$ROOT/sample-app" init -q -b main
 git -C "$ROOT/sample-app" add package.json
@@ -66,10 +66,11 @@ check "grant revoked" "True" "$(ho execution show "$EXEC" | field 'd["grant_revo
 check "worker removed" "0" "$(docker ps -aq --filter "label=ho.execution=$EXEC" | wc -l | tr -d ' ')"
 
 echo "== developer writes only its workspace"
+WS="$(ho git workspace "$TASK" --suffix w1 | field 'd["path"]')"
 EXEC="$(ho execution run "$TASK" 'echo from-worker > /workspace/hello.txt; touch /etc/x 2>/dev/null && echo rootfs=rw || echo rootfs=ro' \
-  --role DEVELOPER --provider codex --workspace .hermes/worktrees/w1 --workspace-access WRITE | field 'd["id"]')"
+  --role DEVELOPER --provider codex --workspace "$WS" --workspace-access WRITE | field 'd["id"]')"
 check "developer succeeded" "SUCCEEDED" "$(wait_state "$EXEC" SUCCEEDED)"
-check "file written to host worktree" "from-worker" "$(cat "$ROOT/sample-app/.hermes/worktrees/w1/hello.txt" 2>/dev/null)"
+check "file written to host worktree" "from-worker" "$(cat "$ROOT/sample-app/$WS/hello.txt" 2>/dev/null)"
 check "workspace outside worktrees rejected" "bad_request" \
   "$(ho execution run "$TASK" true --workspace ../../etc --workspace-access READ | field 'd.get("error")' || true)"
 

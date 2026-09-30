@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.responses import JSONResponse
@@ -17,6 +18,7 @@ from .approvals import Approvals
 from .auth import PRINCIPAL_HEADER, Authenticator, Identity, Principal
 from .context import Context, UnitOfWork
 from .credentials import Credentials
+from .gitops import GitChanges
 from .agentmgr import AgentManagerError
 from .errors import ApiError, Conflict, Forbidden, UpstreamError
 from .idempotency import run_idempotent
@@ -40,6 +42,7 @@ class Services:
     executions: Executions
     run_scheduler: bool = True
     credentials: Credentials | None = None
+    git: GitChanges | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None) -> Services:
@@ -49,7 +52,9 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     executions = Executions(ctx, tasks)
     scheduler = Scheduler(ctx, tasks, approvals, dispatcher, executions)
     credentials = Credentials(ctx, tasks, executions)
-    return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials)
+    git = GitChanges(ctx, tasks, approvals, executions)
+    scheduler.hooks.append(git.sync)
+    return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git)
 
 
 # ------------------------------------------------------------------ request models
@@ -81,6 +86,14 @@ class CreateExecution(BaseModel):
     secrets: list[str] = Field(default_factory=list, max_length=32, description="Secret NAMEs from the project configuration")
     max_turns: int = Field(default=60, ge=1, le=500)
     model: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
+
+
+class GitWorkspace(BaseModel):
+    suffix: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,30}$")
+
+
+class GitResolve(BaseModel):
+    provider: Literal["claude", "codex"]
 
 
 class ResumeExecution(BaseModel):
@@ -296,6 +309,85 @@ def create_app(services: Services) -> FastAPI:
                                        max_turns=int(assignment.get("max_turns") or 60), model=assignment.get("model"))
             return 201, execution_view(services.executions.request(uow, principal=who, task_key=task_key, req=request))
         return idempotent(idempotency_key, who, {"op": "resume", "id": execution_id, **body.model_dump()}, command)
+
+    # ------------------------------------------------------------------ git
+
+    def git_view(uow: UnitOfWork, key: str) -> dict[str, Any]:
+        task = services.tasks.get(uow, key)
+        uow.cur.execute("SELECT * FROM git_changes WHERE task_id = %s", (task["id"],))
+        changes = uow.cur.fetchone()
+        uow.cur.execute("SELECT name, kind, path, branch, base_sha, head_sha, status, collected_at FROM workspaces "
+                        "WHERE task_id = %s ORDER BY created_at", (task["id"],))
+        workspaces = uow.cur.fetchall()
+        clean = {k: (str(v) if isinstance(v, UUID) else v.isoformat() if hasattr(v, "isoformat") else v)
+                 for k, v in (changes or {}).items()}
+        return {"task": key, "state": task["state"], "base_commit": task["base_commit"], "target_branch": task["target_branch"],
+                "changes": clean or None,
+                "workspaces": [{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in w.items()} for w in workspaces]}
+
+    @app.get("/v1/tasks/{key}/git")
+    def git_status(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return git_view(uow, key)
+
+    def git_command(name: str, action):
+        def endpoint(key: str, request: Request, who_identity: Identity = Depends(identity), who: Principal = Depends(principal),
+                     idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+            # Operators drive Git operations by hand until the orchestrator does (Phase 7).
+            if who_identity.name != "operator":
+                raise Forbidden("only the operator can run Git operations directly")
+            body = getattr(request.state, "git_body", {})
+
+            def command(uow: UnitOfWork):
+                result = action(uow, key, who, body)
+                return 200, jsonable(result)
+            return idempotent(idempotency_key, who, {"op": f"git-{name}", "task": key, **body}, command)
+        return endpoint
+
+    def jsonable(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: jsonable(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [jsonable(v) for v in value]
+        if isinstance(value, UUID):
+            return str(value)
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+        return value
+
+    assert services.git is not None
+    git = services.git
+
+    @app.post("/v1/tasks/{key}/git/workspaces")
+    def git_workspace(key: str, body: GitWorkspace, who_identity: Identity = Depends(identity), who: Principal = Depends(principal),
+                      idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        if who_identity.name != "operator":
+            raise Forbidden("only the operator can run Git operations directly")
+
+        def command(uow: UnitOfWork):
+            return 201, jsonable(dict(git.workspace(uow, key, principal=who, suffix=body.suffix)))
+        return idempotent(idempotency_key, who, {"op": "git-workspace", "task": key, **body.model_dump()}, command)
+
+    @app.post("/v1/tasks/{key}/git/resolve")
+    def git_resolve(key: str, body: GitResolve, who_identity: Identity = Depends(identity), who: Principal = Depends(principal),
+                    idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        if who_identity.name != "operator":
+            raise Forbidden("only the operator can run Git operations directly")
+
+        def command(uow: UnitOfWork):
+            return 201, git.resolve_conflicts(uow, key, provider=body.provider, principal=who)
+        return idempotent(idempotency_key, who, {"op": "git-resolve", "task": key, **body.model_dump()}, command)
+
+    for name, action in (
+        ("collect", lambda uow, key, who, body: {"workspaces": git.collect(uow, key)}),
+        ("divergence", lambda uow, key, who, body: (git.collect(uow, key), git.check_divergence(uow, key))[1]),
+        ("integrate", lambda uow, key, who, body: git.integrate(uow, key)),
+        ("push", lambda uow, key, who, body: git.push(uow, key)),
+        ("pr", lambda uow, key, who, body: git.pull_request(uow, key)),
+        ("checks", lambda uow, key, who, body: git.checks(uow, key)),
+        ("merge-request", lambda uow, key, who, body: approval_view(git.request_merge(uow, key, principal=who))),
+    ):
+        app.post(f"/v1/tasks/{{key}}/git/{name}", name=f"git_{name.replace('-', '_')}")(git_command(name, action))
 
     # ---------------------------------------------------------- credentials
 
