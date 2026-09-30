@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete as a documentation/source review and was approved by Gabriel Paredes on 2026-09-30. Phase 1 is next; Phases 1–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture documents and schemas are drafted and awaiting review. Phases 2–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -38,17 +38,19 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Define the smallest secure, portable architecture that satisfies the specification.
 
-- [ ] Produce `ARCHITECTURE.md` with component responsibilities and diagrams.
-- [ ] Produce `SECURITY_MODEL.md` with trust boundaries, service identities, capabilities, approvals, and credential/secret handling.
-- [ ] Produce `DATA_MODEL.md` with persistent entities, task transitions, checkpoints, audit records, and schemas.
-- [ ] Produce `NETWORK_MODEL.md` with control-plane, worker, test, and project network boundaries.
-- [ ] Define PostgreSQL as the extended control-plane source of truth and Redis as reconstructable transient coordination state.
-- [ ] Define adapter contracts and Hermes integration boundaries using Discovery findings.
-- [ ] Define the repository layout, Compose service boundaries, and machine-specific configuration profiles.
-- [ ] Design project configuration, Task Manifest, and Capability Grant schemas.
-- [ ] Document any deviations from the suggested repository structure and avoid unnecessary microservices.
+- [x] Produce `ARCHITECTURE.md` with component responsibilities and diagrams.
+- [x] Produce `SECURITY_MODEL.md` with trust boundaries, service identities, capabilities, approvals, and credential/secret handling.
+- [x] Produce `DATA_MODEL.md` with persistent entities, task transitions, checkpoints, audit records, and schemas.
+- [x] Produce `NETWORK_MODEL.md` with control-plane, worker, test, and project network boundaries.
+- [x] Define PostgreSQL as the extended control-plane source of truth and Redis as reconstructable transient coordination state.
+- [x] Define adapter contracts and Hermes integration boundaries using Discovery findings.
+- [x] Define the repository layout, Compose service boundaries, and machine-specific configuration profiles.
+- [x] Design project configuration, Task Manifest, and Capability Grant schemas.
+- [x] Document any deviations from the suggested repository structure and avoid unnecessary microservices.
 
 **Completion criteria:** Architecture documents and diagrams consistently describe storage, execution, security, networking, and integration responsibilities.
+
+**Status:** Drafted, pending review. Deliverables: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY_MODEL.md](SECURITY_MODEL.md), [DATA_MODEL.md](DATA_MODEL.md), [NETWORK_MODEL.md](NETWORK_MODEL.md), and [schemas/](schemas/) (validated with `scripts/validate_schemas.py`). Open items OI-01 to OI-08 in ARCHITECTURE §15 are assigned to later phases.
 
 ## Phase 2: Minimal Control Plane
 

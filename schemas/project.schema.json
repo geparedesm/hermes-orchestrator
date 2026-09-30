@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hermes-orchestrator:schema:project:1",
+  "title": "Project configuration (.hermes/project.yaml)",
+  "description": "Version-controlled project policy (MASTER_SPEC sections 16, 23, 85). Values here can only tighten platform hard policy; the Policy Engine clamps anything that would weaken it. Secret values are never allowed: secrets are referenced by name.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "project"],
+  "properties": {
+    "version": { "const": 1, "description": "Schema version of this file." },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "default_branch": { "$ref": "#/$defs/branchName", "description": "Overrides the branch detected at registration." }
+      }
+    },
+    "autonomy": {
+      "enum": ["SUPERVISED", "BALANCED", "AUTONOMOUS"],
+      "default": "BALANCED",
+      "description": "No profile removes hard approval boundaries (MASTER_SPEC section 26)."
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profiles"],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["generic", "node", "python", "flutter", "php", "java"] }
+        },
+        "versions": {
+          "type": "object",
+          "description": "Requested toolchain versions per profile, for example {\"node\": \"22\"}. Must exist in a published toolchain image.",
+          "propertyNames": { "enum": ["node", "python", "flutter", "php", "java"] },
+          "additionalProperties": { "type": "string", "pattern": "^[0-9A-Za-z.+-]{1,32}$" }
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Commands run inside toolchain containers. Never executed by trusted services.",
+      "properties": {
+        "install": { "$ref": "#/$defs/command" },
+        "build": { "$ref": "#/$defs/command" },
+        "test": { "$ref": "#/$defs/command" },
+        "test_relevant": { "$ref": "#/$defs/command", "description": "Optional command for tests relevant to a change; may use {paths}." },
+        "lint": { "$ref": "#/$defs/command" },
+        "typecheck": { "$ref": "#/$defs/command" },
+        "format_check": { "$ref": "#/$defs/command" },
+        "security": { "$ref": "#/$defs/command" },
+        "e2e": { "$ref": "#/$defs/command" },
+        "post_merge": { "$ref": "#/$defs/command", "description": "Post-merge verification; defaults to build + test." }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed_providers": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/provider" },
+          "description": "Cross-review requires two distinct providers."
+        },
+        "preferred": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "planning": { "$ref": "#/$defs/provider" },
+            "implementation": { "$ref": "#/$defs/provider" },
+            "debugging": { "$ref": "#/$defs/provider" },
+            "tests": { "$ref": "#/$defs/provider" }
+          }
+        },
+        "orchestrator_may_develop": { "type": "boolean", "default": true }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cycle_limit": { "type": "integer", "minimum": 1, "maximum": 5, "default": 2 },
+        "on_limit": { "enum": ["ALTERNATE_DEVELOPER", "BLOCKED"], "default": "ALTERNATE_DEVELOPER" }
+      }
+    },
+    "retries": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "transient": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 },
+        "fix_attempts": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 },
+        "alternate_developer": { "type": "boolean", "default": true }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_profile": { "$ref": "#/$defs/resourceProfile", "default": "NORMAL" },
+        "max_profile": { "$ref": "#/$defs/resourceProfile", "default": "HEAVY" },
+        "max_agent_workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "description": "Per-project cap; the machine profile cap still applies (the lower wins)."
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "development": {
+          "enum": ["standard", "restricted", "provider_only"],
+          "default": "standard",
+          "description": "standard = STANDARD egress through the task proxy; restricted = ALLOWLIST; provider_only = PROVIDER_ONLY."
+        },
+        "testing": {
+          "enum": ["isolated", "allowlist"],
+          "default": "isolated",
+          "description": "isolated = no Internet (MASTER_SPEC section 53)."
+        },
+        "allowed_domains": { "$ref": "#/$defs/domainList", "description": "Extra development destinations in restricted mode." },
+        "test_allowed_domains": { "$ref": "#/$defs/domainList", "description": "Only used when testing = allowlist." },
+        "research": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "official_docs": { "type": "boolean", "default": true },
+            "package_registries": { "type": "boolean", "default": true },
+            "public_github": { "type": "boolean", "default": true }
+          }
+        }
+      }
+    },
+    "environments": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Known environments. Production hosts are always blocked unless a time-limited approved grant exists.",
+      "properties": {
+        "local": { "$ref": "#/$defs/environment" },
+        "test": { "$ref": "#/$defs/environment" },
+        "staging": { "$ref": "#/$defs/environment" },
+        "production": { "$ref": "#/$defs/environment" }
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "description": "Secret references only. Values live in the Secrets Broker backend.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "environment"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+          "environment": { "enum": ["local", "test", "staging", "production"] },
+          "description": { "type": "string", "maxLength": 500 },
+          "delivery": { "enum": ["file", "env"], "default": "file" }
+        }
+      }
+    },
+    "test_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compose_files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" },
+          "description": "Project Compose files used for ephemeral test services (MASTER_SPEC section 52)."
+        },
+        "services": { "type": "array", "items": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$" } },
+        "startup_timeout_seconds": { "type": "integer", "minimum": 10, "maximum": 1800, "default": 180 }
+      }
+    },
+    "quality_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Project requirements for READY_FOR_MERGE. Cross-review and no Policy Engine violations are always required and cannot be disabled here.",
+      "properties": {
+        "tests": { "type": "boolean", "default": true },
+        "full_suite": { "type": "boolean", "default": true },
+        "build": { "type": "boolean", "default": true },
+        "lint": { "type": "boolean", "default": true },
+        "typecheck": { "type": "boolean", "default": false },
+        "security_checks": { "type": "boolean", "default": false },
+        "browser_tests": { "type": "boolean", "default": false },
+        "ci_checks": { "type": "boolean", "default": true },
+        "docs_updated": { "type": "boolean", "default": false },
+        "block_on_findings": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["MEDIUM", "HIGH", "CRITICAL"] },
+          "default": ["HIGH", "CRITICAL"],
+          "description": "Unresolved review findings of these severities block the gate. HIGH and CRITICAL are always included by hard policy."
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Risk-adaptive verification (MASTER_SPEC section 57).",
+      "properties": {
+        "sensitive_paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "description": "Glob patterns that raise change risk to at least HIGH."
+        },
+        "critical_paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "description": "Glob patterns that raise change risk to CRITICAL (explicit approval)."
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/budgetProfile",
+          "default": "NORMAL",
+          "description": "UNLIMITED is accepted by the schema but always requires explicit user approval per task."
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Overrides for the profile's limits.",
+          "properties": {
+            "runtime_minutes": { "type": "integer", "minimum": 1 },
+            "agent_launches": { "type": "integer", "minimum": 1 },
+            "retries": { "type": "integer", "minimum": 0 },
+            "review_cycles": { "type": "integer", "minimum": 1 },
+            "provider_usage_units": { "type": "integer", "minimum": 1 },
+            "subtasks": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "warning_percent": { "type": "integer", "minimum": 1, "maximum": 99, "default": 70 },
+            "optimize_percent": { "type": "integer", "minimum": 1, "maximum": 99, "default": 85 }
+          }
+        }
+      }
+    },
+    "expansion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile": { "$ref": "#/$defs/budgetProfile", "default": "NORMAL" }
+      }
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protected_branches": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/branchName" },
+          "description": "Added to the hard-policy set (main, master, and the default branch), never replacing it."
+        },
+        "branch_prefix": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,30}/$", "default": "hermes/" },
+        "merge_method": { "enum": ["merge", "squash", "rebase"], "default": "merge" },
+        "require_pull_request": { "type": "boolean", "default": true, "description": "GitHub projects only." },
+        "delete_remote_branch_after_merge": { "type": "boolean", "default": true }
+      }
+    },
+    "browser_tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "base_url": { "type": "string", "format": "uri", "description": "URL of the application on the task service network." },
+        "specs": { "type": "array", "items": { "$ref": "#/$defs/relativePath" } }
+      }
+    },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" },
+          "default": [".hermes/PROJECT.md", ".hermes/architecture.md", ".hermes/conventions.md", ".hermes/decisions/"]
+        }
+      }
+    },
+    "config_drift": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "auto_update_trivial": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only non-sensitive changes; security, network, secrets, production, toolchain, Quality Gate, and infrastructure changes always require approval."
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "artifacts_days": { "type": "integer", "minimum": 1, "maximum": 3650, "default": 30 },
+        "failed_workspace_days": { "type": "integer", "minimum": 1, "maximum": 365, "default": 14 }
+      }
+    }
+  },
+  "$defs": {
+    "provider": { "enum": ["claude", "codex"] },
+    "resourceProfile": { "enum": ["LIGHT", "NORMAL", "HEAVY"] },
+    "budgetProfile": { "enum": ["SMALL", "NORMAL", "LARGE", "UNLIMITED"] },
+    "branchName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^(?!.*\\.\\.)(?!.*//)(?!.*\\.lock$)[A-Za-z0-9]([A-Za-z0-9._/-]*[A-Za-z0-9])?$",
+      "description": "Conservative subset of Git ref names."
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$",
+      "description": "Relative to the project root; absolute paths and '..' segments are rejected."
+    },
+    "domainList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$",
+        "description": "Hostname or '*.' wildcard. IP addresses are not accepted."
+      }
+    },
+    "command": {
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 2000 },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["run"],
+          "properties": {
+            "run": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "working_dir": { "$ref": "#/$defs/relativePath" },
+            "timeout_minutes": { "type": "integer", "minimum": 1, "maximum": 720 },
+            "profile": { "enum": ["generic", "node", "python", "flutter", "php", "java"] }
+          }
+        }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hosts": { "$ref": "#/$defs/domainList", "description": "Hostnames belonging to this environment." },
+        "secrets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+          "description": "Names from the top-level secrets list."
+        }
+      }
+    }
+  }
+}

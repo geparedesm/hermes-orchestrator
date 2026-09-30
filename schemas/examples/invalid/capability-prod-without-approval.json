@@ -1,0 +1,9 @@
+{
+  "schema_version": 1, "grant_id": "G-bad-prod-01", "project": "example-web", "task": "T-284",
+  "execution": "0192f3a1-7c4e-7a10-9b2d-4f5e6a7b8c9d", "worker": "claude-284-03", "role": "DEVELOPER",
+  "provider_credential": { "provider": "claude", "identity": "default" },
+  "issued_at": "2026-09-30T08:00:00Z", "expires_at": "2026-09-30T10:00:00Z", "lease_epoch": 3,
+  "capabilities": { "workspace": "WRITE", "git": "LOCAL_COMMIT", "network": { "egress": "STANDARD", "test_services": false },
+    "secrets": [], "environments": [], "docker": "NONE", "production": "PROD_WRITE", "tests": "EXECUTE", "artifacts": "WRITE" },
+  "resources": { "profile": "NORMAL", "timeout_minutes": 60 }
+}

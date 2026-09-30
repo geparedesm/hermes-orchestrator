@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "project": "example-web",
+  "title": "Add OAuth authentication",
+  "request": "Add OAuth authentication to project example-web.",
+  "priority": "HIGH",
+  "budget_profile": "NORMAL",
+  "requested_by": { "channel": "telegram", "subject": "123456789" },
+  "idempotency_key": "telegram:123456789:msg-8842"
+}

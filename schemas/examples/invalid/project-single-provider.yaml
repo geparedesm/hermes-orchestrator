@@ -1,0 +1,5 @@
+version: 1
+project:
+  name: no-cross-review
+agents:
+  allowed_providers: [codex]
