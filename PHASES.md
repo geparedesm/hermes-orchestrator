@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) is implemented and validated, pending review ([docs/validation/phase-2.md](docs/validation/phase-2.md)). Phases 3–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 is in progress; Phases 4–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -69,7 +69,7 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Completion criteria:** Registered projects and tasks persist across service restarts; scheduling and protected actions respect policy and approval checks.
 
-**Status:** Implemented, pending review. 76 unit tests, 23 integration tests, and a 21-check end-to-end smoke test pass on macOS (Apple Silicon); evidence and known limitations are in [docs/validation/phase-2.md](docs/validation/phase-2.md). Linux has been validated only through configuration schemas so far. No workers exist yet, so READY tasks wait in the queue until Phase 3.
+**Status:** Complete. Approved by Gabriel Paredes on 2026-09-30 (PR #3). 76 unit tests, 23 integration tests, and a 21-check end-to-end smoke test pass on macOS (Apple Silicon); evidence and known limitations are in [docs/validation/phase-2.md](docs/validation/phase-2.md). Linux has been validated only through configuration schemas so far. No workers exist yet, so READY tasks wait in the queue until Phase 3.
 
 ## Phase 3: Agent Manager
 
