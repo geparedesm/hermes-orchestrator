@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-All phases are initially **Not started**. Checkboxes track completed work, not planned work. Creating this roadmap does not complete Discovery or authorize platform implementation.
+**Current status:** Phase 0 discovery is complete as a documentation/source review; explicit approval to proceed is pending. Phases 1–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -19,16 +19,16 @@ All phases are initially **Not started**. Checkboxes track completed work, not p
 
 **Objective:** Verify current official capabilities before choosing custom components.
 
-- [ ] Inspect the latest official Hermes Agent documentation and repository.
-- [ ] Verify Hermes architecture, Docker deployment, supported releases/images, and ARM64/AMD64 support.
-- [ ] Inspect Gateway, Dashboard, Kanban/boards, worker lanes, dependencies, concurrency, worktrees, and reviews.
-- [ ] Verify supported skills, plugins, hooks, CLI extensions, webhooks, MCP, and agent integrations.
-- [ ] Verify Claude Code and Codex CLI authentication and session persistence using official documentation.
-- [ ] Verify GitHub CLI authentication and relevant Git/PR behavior.
-- [ ] Produce a component responsibility matrix: **YES → reuse/integrate**, **PARTIAL → extend**, **NO → implement externally**.
-- [ ] Identify unsupported interfaces, limitations, and conflicts with the specification.
-- [ ] Document the proposed architecture and the evidence supporting each major custom component.
-- [ ] Produce `DISCOVERY.md`.
+- [x] Inspect the latest official Hermes Agent documentation and repository.
+- [x] Verify Hermes architecture, Docker deployment, supported releases/images, and ARM64/AMD64 support.
+- [x] Inspect Gateway, Dashboard, Kanban/boards, worker lanes, dependencies, concurrency, worktrees, and reviews.
+- [x] Verify supported skills, plugins, hooks, CLI extensions, webhooks, MCP, and agent integrations.
+- [x] Verify Claude Code and Codex CLI authentication and session persistence using official documentation.
+- [x] Verify GitHub CLI authentication and relevant Git/PR behavior.
+- [x] Produce a component responsibility matrix: **YES → reuse/integrate**, **PARTIAL → extend**, **NO → implement externally**.
+- [x] Identify unsupported interfaces, limitations, and conflicts with the specification.
+- [x] Document the proposed architecture and the evidence supporting each major custom component.
+- [x] Produce `DISCOVERY.md`.
 
 **Completion criteria:** Discovery includes verified sources, the responsibility matrix, the proposed architecture, and documented limitations. Stop here until explicit user approval is received before implementation.
 
@@ -233,7 +233,7 @@ Verify this checklist against sections 92–94 of `MASTER_SPEC.md` before declar
 
 **Primary phase** owns delivery of the requirement. **Supporting phases** provide design, integration, or validation work; they do not postpone mandatory security rules. Cross-cutting rules apply whenever relevant, from the first affected phase onward. Phase ranges are inclusive.
 
-This is a planning coverage map, not proof of implementation. All rows remain **Not started** until the corresponding work is completed and its evidence is recorded. The evidence column summarizes verification targets; the linked source section retains its full requirements.
+This is a planning coverage map, not proof of implementation. Phase 0 research evidence is recorded in [DISCOVERY.md](DISCOVERY.md); implementation requirements remain unimplemented. A completed research phase does not complete every requirement mapped to it. The evidence column summarizes verification targets; the linked source section retains its full requirements.
 
 | Section | Specification requirement | Primary phase | Supporting phases | Expected evidence / completion check |
 | --- | --- | --- | --- | --- |
