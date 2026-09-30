@@ -1,7 +1,7 @@
 # Phase 0: Discovery
 
 **Research date:** 2026-09-30 (Australia/Perth)  
-**Status:** Documentation and source discovery complete; awaiting human approval to proceed to Phase 1.  
+**Status:** Documentation and source discovery complete; approved by Gabriel Paredes on 2026-09-30. Phase 1 may begin.  
 **Scope:** Sections 2, 3, 20, 87, 88, and 95 of [MASTER_SPEC.md](MASTER_SPEC.md). This report proposes an architecture; it does not claim that the platform, authentication flows, or container integrations have been implemented or runtime-tested.
 
 ## 1. Recommendation
@@ -247,8 +247,8 @@ These are implementation/design decisions, not silent changes to `MASTER_SPEC.md
 - [x] Produced a component responsibility matrix and proposed architecture.
 - [x] Recorded contradictions, unsupported assumptions, and runtime validation limits.
 - [x] Created a source inventory with immutable references and file hashes.
-- [ ] Obtain explicit user approval to proceed beyond Phase 0.
+- [x] Obtain explicit user approval to proceed beyond Phase 0 (approved by Gabriel Paredes on 2026-09-30).
 
-After approval, Phase 1 produces `ARCHITECTURE.md`, `SECURITY_MODEL.md`, `DATA_MODEL.md`, and `NETWORK_MODEL.md`. Its first decisions are task/board ownership, credential and Git execution boundaries, enforceable command policy, and the precise Hermes extension contract. Runtime proof belongs to the relevant implementation phases; it has not been replaced by this document.
+Phase 1 produces `ARCHITECTURE.md`, `SECURITY_MODEL.md`, `DATA_MODEL.md`, and `NETWORK_MODEL.md`. Its first decisions are task/board ownership, credential and Git execution boundaries, enforceable command policy, and the precise Hermes extension contract. Runtime proof belongs to the relevant implementation phases; it has not been replaced by this document.
 
 The stop is required by [MASTER_SPEC.md, section 95](MASTER_SPEC.md#95-first-action): “STOP after Phase 0 and wait for explicit user approval before implementation.”

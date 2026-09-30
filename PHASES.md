@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete as a documentation/source review; explicit approval to proceed is pending. Phases 1–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete as a documentation/source review and was approved by Gabriel Paredes on 2026-09-30. Phase 1 is next; Phases 1–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -31,6 +31,8 @@ All code, filenames, comments, configuration documentation, and project document
 - [x] Produce `DISCOVERY.md`.
 
 **Completion criteria:** Discovery includes verified sources, the responsibility matrix, the proposed architecture, and documented limitations. Stop here until explicit user approval is received before implementation.
+
+**Status:** Complete. Approved by Gabriel Paredes on 2026-09-30.
 
 ## Phase 1: Architecture
 
