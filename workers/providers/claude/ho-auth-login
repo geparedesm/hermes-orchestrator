@@ -4,8 +4,9 @@
 # container that mounts only this identity's credential volume. No model runs.
 #
 # Uses the documented `claude setup-token` flow: it opens the claude.ai
-# authorization page and prints a long-lived subscription token, which is saved
-# to the credential volume (mode 0600) and never printed again.
+# authorization page and prints a long-lived subscription token. The token is
+# verified with a one-turn request and only then saved to the credential volume
+# (mode 0600). It is never printed again.
 set -euo pipefail
 dest=/run/ho-credentials/claude
 mkdir -p "$CLAUDE_CONFIG_DIR"
@@ -13,23 +14,32 @@ mkdir -p "$CLAUDE_CONFIG_DIR"
 echo "Step 1: authorize in your browser. Claude Code prints a token when you finish."
 claude setup-token
 echo
-read -rsp "Step 2: paste the token printed above (input is hidden) and press Enter: " token
-echo
-token="${token//[[:space:]]/}"
-[[ -n $token ]] || { echo "No token entered; nothing was saved." >&2; exit 1; }
+# The terminal usually wraps the long token over several lines, so read every pasted
+# line until an empty one and join them.
+echo "Step 2: paste the whole token printed above (input is hidden), then press Enter on an empty line."
+token=""
+while IFS= read -rs line; do
+  line="${line//[[:space:]]/}"
+  [[ -z $line && -n $token ]] && break
+  token+="$line"
+done
+if [[ ! $token =~ ^sk-ant-oat[0-9]{2}-[A-Za-z0-9_-]{40,}$ ]]; then
+  echo "That does not look like a complete setup-token token (it should start with sk-ant-oat). Nothing was saved." >&2
+  exit 1
+fi
+
+if [[ ${HO_AUTH_VERIFY:-1} == 1 ]]; then
+  echo "Step 3: verifying with a one-turn request..."
+  if ! CLAUDE_CODE_OAUTH_TOKEN="$token" claude -p --setting-sources user --strict-mcp-config --tools "" --max-turns 1 \
+         --output-format json "Reply with the single word OK." > /tmp/verify.json 2>/dev/null \
+     || ! grep -Eq '"is_error": ?false' /tmp/verify.json; then
+    reason="$(grep -o '"result": \?"[^"]\{0,200\}' /tmp/verify.json | head -1 | sed 's/"result": \?"//')"
+    echo "Verification failed: ${reason:-no response}. Nothing was saved; run the login again." >&2
+    exit 4
+  fi
+  echo "Verified: Claude Code accepted the token."
+fi
 umask 077
 printf '%s' "$token" > "$dest/.oauth_token.new"
 mv -f "$dest/.oauth_token.new" "$dest/oauth_token"
 echo "Token saved to the credential volume."
-
-if [[ ${HO_AUTH_VERIFY:-1} == 1 ]]; then
-  echo "Step 3: verifying with a one-turn request..."
-  if CLAUDE_CODE_OAUTH_TOKEN="$token" claude -p --setting-sources user --strict-mcp-config --tools "" --max-turns 1 \
-       --output-format json "Reply with the single word OK." > /tmp/verify.json 2>/dev/null \
-     && grep -Eq '"is_error": ?false' /tmp/verify.json; then
-    echo "Verified: Claude Code accepted the token."
-  else
-    echo "Verification failed. Run the login again." >&2
-    exit 4
-  fi
-fi
