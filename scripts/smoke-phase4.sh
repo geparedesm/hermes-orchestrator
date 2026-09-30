@@ -71,7 +71,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== setup"
-mkdir -p "$ROOT/sample-app/.hermes/worktrees/w1" "$SECRETS/sample-app/test"
+mkdir -p "$ROOT/sample-app/.hermes" "$SECRETS/sample-app/test"
 cat > "$ROOT/sample-app/.hermes/project.yaml" <<'YAML'
 version: 1
 project: {name: sample-app}
@@ -103,7 +103,8 @@ check "task READY" "READY" "$(wait_task "$T3" READY)"
 check "provider status lists both adapters" "claude,codex" "$(ho auth status | field '",".join(sorted(p["provider"] for p in d["providers"]))')"
 
 echo "== no login: the execution fails as AUTH and the task waits"
-E1="$(ho agent run "$T1" "Add a README" --provider codex --workspace .hermes/worktrees/w1 --workspace-access WRITE | field 'd["id"]')"
+W1="$(ho git workspace "$T1" | field 'd["path"]')"
+E1="$(ho agent run "$T1" "Add a README" --provider codex --workspace "$W1" --workspace-access WRITE | field 'd["id"]')"
 check "execution failed" "FAILED" "$(wait_exec "$E1")"
 check "failure class AUTH" "AUTH" "$(ho execution show "$E1" | field 'd["failure_class"]')"
 check "task AUTH_REQUIRED" "AUTH_REQUIRED" "$(wait_task "$T1" AUTH_REQUIRED)"
@@ -129,7 +130,8 @@ check "raw provider stream not stored" "" "$(dc exec -T control-plane sh -c "ls 
 
 echo "== Claude Code with an invalid login (real CLI)"
 fake_login claude
-E2="$(ho agent run "$T2" "Review the project" --provider claude --role REVIEWER --workspace .hermes/worktrees/w1 --workspace-access READ | field 'd["id"]')"
+W2="$(ho git workspace "$T2" | field 'd["path"]')"
+E2="$(ho agent run "$T2" "Review the project" --provider claude --role REVIEWER --workspace "$W2" --workspace-access READ | field 'd["id"]')"
 check "claude execution failed as AUTH" "FAILED/AUTH" "$(wait_exec "$E2")/$(ho execution show "$E2" | field 'd["failure_class"]')"
 check "claude session captured for resume" "True" "$(ho execution show "$E2" | field 'bool(d["provider_session_id"])')"
 check "Claude reached Anthropic through the proxy" "True" \

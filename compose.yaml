@@ -80,8 +80,9 @@ services:
       HO_AGENT_MANAGER_URL: http://agent-manager:8082
       HO_AGENT_MANAGER_TOKEN_FILE: /run/secrets/ho_agent_manager_token
       HO_PROVIDER_IDENTITY: ${HO_PROVIDER_IDENTITY:-default}
+      HO_MERGE_KEY_FILE: /run/secrets/ho_merge_key
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
-    secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token]
+    secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token, ho_merge_key]
     volumes:
       - ./config:/app/config:ro
       - artifacts:/var/lib/ho/artifacts
@@ -98,13 +99,17 @@ services:
     <<: *hardening
     environment:
       HO_GIT_SERVICE_TOKEN_FILE: /run/secrets/ho_git_service_token
+      HO_MERGE_KEY_FILE: /run/secrets/ho_merge_key
       HO_PROJECTS_ROOT: /projects
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
-    secrets: [ho_git_service_token]
+    secrets: [ho_git_service_token, ho_merge_key]
     volumes:
-      # Read-only until Phase 5 adds workspace and integration operations.
-      - ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}:/projects:ro
-    networks: [ho-control]
+      # The only read-write mount of the projects root: workspaces, integration refs, approved merges.
+      - ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}:/projects
+      # GitHub CLI login (make auth-github). Never mounted anywhere else, never backed up.
+      - gh-config:/var/lib/ho/gh
+    # ho-git-egress reaches GitHub over HTTPS; nothing else is on that network.
+    networks: [ho-control, ho-git-egress]
 
   agent-manager:
     image: hermes-orchestrator/agent-manager:${HO_VERSION:-dev}
@@ -135,10 +140,12 @@ networks:
   ho-data: {internal: true}
   ho-control: {internal: true}
   ho-edge: {internal: true}
+  ho-git-egress: {}
 
 volumes:
   pg-data:
   artifacts:
+  gh-config:
 
 secrets:
   ho_owner_db_password: {file: ./secrets/ho_owner_db_password}
@@ -148,3 +155,4 @@ secrets:
   ho_operator_token: {file: ./secrets/ho_operator_token}
   ho_git_service_token: {file: ./secrets/ho_git_service_token}
   ho_agent_manager_token: {file: ./secrets/ho_agent_manager_token}
+  ho_merge_key: {file: ./secrets/ho_merge_key}

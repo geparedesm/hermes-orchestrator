@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phase 4 (Claude/Codex workers) was approved by Gabriel Paredes on 2026-09-30 (PR #5; evidence in [docs/validation/phase-4.md](docs/validation/phase-4.md)). Phases 5–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) was approved by Gabriel Paredes on 2026-09-30 (PR #3; evidence in [docs/validation/phase-2.md](docs/validation/phase-2.md)). Phase 3 (Agent Manager) was approved by Gabriel Paredes on 2026-09-30 (PR #4; evidence in [docs/validation/phase-3.md](docs/validation/phase-3.md)). Phase 4 (Claude/Codex workers) was approved by Gabriel Paredes on 2026-09-30 (PR #5; evidence in [docs/validation/phase-4.md](docs/validation/phase-4.md)). Phase 5 (Git isolation) was approved by Gabriel Paredes on 2026-09-30 (PR #6; evidence in [docs/validation/phase-5.md](docs/validation/phase-5.md)). Phases 6–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -110,17 +110,19 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Preserve human work while preparing reviewed, approval-controlled changes.
 
-- [ ] Create dedicated host worktrees and branches for tasks/subtasks.
-- [ ] Track each task's base commit and preserve the user's normal checkout.
-- [ ] Implement Human Change Protection and divergence/conflict classification.
-- [ ] Implement controlled reconciliation, with retesting after rebase/merge and escalation for hard conflicts.
-- [ ] Implement Git Service for local repositories and GitHub repositories.
-- [ ] Restrict GitHub credentials to Git Service; support persistent `gh auth login` for v1.
-- [ ] Support controlled push, remote branches, PR creation/update, and CI status retrieval.
-- [ ] Enforce action-specific approval before merging into protected branches, including local-only repositories.
-- [ ] Prevent force pushes and deletion of protected branches.
+- [x] Create dedicated host worktrees and branches for tasks/subtasks. *(Isolated clones, AD-06; subtasks arrive with the DAG in Phase 7.)*
+- [x] Track each task's base commit and preserve the user's normal checkout.
+- [x] Implement Human Change Protection and divergence/conflict classification.
+- [x] Implement controlled reconciliation, with retesting after rebase/merge and escalation for hard conflicts.
+- [x] Implement Git Service for local repositories and GitHub repositories.
+- [x] Restrict GitHub credentials to Git Service; support persistent `gh auth login` for v1.
+- [x] Support controlled push, remote branches, PR creation/update, and CI status retrieval. *(Tested with a local bare remote and a GitHub CLI stand-in; a run against real GitHub is part of the operator review.)*
+- [x] Enforce action-specific approval before merging into protected branches, including local-only repositories.
+- [x] Prevent force pushes and deletion of protected branches.
 
 **Completion criteria:** Work stays isolated, human changes are not silently overwritten, and protected merges cannot proceed without valid human approval.
+
+**Status:** Complete. Approved by Gabriel Paredes on 2026-09-30 (PR #6). 173 unit, 63 integration, and 39 real-Docker tests, plus a 23-check end-to-end smoke test on the Compose stack with a local repository (macOS, Apple Silicon); the Phase 2–4 smoke tests pass unchanged in substance. GitHub operations are verified against a local bare remote and a `gh` stand-in; a run against a real GitHub repository needs the operator's `make auth-github`. Evidence, decisions, and limitations: [docs/validation/phase-5.md](docs/validation/phase-5.md).
 
 ## Phase 6: Testing
 

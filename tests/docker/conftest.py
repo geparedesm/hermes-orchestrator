@@ -47,9 +47,17 @@ def git_repo(path: Path) -> Path:
     return path
 
 
+TEST_IDENTITIES = ("hotest", "bogus", "empty", "refresh")
+
+
 @pytest.fixture(scope="session")
-def client() -> docker.DockerClient:
-    return docker.from_env()
+def client() -> Iterator[docker.DockerClient]:
+    docker_client = docker.from_env()
+    yield docker_client
+    # Remove the throwaway credential volumes these tests create; never the operator's identities.
+    for volume in docker_client.volumes.list(filters={"label": "ho.credential"}):
+        if volume.name.rsplit("-", 1)[-1] in TEST_IDENTITIES:
+            volume.remove(force=True)
 
 
 @pytest.fixture

@@ -34,6 +34,8 @@ class Context:
     git: GitServiceClient
     agents: AgentManagerClient | None = None
     provider_identity: str = "default"
+    # Signs merge authorizations for Git Service (HO_MERGE_KEY_FILE).
+    merge_key: bytes = b""
 
     @property
     def policy_version(self) -> str:

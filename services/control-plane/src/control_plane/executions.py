@@ -75,6 +75,8 @@ class Executions:
     def __init__(self, ctx: Context, tasks: Tasks) -> None:
         self.ctx = ctx
         self.tasks = tasks
+        # Set by GitChanges: rejects workspaces that are not the task's own (Phase 5).
+        self.workspace_check: Any = None
         tasks.on_cancel.append(self.stop_task_executions)
 
     @property
@@ -115,11 +117,12 @@ class Executions:
     # ----------------------------------------------------------------- request
 
     def request(self, uow: UnitOfWork, *, principal: Principal, task_key: str, req: ExecutionRequest,
-                replacing: UUID | None = None, retry_of: UUID | None = None) -> Row:
+                replacing: UUID | None = None, retry_of: UUID | None = None, allow_waiting: bool = False) -> Row:
         if self.ctx.agents is None:
             raise UpstreamError("agent-manager is not configured")
         task = self.tasks.get(uow, task_key, lock=True)
-        if TaskState(task["state"]) not in ACTIVE_STATES:
+        # Post-merge verification is the only work allowed while a task is VERIFYING.
+        if TaskState(task["state"]) not in ACTIVE_STATES and not (allow_waiting and task["state"] == TaskState.VERIFYING):
             raise Conflict(f"{task_key} is {task['state']}; executions need an active task")
         uow.cur.execute("SELECT * FROM projects WHERE id = %s", (task["project_id"],))
         project = uow.cur.fetchone()
@@ -165,6 +168,8 @@ class Executions:
         if req.workspace:
             if not _WORKSPACE.match(req.workspace):
                 raise BadRequest("workspace must be .hermes/worktrees/<name>")
+            if self.workspace_check is not None:
+                self.workspace_check(uow, task, req.workspace)
             workspace = f"{project['relative_path']}/{req.workspace}"
         toolchain = image_suffix((config.get("toolchain") or {}).get("profiles") or ["generic"])
         image = req.image or (f"{provider}-{toolchain}" if provider else f"runner-{toolchain}")

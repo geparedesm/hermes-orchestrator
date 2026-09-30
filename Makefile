@@ -9,7 +9,7 @@ COMPOSE := docker compose
 TEST_DB := postgresql://ho_test_admin:ho_test_admin@127.0.0.1:55432/postgres
 TEST_REDIS := redis://127.0.0.1:56379/15
 
-.PHONY: help venv secrets images up down ps logs cli auth-claude auth-codex test test-unit test-integration test-docker test-env test-env-down smoke smoke-phase3 smoke-phase4 lint validate-schemas
+.PHONY: help venv secrets images up down ps logs cli auth-claude auth-codex auth-github test test-unit test-integration test-docker test-env test-env-down smoke smoke-phase3 smoke-phase4 smoke-phase5 lint validate-schemas
 
 help:
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -46,6 +46,10 @@ auth-claude: ## Log in Claude Code with your subscription (IDENTITY=default)
 auth-codex: ## Log in Codex with your ChatGPT account (IDENTITY=default)
 	./scripts/auth-login.sh codex $(IDENTITY)
 
+auth-github: ## Log in the GitHub CLI for Git Service only (pushes, pull requests, approved merges)
+	$(COMPOSE) run --rm --no-deps -e HOME=/tmp git-service gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key --insecure-storage
+	$(COMPOSE) run --rm --no-deps -e HOME=/tmp git-service gh auth status
+
 test: test-unit test-integration ## Run unit and integration tests
 
 test-unit: ## Run unit tests
@@ -71,6 +75,9 @@ smoke-phase3: secrets images ## End-to-end Phase 3 smoke test (real workers)
 
 smoke-phase4: secrets images ## End-to-end Phase 4 smoke test (agent executions, auth, secrets)
 	./scripts/smoke-phase4.sh
+
+smoke-phase5: secrets images ## End-to-end Phase 5 smoke test (workspaces, human changes, integration, approved merge)
+	./scripts/smoke-phase5.sh
 
 lint: ## Static checks
 	$(VENV)/bin/ruff check packages services tests migrations scripts
