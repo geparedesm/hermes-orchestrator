@@ -4,7 +4,7 @@ This roadmap contains all twelve implementation phases defined in section 88 of 
 
 All code, filenames, comments, configuration documentation, and project documentation must be written in English.
 
-**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture documents and schemas are drafted and awaiting review. Phases 2–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
+**Current status:** Phase 0 discovery is complete and was approved by Gabriel Paredes on 2026-09-30. Phase 1 architecture was approved by Gabriel Paredes on 2026-09-30 (PR #2). Phase 2 (minimal control plane) is implemented and validated, pending review ([docs/validation/phase-2.md](docs/validation/phase-2.md)). Phases 3–11 are **Not started**. See [DISCOVERY.md](DISCOVERY.md) for findings, evidence, limitations, and the proposed architecture. Checkboxes track completed work, not planned work; production readiness still requires later runtime validation.
 
 ## Execution Rules
 
@@ -50,24 +50,26 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Completion criteria:** Architecture documents and diagrams consistently describe storage, execution, security, networking, and integration responsibilities.
 
-**Status:** Drafted, pending review. Deliverables: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY_MODEL.md](SECURITY_MODEL.md), [DATA_MODEL.md](DATA_MODEL.md), [NETWORK_MODEL.md](NETWORK_MODEL.md), and [schemas/](schemas/) (validated with `scripts/validate_schemas.py`). Open items OI-01 to OI-08 in ARCHITECTURE §15 are assigned to later phases.
+**Status:** Complete. Approved by Gabriel Paredes on 2026-09-30 (PR #2). Deliverables: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY_MODEL.md](SECURITY_MODEL.md), [DATA_MODEL.md](DATA_MODEL.md), [NETWORK_MODEL.md](NETWORK_MODEL.md), and [schemas/](schemas/) (validated with `scripts/validate_schemas.py`). Open items OI-01 to OI-08 in ARCHITECTURE §15 are assigned to later phases.
 
 ## Phase 2: Minimal Control Plane
 
 **Objective:** Establish persistent task management, project registration, scheduling, and policy enforcement.
 
-- [ ] Implement PostgreSQL migrations and Redis integration.
-- [ ] Implement the Task API and deterministic task state transitions.
-- [ ] Implement Project Registry operations and explicit project security boundaries.
-- [ ] Implement read-only onboarding, environment detection, configuration proposals, and approval before `PROJECT_READY`.
-- [ ] Implement validated project configuration and precedence rules without weakening hard policies.
-- [ ] Implement the basic Scheduler and task queue.
-- [ ] Implement the Policy Engine, command risk classification, environment access rules, and autonomy profiles.
-- [ ] Implement the Approval Service with action-specific records and state/configuration hashes.
-- [ ] Establish authenticated control APIs, structured logging, health checks, and idempotent operations.
-- [ ] Add initial Compose configuration and macOS/Linux configuration profiles.
+- [x] Implement PostgreSQL migrations and Redis integration.
+- [x] Implement the Task API and deterministic task state transitions.
+- [x] Implement Project Registry operations and explicit project security boundaries.
+- [x] Implement read-only onboarding, environment detection, configuration proposals, and approval before `PROJECT_READY`.
+- [x] Implement validated project configuration and precedence rules without weakening hard policies.
+- [x] Implement the basic Scheduler and task queue.
+- [x] Implement the Policy Engine, command risk classification, environment access rules, and autonomy profiles.
+- [x] Implement the Approval Service with action-specific records and state/configuration hashes.
+- [x] Establish authenticated control APIs, structured logging, health checks, and idempotent operations.
+- [x] Add initial Compose configuration and macOS/Linux configuration profiles.
 
 **Completion criteria:** Registered projects and tasks persist across service restarts; scheduling and protected actions respect policy and approval checks.
+
+**Status:** Implemented, pending review. 76 unit tests, 23 integration tests, and a 21-check end-to-end smoke test pass on macOS (Apple Silicon); evidence and known limitations are in [docs/validation/phase-2.md](docs/validation/phase-2.md). Linux has been validated only through configuration schemas so far. No workers exist yet, so READY tasks wait in the queue until Phase 3.
 
 ## Phase 3: Agent Manager
 

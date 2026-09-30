@@ -1,0 +1,19 @@
+# Linux server with Docker Engine. Overrides config/defaults.yaml.
+#
+# Conservative starting values, not Mac values (MASTER_SPEC section 81).
+# Size max_agent_workers and the resource profiles to the host's CPU and RAM.
+platform:
+  projects_root_host: /srv/HermesProjects
+
+machine:
+  name: linux
+  platform: linux/amd64
+  max_agent_workers: 2
+  starting_mix: {claude: 1, codex: 1}
+  resource_profiles:
+    LIGHT: {cpus: 1, memory_gb: 2}
+    NORMAL: {cpus: 2, memory_gb: 4}
+    HEAVY: {cpus: 4, memory_gb: 8}
+  runners:
+    test: {cpus: 2, memory_gb: 4}
+    browser: {cpus: 2, memory_gb: 4}

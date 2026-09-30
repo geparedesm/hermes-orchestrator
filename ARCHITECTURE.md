@@ -1,7 +1,7 @@
 # Architecture
 
 **Phase:** 1 (Architecture)  
-**Status:** Draft for review  
+**Status:** Approved by Gabriel Paredes on 2026-09-30 (PR #2)  
 **Inputs:** [MASTER_SPEC.md](MASTER_SPEC.md) (source of truth), [DISCOVERY.md](DISCOVERY.md) (approved 2026-09-30)  
 **Companion documents:** [SECURITY_MODEL.md](SECURITY_MODEL.md), [DATA_MODEL.md](DATA_MODEL.md), [NETWORK_MODEL.md](NETWORK_MODEL.md), [schemas/](schemas/)
 
@@ -380,10 +380,13 @@ hermes-orchestrator/
 ├── README.md
 ├── MASTER_SPEC.md, PHASES.md, DISCOVERY.md
 ├── ARCHITECTURE.md, SECURITY_MODEL.md, DATA_MODEL.md, NETWORK_MODEL.md
+├── compose.test.yaml              # throwaway PostgreSQL and Redis for integration tests
+├── requirements.lock             # pinned Python dependency versions for images
 ├── config/
 │   ├── defaults.yaml
 │   ├── mac-m2-pro.yaml
-│   └── linux.yaml
+│   ├── linux.yaml
+│   └── local.yaml                # optional, untracked machine-specific overrides
 ├── packages/
 │   └── ho_core/              # shared typed contracts, schema loading, policy types, adapters
 ├── services/
@@ -452,5 +455,5 @@ Details belong to Phase 8 (`docs/recovery.md`). The architecture guarantees the 
 | OI-04 | Confirm Dashboard plugin route authentication with unauthorized requests (D08). | 9 |
 | OI-05 | Choose the egress proxy image and allowlist mechanism for restricted networks (NETWORK_MODEL §5). | 3 |
 | OI-06 | Measure the disk and time cost of isolated clones on large repositories; evaluate the read-only `--reference` optimization. | 5 |
-| OI-07 | Validate the pinned Hermes image boots with the plugin on both architectures, and that SQLite state uses a container-native volume (D07, D09). | 2 |
+| OI-07 | Validate the pinned Hermes image boots with the plugin on both architectures, and that SQLite state uses a container-native volume (D07, D09). **Phase 2 result:** the pinned index digest boots on `linux/arm64` and on `linux/amd64` (emulated) with a named volume at `HERMES_HOME=/opt/data`, reports `v0.21.5 (2026.9.24) · upstream f97608f1`, and its OCI revision label matches the inspected commit. Booting *with the plugin* moves to Phase 9, when the plugin exists. See [docs/validation/phase-2.md](docs/validation/phase-2.md). | 2, 9 |
 | OI-08 | Decide whether a read-only projection into the native Kanban board is worth adding after v1 (AD-02). | 10 |

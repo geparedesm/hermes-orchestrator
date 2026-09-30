@@ -1,7 +1,7 @@
 # Security Model
 
 **Phase:** 1 (Architecture)  
-**Status:** Draft for review  
+**Status:** Approved by Gabriel Paredes on 2026-09-30 (PR #2)  
 **Inputs:** [MASTER_SPEC.md](MASTER_SPEC.md) sections 11–13, 20–26, 39–41, 49, 53–55, 62, 82, 86, 89, 91; [DISCOVERY.md](DISCOVERY.md) D05, D06, D08, D11–D14  
 **Related:** [ARCHITECTURE.md](ARCHITECTURE.md), [NETWORK_MODEL.md](NETWORK_MODEL.md), [schemas/capability.schema.json](schemas/capability.schema.json)
 

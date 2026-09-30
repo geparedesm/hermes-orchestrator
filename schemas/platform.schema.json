@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hermes-orchestrator:schema:platform:1",
+  "title": "Platform configuration",
+  "description": "Merged config/defaults.yaml + config/<machine>.yaml + optional config/local.yaml (ARCHITECTURE.md section 9.2). project_defaults is validated as part of each project's effective configuration against project.schema.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "platform", "machine", "scheduler", "budgets", "project_defaults"],
+  "properties": {
+    "version": { "const": 1 },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_version", "projects_root_host", "approvers", "approval_ttl_hours"],
+      "properties": {
+        "policy_version": { "type": "string", "pattern": "^[0-9A-Za-z.+-]{1,32}$" },
+        "projects_root_host": { "type": "string", "pattern": "^/.+", "description": "Absolute host path." },
+        "approvers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}:.{1,200}$" }
+        },
+        "approval_ttl_hours": {
+          "type": "object",
+          "required": ["default"],
+          "propertyNames": {
+            "enum": ["default", "MERGE", "SCOPE_EXPANSION", "BUDGET_INCREASE", "BUDGET_UNLIMITED", "HIGH_RISK_OPERATION", "ENVIRONMENT_ACCESS", "PROJECT_CONFIG_CHANGE", "ASSUMPTION", "UPDATE", "PROJECT_READY"]
+          },
+          "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 720 }
+        }
+      }
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "max_agent_workers", "starting_mix", "max_execution_minutes", "resource_profiles", "runners"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "platform": { "enum": ["linux/arm64", "linux/amd64"] },
+        "max_agent_workers": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "starting_mix": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "claude": { "type": "integer", "minimum": 0 },
+            "codex": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "max_execution_minutes": { "type": "integer", "minimum": 5, "maximum": 1440 },
+        "resource_profiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["LIGHT", "NORMAL", "HEAVY"],
+          "properties": {
+            "LIGHT": { "$ref": "#/$defs/limits" },
+            "NORMAL": { "$ref": "#/$defs/limits" },
+            "HEAVY": { "$ref": "#/$defs/limits" }
+          }
+        },
+        "runners": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["test", "browser"],
+          "properties": {
+            "test": { "$ref": "#/$defs/limits" },
+            "browser": { "$ref": "#/$defs/limits" }
+          }
+        }
+      }
+    },
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["poll_seconds", "aging_minutes"],
+      "properties": {
+        "poll_seconds": { "type": "number", "minimum": 0.1, "maximum": 300 },
+        "aging_minutes": { "type": "integer", "minimum": 1, "maximum": 10080 }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["SMALL", "NORMAL", "LARGE", "thresholds"],
+      "properties": {
+        "SMALL": { "$ref": "#/$defs/budget" },
+        "NORMAL": { "$ref": "#/$defs/budget" },
+        "LARGE": { "$ref": "#/$defs/budget" },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["warning_percent", "optimize_percent"],
+          "properties": {
+            "warning_percent": { "type": "integer", "minimum": 1, "maximum": 99 },
+            "optimize_percent": { "type": "integer", "minimum": 1, "maximum": 99 }
+          }
+        }
+      }
+    },
+    "project_defaults": { "type": "object" }
+  },
+  "$defs": {
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpus", "memory_gb"],
+      "properties": {
+        "cpus": { "type": "number", "exclusiveMinimum": 0, "maximum": 256 },
+        "memory_gb": { "type": "number", "exclusiveMinimum": 0, "maximum": 2048 }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime_minutes", "agent_launches", "retries", "review_cycles", "subtasks", "provider_usage_units"],
+      "properties": {
+        "runtime_minutes": { "type": ["integer", "null"], "minimum": 1 },
+        "agent_launches": { "type": ["integer", "null"], "minimum": 1 },
+        "retries": { "type": ["integer", "null"], "minimum": 0 },
+        "review_cycles": { "type": ["integer", "null"], "minimum": 1 },
+        "subtasks": { "type": ["integer", "null"], "minimum": 1 },
+        "provider_usage_units": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    }
+  }
+}

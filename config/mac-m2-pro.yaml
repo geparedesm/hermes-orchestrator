@@ -1,0 +1,22 @@
+# MacBook Pro M2 Pro with Docker Desktop (linux/arm64). Overrides config/defaults.yaml.
+#
+# Resource limits apply inside the Docker Desktop VM. Three NORMAL workers need
+# 12 GB plus the persistent services: raise Docker Desktop's memory allocation
+# (Settings > Resources) or lower the profiles below. Agent Manager (Phase 3)
+# refuses to start executions that exceed the VM's available memory.
+platform:
+  projects_root_host: /Users/CHANGE_ME/HermesProjects
+
+machine:
+  name: mac-m2-pro
+  platform: linux/arm64
+  # MASTER_SPEC section 33: maximum three simultaneous agent workers on the M2 Pro.
+  max_agent_workers: 3
+  starting_mix: {claude: 1, codex: 2}
+  resource_profiles:
+    LIGHT: {cpus: 1, memory_gb: 2}
+    NORMAL: {cpus: 2, memory_gb: 4}
+    HEAVY: {cpus: 4, memory_gb: 8}
+  runners:
+    test: {cpus: 2, memory_gb: 4}
+    browser: {cpus: 2, memory_gb: 3}

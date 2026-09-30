@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ho-core"
+version = "0.1.0"
+description = "Shared contracts, configuration, and policy for Hermes Orchestrator."
+# The Hermes plugin imports this package inside Hermes' own interpreter
+# (>=3.11,<3.14 at the pinned release), so keep syntax 3.11-compatible.
+requires-python = ">=3.11"
+dependencies = [
+  "jsonschema[format]>=4.23,<5",
+  "PyYAML>=6.0.2,<7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ho_core"]

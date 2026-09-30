@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ho-control-plane"
+version = "0.1.0"
+description = "Hermes Orchestrator control plane: Task API, Project Registry, Policy Engine, Approval Service, Scheduler."
+requires-python = ">=3.12"
+dependencies = [
+  "ho-core",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.32,<1",
+  "psycopg[binary]>=3.2,<4",
+  "psycopg-pool>=3.2,<4",
+  "redis>=5.2,<7",
+  "httpx>=0.28,<1",
+  "alembic>=1.14,<2",
+  "SQLAlchemy>=2.0.36,<3",
+]
+
+[project.scripts]
+control-plane = "control_plane.main:main"
+ho = "control_plane.cli:main"
+ho-migrate = "control_plane.migrate:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/control_plane"]

@@ -1,0 +1,60 @@
+# Hermes Orchestrator developer and operator commands.
+# Copy/paste friendly: every target prints what it runs.
+
+SHELL := /bin/bash
+PYTHON ?= python3.12
+VENV := .venv
+COMPOSE := docker compose
+TEST_DB := postgresql://ho_test_admin:ho_test_admin@127.0.0.1:55432/postgres
+TEST_REDIS := redis://127.0.0.1:56379/15
+
+.PHONY: help venv secrets up down ps logs cli test test-unit test-integration test-env test-env-down smoke lint validate-schemas
+
+help:
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
+
+venv: ## Create the local Python 3.12 environment for development and tests
+	$(PYTHON) -m venv $(VENV)
+	$(VENV)/bin/pip install -c requirements.lock -e packages/ho_core -e services/control-plane -e services/git-service
+	$(VENV)/bin/pip install pytest ruff
+
+secrets: ## Generate service passwords and tokens in ./secrets (idempotent)
+	./scripts/init-secrets.sh
+
+up: secrets ## Build and start the platform (needs .env)
+	$(COMPOSE) up -d --build --wait
+
+down: ## Stop the platform (keeps data volumes)
+	$(COMPOSE) down
+
+ps: ## Show service status
+	$(COMPOSE) ps
+
+logs: ## Follow service logs
+	$(COMPOSE) logs -f --tail=100
+
+cli: ## Open the operator CLI help (docker compose exec control-plane ho ...)
+	$(COMPOSE) exec control-plane ho --help
+
+test: test-unit test-integration ## Run unit and integration tests
+
+test-unit: ## Run unit tests
+	$(VENV)/bin/pytest tests/unit -q
+
+test-env: ## Start throwaway PostgreSQL and Redis for integration tests
+	$(COMPOSE) -f compose.test.yaml up -d --wait
+
+test-env-down: ## Remove the integration test containers
+	$(COMPOSE) -f compose.test.yaml down -v
+
+test-integration: test-env ## Run integration tests against real PostgreSQL and Redis
+	HO_TEST_DATABASE_URL=$(TEST_DB) HO_TEST_REDIS_URL=$(TEST_REDIS) $(VENV)/bin/pytest tests/integration -q -p no:warnings
+
+smoke: secrets ## End-to-end Phase 2 smoke test on a throwaway Compose stack
+	./scripts/smoke-phase2.sh
+
+lint: ## Static checks
+	$(VENV)/bin/ruff check packages services tests migrations scripts
+
+validate-schemas: ## Validate JSON Schemas, examples, and machine profiles
+	$(VENV)/bin/python scripts/validate_schemas.py
