@@ -276,8 +276,9 @@ class DockerOps:
             raise Rejected(f"volume {name} exists but is not {project}'s {ecosystem} cache")
 
     def _caches_in_use(self) -> set[str]:
+        """Volumes referenced by any managed container, running or not yet removed (Docker refuses to remove those)."""
         used = set()
-        for container in self.client.containers.list(filters={"label": "ho.managed=true"}):
+        for container in self.client.containers.list(all=True, filters={"label": "ho.managed=true"}):
             used |= {m.get("Name") for m in container.attrs.get("Mounts", []) if m.get("Type") == "volume"}
         return used
 

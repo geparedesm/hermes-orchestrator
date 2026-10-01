@@ -95,8 +95,9 @@ update: ## Approval-controlled update: make update VERSION=x [APPROVAL=id]
 	scripts/update.sh $(VERSION) $(APPROVAL)
 
 test-security: test-env ## The security suite (tests/security_suite.txt; docs/security-tests.md), including real-Docker tests
-	HO_TEST_DATABASE_URL=$(TEST_DB) HO_TEST_REDIS_URL=$(TEST_REDIS) HO_TEST_DOCKER=1 $(VENV)/bin/pytest -q -p no:warnings \
-		$$(grep -v '^#' tests/security_suite.txt)
+	HO_TEST_DATABASE_URL=$(TEST_DB) HO_TEST_REDIS_URL=$(TEST_REDIS) $(VENV)/bin/pytest -q -p no:warnings \
+		$$(grep -v '^#' tests/security_suite.txt | grep -v '^tests/docker/')
+	HO_TEST_DOCKER=1 $(VENV)/bin/pytest -q -p no:warnings $$(grep '^tests/docker/' tests/security_suite.txt)
 
 lint: ## Static checks
 	$(VENV)/bin/ruff check packages services tests migrations scripts
