@@ -66,7 +66,7 @@ def export(out: Path) -> None:
                 tar.addfile(info, io.BytesIO(data))
             elif _is_sqlite(path):
                 copy = Path(scratch) / relative.name
-                source, target = sqlite3.connect(f"file:{path}?mode=ro", uri=True), sqlite3.connect(copy)
+                source, target = sqlite3.connect(path), sqlite3.connect(copy)  # the backup API copies a consistent snapshot
                 with target:
                     source.backup(target)
                 source.close()

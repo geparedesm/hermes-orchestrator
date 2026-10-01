@@ -31,7 +31,7 @@ dc exec -T postgres pg_dump -U ho_owner -d ho --format=custom --no-password > "$
 echo "  postgres     $(du -h "$OUT/postgres.dump" | cut -f1)"
 
 docker run --rm --network none -u 0 --entrypoint /opt/hermes/.venv/bin/python \
-  -v "${PROJECT}_hermes-data:/data:ro" -v "$PWD/scripts/hermes_state.py:/opt/ho/hermes_state.py:ro" -v "$OUT:/out" \
+  -v "${PROJECT}_hermes-data:/data" -v "$PWD/scripts/hermes_state.py:/opt/ho/hermes_state.py:ro" -v "$OUT:/out" \
   "$HERMES_IMAGE" /opt/ho/hermes_state.py export /out/hermes-data.tar.gz
 echo "  hermes       $(du -h "$OUT/hermes-data.tar.gz" | cut -f1)"
 
@@ -60,5 +60,5 @@ fi
 trap - ERR
 
 # Keep the newest $KEEP backups.
-ls -1d "$DIR"/[0-9]*T*Z 2>/dev/null | sort | head -n "-$KEEP" | while read -r old; do rm -rf "$old"; echo "  pruned       $old"; done
+ls -1d "$DIR"/[0-9]*T*Z 2>/dev/null | sort | awk -v keep="$KEEP" '{ line[NR] = $0 } END { for (i = 1; i <= NR - keep; i++) print line[i] }' | while read -r old; do rm -rf "$old"; echo "  pruned       $old"; done
 echo "backup complete: $OUT"
