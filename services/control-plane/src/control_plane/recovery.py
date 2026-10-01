@@ -175,9 +175,13 @@ class Outbox:
         if not self.url:
             return stats  # Hermes integration (Phase 9) not configured: notifications wait in the outbox
         with self.ctx.unit_of_work() as uow:
-            uow.cur.execute("SELECT * FROM notifications WHERE state = 'PENDING' AND next_attempt_at <= now() "
+            # Strict order: the oldest pending notification (attention first) gates the rest, and its backoff is
+            # the outbox's backoff while Hermes is unreachable.
+            uow.cur.execute("SELECT *, next_attempt_at <= now() AS due FROM notifications WHERE state = 'PENDING' "
                             "ORDER BY priority, created_at LIMIT %s", (OUTBOX_BATCH,))
             rows = uow.cur.fetchall()
+        if not rows or not rows[0]["due"]:
+            return stats
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         for row in rows:
             try:
@@ -318,7 +322,9 @@ class Recovery:
         if self.ctx.agents is None:
             return stats
         managed = self.ctx.agents.managed()
-        ids = {c["labels"].get("ho.execution") for c in managed.get("containers", []) if c["labels"].get("ho.execution")}
+        # Networks and volumes too: a cleanup interrupted after removing the containers must still be finished.
+        ids = {(r.get("labels") or {}).get("ho.execution") for kind in ("containers", "networks", "volumes")
+               for r in managed.get(kind, [])} - {None, ""}
         if not ids:
             return stats
         with self.ctx.unit_of_work() as uow:
@@ -403,7 +409,8 @@ class Recovery:
                     with uow.cur.connection.transaction():
                         self.git.collect(uow, key)
                 except ApiError as exc:
-                    log.warning("could not collect %s before retaining it: %s", key, exc)
+                    log.warning("could not collect %s before retaining it; retried next pass: %s", key, exc)
+                    continue  # stays ACTIVE so collection is retried once Git Service is back
                 uow.cur.execute("UPDATE workspaces SET status = 'RETAINED' WHERE task_id = (SELECT id FROM tasks WHERE key = %s) "
                                 "AND status = 'ACTIVE' RETURNING id", (key,))
                 retained += len(uow.cur.fetchall())

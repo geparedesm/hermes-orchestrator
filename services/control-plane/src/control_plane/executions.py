@@ -347,6 +347,11 @@ class Executions:
             row = self.get(uow, execution_id, lock=True)
             if row["state"] != "REQUESTED":
                 return
+            # While Agent Manager is DEGRADED every dispatch path waits (no attempt is spent); the health probe
+            # keeps checking and dispatching resumes when it recovers.
+            uow.cur.execute("SELECT 1 FROM component_health WHERE component = 'agent_manager' AND state = 'DEGRADED'")
+            if uow.cur.fetchone() is not None:
+                return
             if (row["spec"].get("purpose") or {}).get("fenced"):
                 uow.cur.execute("SELECT epoch FROM task_leases WHERE task_id = %s FOR UPDATE", (row["task_id"],))
                 lease = uow.cur.fetchone()

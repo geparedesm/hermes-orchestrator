@@ -256,3 +256,52 @@ def test_no_failback_right_after_a_failover(api, services, repo):
     services.scheduler.run_once()
     assert q(services, "SELECT provider FROM task_leases")[0]["provider"] == "codex"  # held for FAILBACK_HOLD
     assert key
+
+
+# ------------------------------------------------------------------ Codex review findings
+
+
+def test_recovery_does_not_dispatch_while_agent_manager_is_degraded(api, services, agents, task):
+    agents.fail_with = AgentManagerError(0, "unavailable", "connection refused")
+    for _ in range(DEGRADED_AFTER):
+        services.recovery.health.check()
+    execution = run_agent(api, task)
+    for _ in range(5):
+        services.recovery.run("PERIODIC")
+    [row] = q(services, "SELECT state, dispatch_attempts FROM executions WHERE id = %s", execution)
+    assert (row["state"], row["dispatch_attempts"]) == ("REQUESTED", 0)
+
+
+def test_failed_collection_keeps_workspaces_for_retry(api, services, agents, repo, task, monkeypatch):
+    ws = workspace(api, task)
+    commit(clone(repo, ws), "unfinished", {"app.py": "x = 4\n"})
+    api.post(f"/v1/tasks/{task}/cancel")
+    real = services.ctx.git.collect
+
+    def down(*args, **kwargs):
+        from control_plane.errors import UpstreamError
+        raise UpstreamError("git-service unavailable")
+
+    monkeypatch.setattr(services.ctx.git, "collect", down)
+    assert services.recovery.run("PERIODIC")["retained"]["workspaces"] == 0
+    assert q(services, "SELECT status FROM workspaces")[0]["status"] == "ACTIVE"
+    monkeypatch.setattr(services.ctx.git, "collect", real)
+    assert services.recovery.run("PERIODIC")["retained"]["workspaces"] == 1
+
+
+def test_orphaned_networks_without_containers_are_removed(api, services, agents, task):
+    agents.networks.append({"name": "ho-x-net", "labels": {"ho.execution": "01a0f000-0000-7000-8000-000000000002"}})
+    assert services.recovery.run("PERIODIC")["orphans"]["removed"] == 1
+    assert agents.networks == []
+
+
+def test_outbox_head_backoff_gates_later_notifications(api, services, agents, task):
+    calls = []
+    outbox = services.outbox
+    outbox.url = "http://hermes.test/notify"
+    outbox.client = httpx.Client(transport=httpx.MockTransport(lambda r: calls.append(r) or httpx.Response(503)))
+    outbox.deliver()
+    assert len(calls) == 1
+    outbox.deliver()  # the head is backing off: no request, and nothing later jumps ahead
+    assert len(calls) == 1
+    assert q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'SENT'")[0]["n"] == 0
