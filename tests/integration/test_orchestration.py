@@ -458,3 +458,14 @@ def test_orphaned_tasks_are_adopted(api, services, agents, task):
     assert lease["holder"] == services.ctx.instance_id and lease["epoch"] == 2  # never reuses an epoch
     assert len(active(services, task, "ORCHESTRATOR")) == 1
     assert "LEASE_ADOPTED" in [r["type"] for r in q(services, "SELECT type FROM events")]
+
+
+def test_research_subtasks_are_accepted_without_code(api, services, agents, task):
+    plan_and_start(services, agents, task, plan_item("r", kind="RESEARCH"), plan_item("a", depends_on=["r"]), start="r")
+    [dev] = active(services, task, "DEVELOPER")
+    answer(services, agents, dev["id"], {**DONE, "summary": "The package exposes greet in hello/__init__.py.",
+                                         "changed_files": []})
+    assert subtasks(services, task)["r"]["state"] == "ACCEPTED"
+    assert subtasks(services, task)["a"]["state"] == "READY"
+    [execution] = active(services, task, "ORCHESTRATOR")
+    assert "exposes greet" in agents.specs[str(execution["id"])]["inputs"]["prompt.md"]

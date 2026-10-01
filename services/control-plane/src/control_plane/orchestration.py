@@ -527,6 +527,13 @@ class Orchestration:
             return self._request_execution(uow, task, epoch, action)
         if kind == "ACCEPT_SUBTASK":
             subtask = self._subtask(uow, task, action.get("subtask"))
+            if subtask is not None and subtask["kind"] == "RESEARCH" and subtask["state"] in ("FIX_REQUIRED", "IN_REVIEW"):
+                uow.cur.execute("SELECT 1 FROM executions WHERE subtask_id = %s AND state = 'SUCCEEDED' "
+                                "AND result->>'status' = 'completed'", (subtask["id"],))
+                if uow.cur.fetchone() is None:
+                    raise Conflict(f"{subtask['key']} has no completed research to accept")
+                self._accept_research(uow, task, subtask)
+                return "research accepted"
             if subtask is None or subtask["state"] != "ACCEPTED":
                 raise Conflict("subtasks are accepted by an approving cross-review, not by the orchestrator")
             return "already accepted"
@@ -876,6 +883,9 @@ class Orchestration:
                 workspace = uow.cur.fetchone()
                 assert workspace is not None
                 result = collected.get(workspace["name"])
+                if (result is None or not result["commits"]) and subtask["kind"] == "RESEARCH":
+                    self._accept_research(uow, task, subtask)
+                    return
                 if result is None or not result["commits"]:
                     self._set_subtask(uow, subtask, "FIX_REQUIRED", "the developer made no commits")
                     self._input(uow, task, f"{subtask['key']}: the developer finished without committing", {"subtask": subtask["key"]})
@@ -883,6 +893,17 @@ class Orchestration:
                 self._request_subtask_review(uow, task, subtask, developer, workspace, result["head_sha"])
         except ApiError as exc:
             log.warning("review of %s not started: %s", task_key, exc)
+
+    def _accept_research(self, uow: UnitOfWork, task: Row, subtask: Row) -> None:
+        """Research produces findings, not code: there is nothing to cross-review, so a completed run is accepted
+        and its summary goes to the orchestrator."""
+        uow.cur.execute("SELECT result->>'summary' AS summary FROM executions WHERE subtask_id = %s AND state = 'SUCCEEDED' "
+                        "ORDER BY ended_at DESC LIMIT 1", (subtask["id"],))
+        row = uow.cur.fetchone()
+        self._set_subtask(uow, subtask, "ACCEPTED", "research completed (no code to review)")
+        self._refresh_ready(uow, task)
+        self._input(uow, task, f"{subtask['key']} research findings: {((row or {}).get('summary') or '')[:600]}",
+                    {"subtask": subtask["key"]})
 
     def _request_subtask_review(self, uow: UnitOfWork, task: Row, subtask: Row, developer: str, workspace: Row, head: str) -> None:
         reviewer = OTHER[developer]  # an agent never approves its own work
