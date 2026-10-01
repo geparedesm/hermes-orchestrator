@@ -50,4 +50,4 @@ The Phase 4 smoke failed reproducibly after the first Phase 8 build: a periodic 
 ## Operator review
 
 - [ ] Review `ho recovery status` on the live stack after `make up`.
-- [ ] Approve Phase 8.
+- [x] Merged under the operator's standing authorization (2026-10-01: "haz tu los merge cuando cumplas las fases").

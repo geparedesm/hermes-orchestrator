@@ -165,16 +165,18 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Resume authorized execution safely after interruptions and failures.
 
-- [ ] Implement durable checkpoints and task/worker/Git reconciliation.
-- [ ] Implement leader leases and heartbeats so only one orchestrator leads a task.
-- [ ] Implement Claude restart/resume and Codex Orchestrator Adapter failover when Claude remains unavailable.
-- [ ] Restrict failover and failback to safe checkpoints.
-- [ ] Implement reboot recovery from PostgreSQL, worktrees, and checkpoints using fresh ephemeral workers.
-- [ ] Reconstruct Redis coordination state from persistent records.
-- [ ] Implement self-healing with bounded retries, backoff, and `DEGRADED`/`BLOCKED` reporting.
-- [ ] Implement graceful pause, resume, cancellation, and unfinished-work retention.
-- [ ] Continue already-authorized work through Hermes outages while stopping actions requiring new approval.
-- [ ] Persist pending notifications and reconcile delivery after Hermes returns.
+- [x] Implement durable checkpoints and task/worker/Git reconciliation.
+- [x] Implement leader leases and heartbeats so only one orchestrator leads a task.
+- [x] Implement Claude restart/resume and Codex Orchestrator Adapter failover when Claude remains unavailable.
+- [x] Restrict failover and failback to safe checkpoints.
+- [x] Implement reboot recovery from PostgreSQL, worktrees, and checkpoints using fresh ephemeral workers.
+- [x] Reconstruct Redis coordination state from persistent records.
+- [x] Implement self-healing with bounded retries, backoff, and `DEGRADED`/`BLOCKED` reporting.
+- [x] Implement graceful pause, resume, cancellation, and unfinished-work retention.
+- [x] Continue already-authorized work through Hermes outages while stopping actions requiring new approval.
+- [x] Persist pending notifications and reconcile delivery after Hermes returns.
+
+**Status:** Complete. Merged on 2026-10-01 under the operator's standing authorization (PR #9). 217 unit and 123 integration tests, a 19-check smoke test that injects real failures (control plane killed mid-execution, worker vanished while it was down, whole-stack restart, Agent Manager and Redis stopped, cancellation with unfinished work), and the Phase 2–7 smoke tests pass. Evidence, the defect the regression smokes found, decisions, and limitations: [docs/validation/phase-8.md](docs/validation/phase-8.md); procedures: [docs/recovery.md](docs/recovery.md).
 
 **Completion criteria:** Recovery preserves work and approval boundaries, avoids duplicate leaders/actions, and survives UI disconnection, provider failures, and machine restart.
 
