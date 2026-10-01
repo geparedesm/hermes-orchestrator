@@ -379,3 +379,27 @@ def test_orchestrator_login_failure_fails_over_without_waiting(api, services, ag
     assert (lease["provider"], lease["epoch"]) == ("codex", 2)
     [step] = active(services, task, "ORCHESTRATOR")
     assert step["provider"] == "codex" and step["lease_epoch"] == 2
+
+
+def test_orchestrator_retries_are_charged_to_the_retries_budget(api, services, agents, task):
+    [execution] = active(services, task, "ORCHESTRATOR")
+    agents.finish_agent(str(execution["id"]), b'{"type":"result","is_error":true,"result":"boom"}', exit_code=1)
+    services.scheduler.run_once()
+    [retry] = active(services, task, "ORCHESTRATOR")
+    assert retry["spec"]["purpose"]["retry"] is True
+    assert api.get(f"/v1/tasks/{task}/budget").json()["reserved"]["retries"] == 1
+
+
+def test_plan_expansion_needs_an_approval_bound_to_that_plan(api, services, agents, task):
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("a")]})
+    q(services, "UPDATE tasks SET step_requested = true")
+    services.scheduler.run_once()
+    bigger = [plan_item(k) for k in ("a", "b", "c", "d", "e")]
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": bigger})
+    assert state(api, task) == "APPROVAL_REQUIRED" and len(subtasks(services, task)) == 1
+    [approval] = q(services, "SELECT * FROM approvals WHERE action = 'SCOPE_EXPANSION'")
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    services.scheduler.run_once()
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": bigger})  # the same plan, now authorized
+    assert len(subtasks(services, task)) == 5
+    assert q(services, "SELECT state FROM approvals WHERE id = %s", approval["id"])[0]["state"] == "CONSUMED"

@@ -15,6 +15,7 @@ Pipeline      deterministic cycle the model cannot skip: developer -> cross-revi
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -372,7 +373,8 @@ class Orchestration:
         request = {"role": "ORCHESTRATOR", "provider": lease["provider"], "prompt": self.context_bundle(uow, task),
                    "result_schema": "orchestrator-step", "capabilities": {"project_read": True, "egress": "ALLOWLIST"},
                    "max_turns": 40, "timeout_minutes": STEP_TIMEOUT_MINUTES, "lease_epoch": int(lease["epoch"]),
-                   "purpose": {"orchestrator_step": True, "fenced": True, "epoch": int(lease["epoch"]), "cursor": cursor}}
+                   "purpose": {"orchestrator_step": True, "fenced": True, "epoch": int(lease["epoch"]), "cursor": cursor,
+                               "retry": int(task["orchestrator_failures"]) > 0}}
         return self.launch(uow, task, "STEP", request)
 
     def context_bundle(self, uow: UnitOfWork, task: Row) -> str:
@@ -570,10 +572,11 @@ class Orchestration:
         if busy:
             raise Conflict(f"the new plan drops subtasks that are running ({', '.join(busy)}); revise them instead")
         new_keys = [k for k in keys if k not in current]
-        budgets.charge(uow, task, "subtasks", len(new_keys))
         expansion = self._expansion_limit(uow, task)
         if task["current_plan_version"] and expansion is not None and len(new_keys) > expansion:
-            raise Conflict(f"the revised plan adds {len(new_keys)} subtasks; more than {expansion} needs REQUEST_APPROVAL")
+            if not self._expansion_approved(uow, task, items, len(new_keys), expansion):
+                return f"adds {len(new_keys)} subtasks (limit {expansion}): SCOPE_EXPANSION approval requested; resubmit this plan once approved"
+        budgets.charge(uow, task, "subtasks", len(new_keys))
         version = int(task["current_plan_version"] or 0) + 1
         uow.cur.execute("SELECT count(*) AS n FROM subtasks WHERE task_id = %s", (task["id"],))
         counter = int(uow.cur.fetchone()["n"])  # type: ignore[index]
@@ -619,6 +622,26 @@ class Orchestration:
             self._move(uow, task, S.QUEUED, reason="plan accepted")
         return f"version {version}"
 
+    def _expansion_approved(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], added: int, limit: int) -> bool:
+        """A plan beyond the expansion profile needs a human approval bound to that exact plan (design change)."""
+        config = self._config(uow, task)
+        digest = hashlib.sha256(json.dumps(items, sort_keys=True).encode()).hexdigest()
+        subject = {"kind": "plan_expansion", "plan": digest, "added": added, "limit": limit}
+        uow.cur.execute("SELECT * FROM approvals WHERE task_id = %s AND action = 'SCOPE_EXPANSION' AND state = 'APPROVED' "
+                        "AND subject->>'plan' = %s ORDER BY decided_at DESC LIMIT 1", (task["id"], digest))
+        approval = uow.cur.fetchone()
+        if approval is not None and self.approvals.consume(uow, approval, subject=subject, config_hash=config["_hash"]):
+            return True
+        uow.cur.execute("SELECT 1 FROM approvals WHERE task_id = %s AND action = 'SCOPE_EXPANSION' AND state = 'PENDING' "
+                        "AND subject->>'plan' = %s", (task["id"], digest))
+        if uow.cur.fetchone() is None:
+            self.approvals.request(uow, action=ApprovalAction.SCOPE_EXPANSION, project_id=task["project_id"], task_id=task["id"],
+                                   subject=subject, config_hash=config["_hash"], requested_by="orchestrator", risk=Risk.HIGH,
+                                   summary=f"{task['key']}: revised plan adds {added} subtasks (expansion limit {limit})",
+                                   from_task_state=task["state"])
+            self._move(uow, task, S.APPROVAL_REQUIRED, reason="plan expansion needs approval")
+        return False
+
     def _expansion_limit(self, uow: UnitOfWork, task: Row) -> int | None:
         profile = (self._config(uow, task).get("expansion") or {}).get("profile", "NORMAL")
         return {"SMALL": 1, "NORMAL": 3, "LARGE": 10}.get(profile)
@@ -657,7 +680,7 @@ class Orchestration:
     # ------------------------------------------------------------ pipeline
 
     def _develop(self, uow: UnitOfWork, task: Row, subtask: Row, provider: str, *, extra: str, epoch: int | None,
-                 kind: str, fresh: bool = False) -> Row | None:
+                 kind: str, fresh: bool = False, retry: bool = False) -> Row | None:
         """Launch a developer execution for a subtask in its workspace (a fresh one for a new attempt)."""
         workspace = None
         if subtask["workspace_id"] and not fresh:
@@ -679,7 +702,7 @@ class Orchestration:
         request = {"role": "DEVELOPER", "provider": provider, "prompt": prompt, "workspace": workspace["path"],
                    "capabilities": {"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE", "egress": "STANDARD"},
                    "subtask_id": str(subtask["id"]), "lease_epoch": epoch,
-                   "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None}}
+                   "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry}}
         if task["state"] == S.QUEUED:
             task = self._move(uow, task, S.RUNNING, reason="subtask work started")
         elif task["state"] == S.FIX_REQUIRED:
@@ -750,13 +773,12 @@ class Orchestration:
         if state != "SUCCEEDED":
             if failure == "TRANSIENT" and int(subtask["attempts"]) <= int(retries.get("transient", 2)):
                 self._event(uow, task, "RETRY_SCHEDULED", f"{subtask['key']}: transient failure, retrying")
-                self._develop(uow, task, subtask, execution["provider"], extra="", epoch=None, kind="DEVELOP",
-                              fresh=False)
+                self._develop(uow, task, subtask, execution["provider"], extra="", epoch=None, kind="DEVELOP", retry=True)
                 return
             if failure == "QUOTA" and retries.get("alternate_developer", True) and OTHER[execution["provider"]] in self._available(uow):
                 self._event(uow, task, "PROVIDER_FALLBACK", f"{subtask['key']}: {execution['provider']} is out of quota; "
                             f"{OTHER[execution['provider']]} starts a fresh attempt")
-                self._develop(uow, task, subtask, OTHER[execution["provider"]], extra="", epoch=None, kind="DEVELOP", fresh=True)
+                self._develop(uow, task, subtask, OTHER[execution["provider"]], extra="", epoch=None, kind="DEVELOP", fresh=True, retry=True)
                 return
             self._set_subtask(uow, subtask, "FIX_REQUIRED", f"developer {state.lower()}: {(execution['failure_reason'] or '')[:200]}")
             self._input(uow, task, f"{subtask['key']} developer execution {state.lower()} ({failure}): "
@@ -863,7 +885,7 @@ class Orchestration:
         if on_limit == "ALTERNATE_DEVELOPER" and int(subtask["attempts"]) < 2 and alternate in self._available(uow):
             self._event(uow, task, "ALTERNATE_DEVELOPER", f"{subtask['key']}: review limit reached; {alternate} starts a fresh attempt")
             uow.cur.execute("UPDATE subtasks SET review_cycles = 0 WHERE id = %s", (subtask["id"],))
-            self._develop(uow, task, {**subtask, "review_cycles": 0}, alternate, extra=feedback, epoch=None, kind="DEVELOP", fresh=True)
+            self._develop(uow, task, {**subtask, "review_cycles": 0}, alternate, extra=feedback, epoch=None, kind="DEVELOP", fresh=True, retry=True)
             return
         self._set_subtask(uow, subtask, "BLOCKED", f"review limit reached ({limit} cycles)")
         self._input(uow, task, f"{subtask['key']} is blocked: the review-cycle limit was reached", {"subtask": subtask["key"]})
