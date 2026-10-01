@@ -63,7 +63,7 @@ class Approvals:
         uow: UnitOfWork,
         *,
         action: ApprovalAction,
-        project_id: UUID,
+        project_id: UUID | None,
         subject: dict[str, Any],
         config_hash: str,
         summary: str,

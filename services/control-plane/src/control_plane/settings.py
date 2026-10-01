@@ -46,6 +46,7 @@ class Settings:
     hermes_webhook_url: str | None = None
     hermes_webhook_secret: str | None = None  # HMAC V2 key shared with the Hermes webhook route
     extra_approvers: tuple[str, ...] = ()
+    version: str = "dev"  # HO_VERSION: the image tag this stack runs
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -89,6 +90,7 @@ class Settings:
             hermes_webhook_url=env.get("HO_HERMES_WEBHOOK_URL") or None,
             hermes_webhook_secret=_read_secret(env.get("HO_HERMES_WEBHOOK_SECRET_FILE")),
             extra_approvers=tuple(a.strip() for a in env.get("HO_APPROVERS", "").split(",") if a.strip()),
+            version=env.get("HO_VERSION") or "dev",
         )
 
     def platform_config(self) -> dict:
@@ -96,6 +98,7 @@ class Settings:
         if self.projects_root_host:
             # The Compose mount and the control plane must agree on the root.
             config["platform"]["projects_root_host"] = self.projects_root_host
+        config["platform"]["version"] = self.version
         if self.extra_approvers:
             # Chat identities allowed to approve (for example telegram:<user id>), set by the operator in .env.
             config["platform"]["approvers"] = sorted(set(config["platform"]["approvers"]) | set(self.extra_approvers))

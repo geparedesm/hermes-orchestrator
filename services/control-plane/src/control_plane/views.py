@@ -56,7 +56,7 @@ def approval_view(row: Row) -> dict[str, Any]:
         "state": row["state"],
         "risk": row["risk"],
         "summary": row["summary"],
-        "project_id": str(row["project_id"]),
+        "project_id": str(row["project_id"]) if row["project_id"] else None,
         "task_id": _str(row["task_id"]),
         "subject": row["subject"],
         "state_hash": row["state_hash"],

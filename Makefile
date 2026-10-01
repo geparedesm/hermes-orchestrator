@@ -82,6 +82,18 @@ smoke-phase5: secrets images ## End-to-end Phase 5 smoke test (workspaces, human
 smoke-phase6: secrets images ## End-to-end Phase 6 smoke test (Compose test services, runners, browser, Quality Gate)
 	./scripts/smoke-phase6.sh
 
+backup: ## Back up critical state (PostgreSQL, Hermes state, config, artifacts) to ./backups
+	scripts/backup.sh
+
+restore: ## Restore a backup: make restore BACKUP=backups/<timestamp>
+	scripts/restore.sh $(BACKUP)
+
+check: ## Health check of the running stack
+	scripts/check.sh
+
+update: ## Approval-controlled update: make update VERSION=x [APPROVAL=id]
+	scripts/update.sh $(VERSION) $(APPROVAL)
+
 lint: ## Static checks
 	$(VENV)/bin/ruff check packages services tests migrations scripts
 

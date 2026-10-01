@@ -92,6 +92,11 @@
               "maximum": 3650
             }
           }
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Image tag of the running stack (HO_VERSION), set at startup."
         }
       }
     },

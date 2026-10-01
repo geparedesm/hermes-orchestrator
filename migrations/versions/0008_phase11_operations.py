@@ -22,6 +22,10 @@ def upgrade() -> None:
     ALTER TABLE recovery_runs ADD CONSTRAINT recovery_runs_trigger_check
         CHECK (trigger IN ('STARTUP', 'PERIODIC', 'OPERATOR', 'MAINTENANCE'));
 
+    -- Platform updates are approved like everything else but belong to no project.
+    ALTER TABLE approvals ALTER COLUMN project_id DROP NOT NULL;
+    ALTER TABLE approvals ADD CONSTRAINT approvals_project_scope CHECK (project_id IS NOT NULL OR action = 'UPDATE');
+
     -- One row per platform update, bound to the UPDATE approval that authorized it.
     CREATE TABLE platform_updates (
         id            uuid PRIMARY KEY,

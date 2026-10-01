@@ -35,6 +35,7 @@ from .executions import ExecutionRequest, Executions
 from .scheduler import Scheduler
 from .orchestration import Orchestration
 from .tasks import Tasks
+from .updates import Updates
 from .views import approval_view, config_view, execution_view, project_view
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class Services:
     recovery: Recovery | None = None
     outbox: Outbox | None = None
     maintenance: Maintenance | None = None
+    updates: Updates | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None,
@@ -89,7 +91,7 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     scheduler.hooks += [recovery.periodic, outbox.deliver, maintenance.tick]
     gate.on_evaluated.append(_request_merge_when_ready(git))
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
-                    verifications, reviews, gate, orchestrator, recovery, outbox, maintenance)
+                    verifications, reviews, gate, orchestrator, recovery, outbox, maintenance, Updates(ctx, approvals))
 
 
 def _request_merge_when_ready(git: GitChanges) -> Any:
@@ -147,6 +149,19 @@ class GitResolve(BaseModel):
 
 class ReviewRequest(BaseModel):
     provider: Literal["claude", "codex"]
+
+
+class UpdateRequest(BaseModel):
+    to_version: str
+
+
+class UpdateStart(BaseModel):
+    backup: str | None = None
+
+
+class UpdateFinish(BaseModel):
+    state: str
+    report: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReviseRequest(BaseModel):
@@ -562,6 +577,34 @@ def create_app(services: Services) -> FastAPI:
     def recovery_run(who_identity: Identity = Depends(identity)) -> dict[str, Any]:
         operator_only(who_identity)
         return jsonable(services.recovery.run("OPERATOR"))  # type: ignore[union-attr]
+
+    # ------------------------------------------------------------ platform updates (Phase 11)
+
+    @app.get("/v1/platform/updates")
+    def list_updates(_: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return {"version": services.updates.current, "updates": jsonable(services.updates.list(uow))}  # type: ignore[union-attr]
+
+    @app.post("/v1/platform/updates", status_code=201)
+    def request_update(body: UpdateRequest, who_identity: Identity = Depends(identity), who: Principal = Depends(principal),
+                       idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        operator_only(who_identity)
+
+        def command(uow: UnitOfWork):
+            return 201, approval_view(services.updates.request(uow, body.to_version, principal=who))  # type: ignore[union-attr]
+        return idempotent(idempotency_key, who, {"op": "update", **body.model_dump()}, command)
+
+    @app.post("/v1/platform/updates/{approval_id}/start", status_code=201)
+    def start_update(approval_id: UUID, body: UpdateStart, who_identity: Identity = Depends(identity)) -> dict[str, Any]:
+        operator_only(who_identity)
+        with ctx.unit_of_work() as uow:
+            return jsonable(services.updates.start(uow, approval_id, backup=body.backup))  # type: ignore[union-attr]
+
+    @app.post("/v1/platform/updates/runs/{update_id}/finish")
+    def finish_update(update_id: UUID, body: UpdateFinish, who_identity: Identity = Depends(identity)) -> dict[str, Any]:
+        operator_only(who_identity)
+        with ctx.unit_of_work() as uow:
+            return jsonable(services.updates.finish(uow, update_id, state=body.state, report=body.report))  # type: ignore[union-attr]
 
     @app.post("/v1/maintenance/run")
     def maintenance_run(who_identity: Identity = Depends(identity)) -> dict[str, Any]:
