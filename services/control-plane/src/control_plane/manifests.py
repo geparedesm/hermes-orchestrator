@@ -49,8 +49,10 @@ def _compact(value: dict[str, Any]) -> dict[str, Any]:
 
 def build(uow: UnitOfWork, ctx: Context, task: Row, kind: str) -> dict[str, Any]:
     tid = task["id"]
-    uow.cur.execute("SELECT slug FROM projects WHERE id = %s", (task["project_id"],))
-    project = uow.cur.fetchone()["slug"]  # type: ignore[index]
+    uow.cur.execute("SELECT * FROM projects WHERE id = %s", (task["project_id"],))
+    project_row = uow.cur.fetchone()
+    assert project_row is not None
+    project = project_row["slug"]
     original = _artifact(uow, task["original_request_artifact_id"])
 
     uow.cur.execute("SELECT * FROM requirement_versions WHERE task_id = %s ORDER BY version", (tid,))
@@ -149,7 +151,7 @@ def build(uow: UnitOfWork, ctx: Context, task: Row, kind: str) -> dict[str, Any]
         "dag": {"plan_version": task["current_plan_version"] or 1, "subtasks": dag_items, "task_relationships": relationships},
         "agent_assignments": assignments, "agent_versions": {}, "worker_images": [], "toolchains": [],
         "project_config_hash": _config_hash(uow, task), "policy_version": ctx.policy_version[:64],
-        "base_commit": changes.get("base_sha"), "generated_commits": commits, "commands": [], "tests": tests,
+        "base_commit": changes.get("base_sha") or task["base_commit"] or _target_head(ctx, task, project_row), "generated_commits": commits, "commands": [], "tests": tests,
         "quality_gate": _compact({"outcome": gate["outcome"], "commit": gate["commit_sha"], "evaluated_at": _ts(gate["evaluated_at"]),
                                   "test_gaps": [str(g)[:500] for g in gate["test_gaps"]][:50],
                                   "residual_risk": (gate["residual_risk"] or "")[:1000]}) if gate else None,
@@ -161,6 +163,15 @@ def build(uow: UnitOfWork, ctx: Context, task: Row, kind: str) -> dict[str, Any]
                                   in ("PASSED", "FAILED") else "NOT_RUN"}),
     })
     return manifest
+
+
+def _target_head(ctx: Context, task: Row, project: Row) -> str | None:
+    """A task that never got a workspace has no pinned base: record the target branch head now."""
+    branch = task["target_branch"] or project["default_branch"] or "main"
+    try:
+        return ctx.git.refs(project["relative_path"], [branch])["refs"].get(branch)
+    except Exception:  # noqa: BLE001 - the schema check reports the missing base
+        return None
 
 
 def _config_hash(uow: UnitOfWork, task: Row) -> str | None:

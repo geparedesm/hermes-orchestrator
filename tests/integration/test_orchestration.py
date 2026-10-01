@@ -344,6 +344,9 @@ def test_duplicate_requests_wait_for_the_user(api, services, agents, task):
     kinds = {(r["f"], r["t"], r["kind"]) for r in q(services, "SELECT f.key AS f, t.key AS t, r.kind FROM task_relationships r "
                                                              "JOIN tasks f ON f.id = r.from_task_id JOIN tasks t ON t.id = r.to_task_id")}
     assert (duplicate, task, "DUPLICATE") in kinds and (related, task, "RELATED") in kinds
+    response = api.post(f"/v1/tasks/{duplicate}/manifest")
+    assert response.status_code == 201, response.text
+    assert response.json()["dag"]["task_relationships"][0]["kind"] == "DUPLICATE"
 
 
 def test_knowledge_is_proposed_confirmed_retrieved_and_goes_stale(api, services, agents, repo, task):
