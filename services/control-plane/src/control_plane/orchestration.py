@@ -875,7 +875,11 @@ class Orchestration:
                                 "AND trust IN ('CONFIRMED', 'OBSERVED') AND anchors && %s", (task["project_id"], files))
             self._event(uow, task, "SUBTASK_ACCEPTED", f"{subtask['key']} approved by {review['reviewer_provider']}")
             self._refresh_ready(uow, task)
-            self._integrate_if_ready(uow, task)
+            if self._integrate_if_ready(uow, task) is None:
+                ready = [s["key"] for s in self._subtasks(uow, task) if s["state"] in ("READY", "FIX_REQUIRED")]
+                if ready:  # the orchestrator decides what starts next
+                    self._input(uow, task, f"{subtask['key']} accepted; ready to start: {', '.join(ready)}",
+                                {"subtask": subtask["key"], "ready": ready})
             return
         uow.cur.execute("SELECT severity, path, line, description FROM review_findings WHERE review_id = %s ORDER BY severity",
                         (review["id"],))

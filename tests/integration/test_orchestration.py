@@ -260,8 +260,7 @@ def test_both_providers_as_developers_need_both_integration_reviews(api, service
     [dev_a] = active(services, task, "DEVELOPER")
     develop(services, agents, repo, dev_a, {"a.py": "a = 1\n"})
     review_verdict(services, agents, active(services, task, "REVIEWER")[0])
-    q(services, "UPDATE tasks SET step_requested = true")
-    services.scheduler.run_once()
+    assert len(active(services, task, "ORCHESTRATOR")) == 1  # accepting a and leaving b READY asks for a step
     q(services, "INSERT INTO credential_refs (provider, identity, status) VALUES ('codex', 'default', 'AUTH_REQUIRED') "
       "ON CONFLICT (provider, identity) DO UPDATE SET status = 'AUTH_REQUIRED'")
     step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "b", "provider": "claude"})
