@@ -80,6 +80,7 @@ services:
       HO_AGENT_MANAGER_URL: http://agent-manager:8082
       HO_AGENT_MANAGER_TOKEN_FILE: /run/secrets/ho_agent_manager_token
       HO_PROVIDER_IDENTITY: ${HO_PROVIDER_IDENTITY:-default}
+      HO_ORCHESTRATION: ${HO_ORCHESTRATION:-false}
       HO_MERGE_KEY_FILE: /run/secrets/ho_merge_key
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
     secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token, ho_merge_key]

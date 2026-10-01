@@ -28,7 +28,7 @@ from ho_core.ids import uuid7
 from ho_core.routing import ProviderStats, route
 from ho_core.statemachine import Trigger
 
-from . import budgets
+from . import budgets, manifests
 from .approvals import Approvals
 from .auth import Principal
 from .budgets import BudgetExhausted
@@ -301,6 +301,8 @@ class Orchestration:
                         (list(ACTIVE),))
         if int(uow.cur.fetchone()["n"]) >= cap:  # type: ignore[index]
             return False
+        if self._classify(uow, task):
+            return True  # a duplicate waits for the user instead of being planned
         provider = self._route(uow, task, "PLANNING")
         if provider is None:
             return False
@@ -313,6 +315,43 @@ class Orchestration:
         task = self._move(uow, self._task(uow, task["id"]), S.PLANNING, reason=f"orchestrated by {provider}")
         self.request_step(uow, task)
         return True
+
+    def _classify(self, uow: UnitOfWork, task: Row) -> bool:
+        """Relate a new task to the project's active tasks (section 7); True when it is a duplicate."""
+        uow.cur.execute("SELECT 1 FROM events WHERE task_id = %s AND type = 'TASK_CLASSIFIED'", (task["id"],))
+        if uow.cur.fetchone() is not None:
+            return False  # already classified (a released duplicate goes ahead)
+        mine = _words(self.reviews._request_text(uow, task))
+        uow.cur.execute("SELECT * FROM tasks WHERE project_id = %s AND id <> %s AND state NOT IN ('DONE', 'CANCELLED', 'FAILED', 'BACKLOG')",
+                        (task["project_id"], task["id"]))
+        duplicate = None
+        for other in uow.cur.fetchall():
+            similarity = _similarity(mine, _words(self.reviews._request_text(uow, other)))
+            kind = "DUPLICATE" if similarity >= DUPLICATE_SIMILARITY else "RELATED" if similarity >= RELATED_SIMILARITY else None
+            if kind is None:
+                continue
+            uow.cur.execute("INSERT INTO task_relationships (id, from_task_id, to_task_id, kind, classified_by, evidence) "
+                            "VALUES (%s, %s, %s, %s, 'control-plane', %s) ON CONFLICT DO NOTHING",
+                            (uuid7(), task["id"], other["id"], kind, f"request similarity {similarity:.2f}"))
+            self._event(uow, task, "TASK_RELATED", f"{task['key']} is {kind.lower()} to {other['key']} ({similarity:.0%} similar)",
+                        {"task": other["key"], "kind": kind})
+            if kind == "DUPLICATE" and duplicate is None:
+                duplicate = other
+        self._event(uow, task, "TASK_CLASSIFIED", f"{task['key']} is " + (f"a duplicate of {duplicate['key']}" if duplicate
+                    else "independent of the active tasks or related to them"))
+        if duplicate is not None:
+            self.tasks.transition(uow, task, S.BLOCKED, trigger=Trigger.SCHEDULER, actor="orchestration",
+                                  reason=f"duplicate of {duplicate['key']}: release it (ho task retry) or cancel it")
+            return True
+        return False
+
+    def _knowledge_for(self, uow: UnitOfWork, task: Row, files: list[str]) -> list[Row]:
+        """Trusted project knowledge whose anchors overlap the given paths."""
+        if not files:
+            return []
+        uow.cur.execute("SELECT category, trust, title, body FROM knowledge_items WHERE project_id = %s AND trust IN "
+                        "('CONFIRMED', 'OBSERVED') AND anchors && %s ORDER BY updated_at DESC LIMIT 8", (task["project_id"], files))
+        return uow.cur.fetchall()
 
     # ------------------------------------------------------------- steps
 
@@ -631,8 +670,11 @@ class Orchestration:
                                            suffix=f"{subtask['key'].split('-')[-1]}a{attempt}".lower())
             uow.cur.execute("UPDATE subtasks SET workspace_id = %s, attempts = %s WHERE id = %s",
                             (workspace["id"], attempt, subtask["id"]))
+        knowledge = self._knowledge_for(uow, task, list((subtask["estimated_scope"] or {}).get("files") or []))
         prompt = "\n".join([f"Subtask {subtask['key']}: {subtask['title']}", "", subtask["description"].strip(),
-                            *(["", extra.strip()] if extra.strip() else []), "",
+                            *(["", extra.strip()] if extra.strip() else []),
+                            *(["", "## Project knowledge for these files"] + [f"- [{k['trust']}] {k['title']}: {k['body'][:300]}"
+                                                                             for k in knowledge] if knowledge else []), "",
                             "Work only on this subtask. Run the relevant tests, fix failures, and commit locally when done."])
         request = {"role": "DEVELOPER", "provider": provider, "prompt": prompt, "workspace": workspace["path"],
                    "capabilities": {"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE", "egress": "STANDARD"},
@@ -676,10 +718,16 @@ class Orchestration:
                         (task["id"],))
         failures = int(uow.cur.fetchone()["orchestrator_failures"])  # type: ignore[index]
         lease = self.leases.get(uow, task["id"], lock=True)
-        if lease and (failure in (FailureClass.QUOTA.value,) or failures >= 2) and OTHER[lease["provider"]] in self._available(uow):
+        unavailable = failure in (FailureClass.QUOTA.value, FailureClass.AUTH.value)
+        if lease and (unavailable or failures >= 2) and OTHER[lease["provider"]] in self._available(uow):
             epoch = self.leases.acquire(uow, task["id"], OTHER[lease["provider"]])  # failover at a step boundary
             self._event(uow, task, "FAILOVER_COMPLETED", f"orchestration moved to {OTHER[lease['provider']]} (epoch {epoch})",
                         {"from": lease["provider"], "to": OTHER[lease["provider"]], "epoch": epoch})
+            if task["state"] == S.AUTH_REQUIRED and failure == FailureClass.AUTH.value:
+                # The other provider leads now: the task need not wait for this login.
+                task = self.tasks.transition(uow, task, S(task["resume_state"]), trigger=Trigger.SYSTEM, actor="orchestration",
+                                             reason=f"orchestration continues with {OTHER[lease['provider']]}")
+                uow.cur.execute("UPDATE tasks SET waiting_on_credential = NULL WHERE id = %s", (task["id"],))
         if failures >= MAX_STEP_FAILURES:
             if S(task["state"]) in STEP_STATES:
                 self._move(uow, task, S.BLOCKED, reason=f"the orchestrator failed {failures} times in a row")
@@ -780,6 +828,10 @@ class Orchestration:
         config = self._config(uow, task)
         if review["outcome"] == "APPROVED" and review["requirements_met"]:
             self._set_subtask(uow, subtask, "ACCEPTED", f"approved by {review['reviewer_provider']}")
+            files = list((subtask["estimated_scope"] or {}).get("files") or [])
+            if files:  # knowledge anchored to code this subtask changed must be re-confirmed
+                uow.cur.execute("UPDATE knowledge_items SET trust = 'STALE', updated_at = now() WHERE project_id = %s "
+                                "AND trust IN ('CONFIRMED', 'OBSERVED') AND anchors && %s", (task["project_id"], files))
             self._event(uow, task, "SUBTASK_ACCEPTED", f"{subtask['key']} approved by {review['reviewer_provider']}")
             self._refresh_ready(uow, task)
             self._integrate_if_ready(uow, task)
@@ -918,6 +970,12 @@ class Orchestration:
 
     def _on_gate(self, uow: UnitOfWork, task: Row, evaluation: Row) -> None:
         task = self._task(uow, task["id"])
+        if evaluation["outcome"] == "PASS" and task["state"] == S.READY_FOR_MERGE:
+            try:
+                with uow.cur.connection.transaction():
+                    manifests.store(uow, self.ctx, task, "READY_FOR_MERGE")
+            except Exception:  # noqa: BLE001 - the gate decision stands even if its manifest cannot be built
+                log.exception("ready-for-merge manifest for %s failed", task["key"])
         if evaluation["outcome"] == "FAIL" and task["state"] == S.FIX_REQUIRED:
             failing = [f"{r['name']}: {r['detail']}" for r in evaluation["requirements"] if r["status"] == "FAIL"]
             self._input(uow, task, "Quality Gate failed: " + "; ".join(failing)[:250], {"evaluation": str(evaluation["id"])})
@@ -1030,6 +1088,15 @@ class Orchestration:
             uow.cur.execute("SELECT task_id FROM task_leases WHERE holder = %s", (self.ctx.instance_id,))
             for row in uow.cur.fetchall():
                 self.leases.renew(uow, row["task_id"])
+        with self.ctx.unit_of_work() as uow:  # final manifests for tasks that ended since the last pass
+            uow.cur.execute("SELECT t.* FROM tasks t WHERE t.state IN ('DONE', 'CANCELLED', 'FAILED') AND t.started_at IS NOT NULL "
+                            "AND NOT EXISTS (SELECT 1 FROM manifests m WHERE m.task_id = t.id AND m.kind = 'FINAL') LIMIT 20")
+            for task in uow.cur.fetchall():
+                try:
+                    with uow.cur.connection.transaction():
+                        manifests.store(uow, self.ctx, task, "FINAL")
+                except Exception:  # noqa: BLE001 - a broken manifest must not stop orchestration
+                    log.exception("final manifest for %s failed", task["key"])
         for task_id in candidates:
             with self.ctx.unit_of_work() as uow:
                 task = self._task(uow, task_id)
@@ -1053,3 +1120,15 @@ def _check_acyclic(graph: dict[str, list[str]]) -> None:
 
     for node in graph:
         visit(node)
+
+
+DUPLICATE_SIMILARITY = 0.8
+RELATED_SIMILARITY = 0.4
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]{3,}", text.lower())}
+
+
+def _similarity(a: set[str], b: set[str]) -> float:
+    return len(a & b) / len(a | b) if a and b else 0.0

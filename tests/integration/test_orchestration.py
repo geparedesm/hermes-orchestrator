@@ -157,6 +157,13 @@ def test_plan_runs_the_subtask_cycle_to_ready_for_merge(api, services, agents, r
     services.scheduler.run_once()
     assert state(api, task) == "READY_FOR_MERGE", q(services, "SELECT type, summary FROM events ORDER BY seq DESC LIMIT 8")
     assert len(executions(services, task, "ORCHESTRATOR")) == 1  # nothing asked the orchestrator to think again
+    [manifest] = q(services, "SELECT m.kind, a.path FROM manifests m JOIN artifacts a ON a.id = m.artifact_id")
+    assert manifest["kind"] == "READY_FOR_MERGE"
+    body = json.loads(services.ctx.artifacts.read(manifest["path"]))
+    assert [s["state"] for s in body["dag"]["subtasks"]] == ["ACCEPTED"]
+    assert {(r["subject"], r["reviewer_provider"]) for r in body["reviews"]} == {(f"{task}-1", "claude"), (task, "claude")}
+    inspect = api.get(f"/v1/tasks/{task}/orchestration").json()
+    assert inspect["lease"]["epoch"] == 1 and inspect["subtasks"][0]["state"] == "ACCEPTED"
 
 
 def test_wait_without_new_events_does_not_loop(api, services, agents, task):
@@ -323,3 +330,49 @@ def test_scope_conflicts_queue_the_launch(api, services, agents, repo, task):
     assert len(active(services, task, "DEVELOPER")) == 1
     [pending] = q(services, "SELECT * FROM pending_launches")
     assert "scope overlaps" in pending["reason"]
+
+
+# ------------------------------------------------------------------ relationships and knowledge
+
+
+def test_duplicate_requests_wait_for_the_user(api, services, agents, task):
+    duplicate = api.post("/v1/tasks", {"project": "demo", "request": "Add a greeting endpoint"}).json()["key"]
+    related = api.post("/v1/tasks", {"project": "demo", "request": "Add a greeting endpoint with tests and docs"}).json()["key"]
+    services.scheduler.run_once()
+    assert state(api, duplicate) == "BLOCKED"
+    assert state(api, related) == "PLANNING"
+    kinds = {(r["f"], r["t"], r["kind"]) for r in q(services, "SELECT f.key AS f, t.key AS t, r.kind FROM task_relationships r "
+                                                             "JOIN tasks f ON f.id = r.from_task_id JOIN tasks t ON t.id = r.to_task_id")}
+    assert (duplicate, task, "DUPLICATE") in kinds and (related, task, "RELATED") in kinds
+
+
+def test_knowledge_is_proposed_confirmed_retrieved_and_goes_stale(api, services, agents, repo, task):
+    step(services, agents, task, {"type": "PROPOSE_KNOWLEDGE", "text": "Greeting lives in a.py\nKeep it pure.",
+                                  "category": "CONVENTION", "anchors": ["a.py"]})
+    [item] = api.get("/v1/projects/demo/knowledge").json()["items"]
+    assert item["trust"] == "HYPOTHESIS"
+    assert api.post(f"/v1/knowledge/{item['id']}/decision", {"decision": "CONFIRM"}).status_code == 200
+    api.post(f"/v1/tasks/{task}/revise", {"text": "Greeting endpoint returns hello."})
+    services.scheduler.run_once()
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    assert "Keep it pure" in agents.specs[str(dev["id"])]["inputs"]["prompt.md"]
+    develop(services, agents, repo, dev, {"a.py": "x = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    assert q(services, "SELECT trust FROM knowledge_items")[0]["trust"] == "STALE"
+
+
+def test_budget_is_visible(api, services, agents, task):
+    budget = api.get(f"/v1/tasks/{task}/budget").json()
+    assert budget["consumed"]["agent_launches"] == 1 and budget["reserved"]["provider_usage_units"] > 0
+
+
+def test_orchestrator_login_failure_fails_over_without_waiting(api, services, agents, task):
+    [execution] = active(services, task, "ORCHESTRATOR")
+    agents.finish_agent(str(execution["id"]), (FIXTURES / "claude-auth-failure.jsonl").read_bytes(), exit_code=1)
+    services.scheduler.run_once()
+    assert state(api, task) == "PLANNING"  # not AUTH_REQUIRED: codex leads now
+    [lease] = q(services, "SELECT * FROM task_leases")
+    assert (lease["provider"], lease["epoch"]) == ("codex", 2)
+    [step] = active(services, task, "ORCHESTRATOR")
+    assert step["provider"] == "codex" and step["lease_epoch"] == 2

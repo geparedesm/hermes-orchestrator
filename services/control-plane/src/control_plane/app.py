@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ from .agentmgr import AgentManagerError
 from .errors import ApiError, Conflict, Forbidden, UpstreamError
 from .idempotency import run_idempotent
 from .projects import Projects
-from . import budgets
+from . import budgets, manifests
 from .budgets import BudgetExhausted
 from .executions import ExecutionRequest, Executions
 from .scheduler import Scheduler
@@ -512,6 +513,15 @@ def create_app(services: Services) -> FastAPI:
     def inspect_orchestration(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
             return jsonable(orchestrator().inspect(uow, key))
+
+    @app.post("/v1/tasks/{key}/manifest", status_code=201)
+    def task_manifest(key: str, who: Principal = Depends(principal),
+                      idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            row = manifests.store(uow, ctx, services.tasks.get(uow, key, lock=True), "ON_DEMAND")
+            uow.cur.execute("SELECT path FROM artifacts WHERE id = %s", (row["artifact_id"],))
+            return 201, json.loads(ctx.artifacts.read(uow.cur.fetchone()["path"]))
+        return idempotent(idempotency_key, who, {"op": "manifest", "task": key}, command)
 
     @app.get("/v1/projects/{slug}/knowledge")
     def list_knowledge(slug: str, _: Identity = Depends(identity)) -> dict[str, Any]:

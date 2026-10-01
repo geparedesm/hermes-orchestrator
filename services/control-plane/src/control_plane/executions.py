@@ -460,6 +460,8 @@ class Executions:
         assignment = (row["spec"] or {}).get("assignment")
         if not row["agent_run"] or not assignment:
             return None
+        if ((row["spec"] or {}).get("purpose") or {}).get("orchestrator_step"):
+            return None  # orchestration asks for a fresh step instead (its context and epoch would be stale)
         uow.cur.execute("SELECT requested FROM capability_grants WHERE execution_id = %s", (row["id"],))
         requested = uow.cur.fetchone()["requested"]  # type: ignore[index]
         uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (row["task_id"],))
@@ -480,6 +482,9 @@ class Executions:
             resume=str(row["id"]) if row["provider_session_id"] else None,
             max_turns=int(assignment.get("max_turns") or 60),
             model=assignment.get("model"),
+            result_schema=assignment.get("result_schema") or "agent-result",
+            purpose=spec.get("purpose") or {},
+            subtask_id=row["subtask_id"],
         )
         return self.request(uow, principal=Principal("control-plane", "auth-resume"), task_key=task_key, req=req,
                             retry_of=None if row["provider_session_id"] else row["id"])
@@ -600,10 +605,10 @@ class Executions:
             else:
                 state, failure = "FAILED", "TASK"
                 reason = "out of memory" if status.get("oom_killed") else f"exit code {status.get('exit_code')}"
+            if failure == "AUTH":  # before _finish, so its hooks see the task waiting for the login
+                self._auth_required(uow, row, reason or "provider authentication failed")
             self._finish(uow, row, state, failure_class=failure, reason=redact(reason)[0] if reason else None,
                          exit_code=status.get("exit_code"), artifacts=artifact_ids)
-            if failure == "AUTH":
-                self._auth_required(uow, row, reason or "provider authentication failed")
             exec_id = str(row["id"])
             uow.after_commit.append(lambda: self._remove(exec_id))
 
