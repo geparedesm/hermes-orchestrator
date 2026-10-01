@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hermes-orchestrator:schema:orchestrator-step:1",
+  "title": "Orchestrator step",
+  "description": "Structured answer of one ORCHESTRATOR step (ARCHITECTURE.md section 6.1): a short summary and actions from a closed vocabulary. The control plane validates every action (lease epoch, Policy Engine, budgets, state machine) and records it as accepted or rejected. Passed to the CLIs without metadata keywords; every property is required and nullable values use a type list.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "actions"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Short operational summary of the decision. Not a transcript."
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "text",
+          "subtasks",
+          "subtask",
+          "role",
+          "provider",
+          "prompt",
+          "level",
+          "reversible",
+          "category",
+          "anchors"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "SET_REQUIREMENTS",
+              "RECORD_ASSUMPTION",
+              "SET_PLAN",
+              "REQUEST_EXECUTION",
+              "ACCEPT_SUBTASK",
+              "REJECT_SUBTASK",
+              "REQUEST_APPROVAL",
+              "PROPOSE_KNOWLEDGE",
+              "SUBMIT_FOR_QUALITY_GATE",
+              "REPORT_BLOCKED",
+              "WAIT"
+            ]
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Requirements (markdown), assumption, reason, knowledge body, or approval summary."
+          },
+          "subtasks": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "key",
+                "title",
+                "kind",
+                "description",
+                "depends_on",
+                "files",
+                "risk",
+                "preferred_provider"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Short local id unique in the plan, for example s1."
+                },
+                "title": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "IMPLEMENT",
+                    "TEST_AUTHORING",
+                    "RESEARCH"
+                  ]
+                },
+                "description": {
+                  "type": "string",
+                  "description": "What the developer must do, including acceptance criteria."
+                },
+                "depends_on": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Keys of subtasks that must be accepted first."
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Estimated files or directories this subtask changes."
+                },
+                "risk": {
+                  "type": "string",
+                  "enum": [
+                    "LOW",
+                    "MEDIUM",
+                    "HIGH",
+                    "CRITICAL"
+                  ]
+                },
+                "preferred_provider": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "claude",
+                    "codex",
+                    null
+                  ]
+                }
+              }
+            },
+            "description": "SET_PLAN only: the whole plan."
+          },
+          "subtask": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Target subtask key (local key or T-n-m)."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "DEVELOPER",
+              "TESTER",
+              null
+            ]
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "claude",
+              "codex",
+              null
+            ]
+          },
+          "prompt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "REQUEST_EXECUTION: instructions for the worker."
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              null
+            ],
+            "description": "RECORD_ASSUMPTION: ambiguity level."
+          },
+          "reversible": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "DISCOVERY",
+              "CONVENTION",
+              "DECISION",
+              "KNOWN_ISSUE",
+              "ARCHITECTURE",
+              "LESSON_LEARNED",
+              null
+            ]
+          },
+          "anchors": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "PROPOSE_KNOWLEDGE: paths the item depends on."
+          }
+        }
+      }
+    }
+  }
+}

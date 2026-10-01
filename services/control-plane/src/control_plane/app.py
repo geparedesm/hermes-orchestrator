@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -24,8 +25,11 @@ from .agentmgr import AgentManagerError
 from .errors import ApiError, Conflict, Forbidden, UpstreamError
 from .idempotency import run_idempotent
 from .projects import Projects
-from .executions import BudgetExhausted, ExecutionRequest, Executions
+from . import budgets, manifests
+from .budgets import BudgetExhausted
+from .executions import ExecutionRequest, Executions
 from .scheduler import Scheduler
+from .orchestration import Orchestration
 from .tasks import Tasks
 from .views import approval_view, config_view, execution_view, project_view
 
@@ -47,9 +51,11 @@ class Services:
     verifications: Verifications | None = None
     reviews: Reviews | None = None
     gate: QualityGate | None = None
+    orchestration: Orchestration | None = None
 
 
-def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None) -> Services:
+def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None,
+                   orchestration: bool = False) -> Services:
     approvals = Approvals(ctx)
     projects = Projects(ctx, approvals)
     tasks = Tasks(ctx, projects, approvals)
@@ -61,8 +67,14 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     reviews = Reviews(ctx, tasks, executions, git)
     gate = QualityGate(ctx, tasks, approvals, git, reviews)
     scheduler.hooks += [git.sync, verifications.sync, gate.sync]
+    orchestrator = None
+    if orchestration:
+        orchestrator = Orchestration(ctx, tasks, approvals, executions, git, verifications, reviews, gate)
+        if dispatcher is None:
+            scheduler.dispatcher = orchestrator
+        scheduler.hooks.append(orchestrator.sync)
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
-                    verifications, reviews, gate)
+                    verifications, reviews, gate, orchestrator)
 
 
 # ------------------------------------------------------------------ request models
@@ -106,6 +118,18 @@ class GitResolve(BaseModel):
 
 class ReviewRequest(BaseModel):
     provider: Literal["claude", "codex"]
+
+
+class ReviseRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+
+
+class BudgetIncreaseRequest(BaseModel):
+    add: dict[str, int]
+
+
+class KnowledgeDecision(BaseModel):
+    decision: Literal["CONFIRM", "REJECT"]
 
 
 class ResumeExecution(BaseModel):
@@ -458,6 +482,64 @@ def create_app(services: Services) -> FastAPI:
         def command(uow: UnitOfWork):
             return 200, jsonable(dict(gate.evaluate(uow, key, actor=who.value)))
         return idempotent(idempotency_key, who, {"op": "quality-gate", "task": key}, command)
+
+    # ------------------------------------------------------------ orchestration (Phase 7)
+
+    def orchestrator() -> Orchestration:
+        if services.orchestration is None:
+            raise Conflict("orchestration is disabled (HO_ORCHESTRATION=false)")
+        return services.orchestration
+
+    @app.post("/v1/tasks/{key}/revise")
+    def revise_task(key: str, body: ReviseRequest, who: Principal = Depends(principal),
+                    idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            return 200, orchestrator().revise(uow, key, body.text, principal=who)
+        return idempotent(idempotency_key, who, {"op": "revise", "task": key, **body.model_dump()}, command)
+
+    @app.get("/v1/tasks/{key}/budget")
+    def task_budget(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return {"task": key, **jsonable(budgets.state(uow, services.tasks.get(uow, key)))}
+
+    @app.post("/v1/tasks/{key}/budget", status_code=201)
+    def raise_budget(key: str, body: BudgetIncreaseRequest, who: Principal = Depends(principal),
+                     idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            return 201, approval_view(orchestrator().request_budget_increase(uow, key, body.add, principal=who))
+        return idempotent(idempotency_key, who, {"op": "budget", "task": key, **body.model_dump()}, command)
+
+    @app.get("/v1/tasks/{key}/orchestration")
+    def inspect_orchestration(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return jsonable(orchestrator().inspect(uow, key))
+
+    @app.post("/v1/tasks/{key}/manifest", status_code=201)
+    def task_manifest(key: str, who: Principal = Depends(principal),
+                      idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            row = manifests.store(uow, ctx, services.tasks.get(uow, key, lock=True), "ON_DEMAND")
+            uow.cur.execute("SELECT path FROM artifacts WHERE id = %s", (row["artifact_id"],))
+            return 201, json.loads(ctx.artifacts.read(uow.cur.fetchone()["path"]))
+        return idempotent(idempotency_key, who, {"op": "manifest", "task": key}, command)
+
+    @app.get("/v1/projects/{slug}/knowledge")
+    def list_knowledge(slug: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            project = services.projects.get(uow, slug)
+            uow.cur.execute("SELECT * FROM knowledge_items WHERE project_id = %s ORDER BY updated_at DESC LIMIT 200",
+                            (project["id"],))
+            return {"project": slug, "items": jsonable(uow.cur.fetchall())}
+
+    @app.post("/v1/knowledge/{item_id}/decision")
+    def decide_knowledge(item_id: UUID, body: KnowledgeDecision, who_identity: Identity = Depends(identity),
+                         who: Principal = Depends(principal), idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        operator_only(who_identity)
+
+        def command(uow: UnitOfWork):
+            return 200, jsonable(orchestrator().decide_knowledge(uow, item_id, confirm=body.decision == "CONFIRM",
+                                                                 principal=who))
+        return idempotent(idempotency_key, who, {"op": "knowledge", "item": str(item_id), **body.model_dump()}, command)
 
     @app.get("/v1/tasks/{key}/quality-gate")
     def show_gate(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:

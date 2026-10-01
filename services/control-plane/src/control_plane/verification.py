@@ -35,6 +35,7 @@ from ho_core.verification import (
 
 from .agentmgr import AgentManagerError
 from .approvals import Approvals
+from .budgets import BudgetExhausted
 from .auth import Principal
 from .context import Context, UnitOfWork
 from .db import Row, jsonb
@@ -63,6 +64,8 @@ class Verifications:
         self.executions = executions
         self.git = git
         git.verifications = self
+        # Called with (uow, verification row, state) when a verification ends.
+        self.on_finished: list[Any] = []
 
     # ------------------------------------------------------------------ start
 
@@ -122,8 +125,25 @@ class Verifications:
                 with self.ctx.unit_of_work() as uow:
                     self._fail(uow, verification_id, f"test services did not start: {exc.message}")
                 return
+        try:
+            self._launch_runners(verification_id, environment)
+        except BudgetExhausted as exc:
+            # The verification stays PREPARING; it is launched again when the budget is raised.
+            with self.ctx.unit_of_work() as uow:
+                task_key = self._load(uow, verification_id)[1]["key"]
+            self.executions.pause_for_budget(task_key, str(exc))
+
+    def relaunch_waiting(self, uow: UnitOfWork, task: Row) -> None:
+        """Launch, after this transaction, verifications of `task` left PREPARING (for example by an exhausted budget)."""
+        uow.cur.execute("SELECT id FROM verifications WHERE task_id = %s AND state = 'PREPARING'", (task["id"],))
+        for row in uow.cur.fetchall():
+            uow.after_commit.append(lambda vid=row["id"]: self._launch(vid))
+
+    def _launch_runners(self, verification_id: UUID, environment: dict[str, Any] | None) -> None:
         with self.ctx.unit_of_work() as uow:
             row, task, project, config = self._load(uow, verification_id, lock=True)
+            if row["state"] != "PREPARING":
+                return
             plan = row["plan"]
             allow_waiting = row["purpose"] == "POST_MERGE"
             executions: list[UUID] = []
@@ -260,6 +280,8 @@ class Verifications:
         if row["environment"] or (row["plan"] or {}).get("browser"):
             key = task["key"]
             uow.after_commit.append(lambda: self._stop_services(key))
+        for hook in self.on_finished:
+            hook(uow, row, state)
         if row["purpose"] == "INTEGRATION":
             uow.cur.execute("UPDATE git_changes SET retest_status = %s WHERE task_id = %s AND integration_sha = %s",
                             ("PASSED" if passed else "FAILED", task["id"], row["commit_sha"]))
@@ -294,6 +316,14 @@ class Verifications:
 # ------------------------------------------------------------------------ reviews
 
 
+def required_reviewer_set(developers: list[str]) -> set[str]:
+    """Who must review an integrated change: the other provider when one provider developed it, each
+    provider when both did (docs/design/phase-7.md, change 4), anyone when no agent developed it."""
+    if len(set(developers)) >= 2:
+        return {"claude", "codex"}
+    return {p for p in ("claude", "codex") if p not in developers} if developers else set()
+
+
 class Reviews:
     def __init__(self, ctx: Context, tasks: Tasks, executions: Executions, git: GitChanges) -> None:
         self.ctx = ctx
@@ -301,6 +331,8 @@ class Reviews:
         self.executions = executions
         self.git = git
         executions.on_agent_result.append(self._record)
+        # Called with (uow, review row, execution row) after a review is stored.
+        self.on_recorded: list[Any] = []
 
     def developer_providers(self, uow: UnitOfWork, task: Row) -> list[str]:
         uow.cur.execute("SELECT DISTINCT provider FROM executions WHERE task_id = %s AND role = 'DEVELOPER' AND agent_run",
@@ -308,30 +340,42 @@ class Reviews:
         return sorted(r["provider"] for r in uow.cur.fetchall())
 
     def request(self, uow: UnitOfWork, task_key: str, *, provider: str, principal: Principal) -> Row:
-        task, project, _ = self.git._context(uow, task_key, lock=True)
+        """Integration-level cross-review of the task's integrated commit."""
+        task, _, _ = self.git._context(uow, task_key, lock=True)
         changes = self.git._changes(uow, task)
         if changes is None or not changes["integration_sha"]:
             raise Conflict(f"integrate {task_key} before reviewing it")
         developers = self.developer_providers(uow, task)
-        if provider in developers:
+        if provider in developers and len(set(developers)) < 2:
             raise BadRequest(f"cross-review needs a provider other than the developers ({', '.join(developers)})")
+        # With both providers as developers each reviews the whole change; it is recorded as covering the other's work.
+        return self.request_review(uow, task, provider=provider, principal=principal, ref=changes["integration_ref"],
+                                   commit=changes["integration_sha"], base=changes["base_sha"],
+                                   developers=[d for d in developers if d != provider],
+                                   scope=f"the change of task {task_key} for merge into {changes['target_branch']}")
+
+    def request_review(self, uow: UnitOfWork, task: Row, *, provider: str, principal: Principal, ref: str, commit: str,
+                       base: str, developers: list[str], scope: str, subtask: Row | None = None,
+                       extra: str = "", lease_epoch: int | None = None) -> Row:
+        """A REVIEWER execution on a fresh read-only clone of `ref` (review-result schema)."""
         uow.cur.execute("SELECT count(*) AS n FROM workspaces WHERE task_id = %s AND kind = 'VERIFICATION'", (task["id"],))
         suffix = f"review{uow.cur.fetchone()['n'] + 1}"  # type: ignore[index]
-        ws = self.git.workspace(uow, task_key, principal=CONTROL_PLANE, suffix=suffix, kind="VERIFICATION",
-                                base_ref=changes["integration_ref"])
-        request_text = self._request_text(uow, task)
+        ws = self.git.workspace(uow, task["key"], principal=CONTROL_PLANE, suffix=suffix, kind="VERIFICATION", base_ref=ref)
         prompt = "\n".join([
-            f"Review the change of task {task_key} for merge into {changes['target_branch']}.",
-            f"The change is `git diff {changes['base_sha']}...HEAD` in /workspace (commit {changes['integration_sha'][:12]}).",
-            "", "## What the task asked for", "", request_text.strip()[:6000], "",
+            f"Review {scope}.",
+            f"The change is `git diff {base}...HEAD` in /workspace (commit {commit[:12]}).",
+            "", "## What was asked", "", (subtask["description"] if subtask else self._request_text(uow, task)).strip()[:6000],
+            *(["", extra.strip()[:4000]] if extra else []), "",
             "Check correctness, security, tests, and whether the change does what was asked. Run the tests if useful.",
             "Report every problem as a finding with a severity: CRITICAL and HIGH block the merge; MEDIUM and LOW are advice.",
             "Report requirements the change does not meet in unmet_requirements.",
         ])
-        return self.executions.request(uow, principal=principal, task_key=task_key, req=ExecutionRequest(
+        return self.executions.request(uow, principal=principal, task_key=task["key"], req=ExecutionRequest(
             role="REVIEWER", provider=provider, prompt=prompt, workspace=ws["path"], result_schema="review-result",
             capabilities={"workspace": "READ", "git": "READ", "tests": "EXECUTE"},
-            purpose={"review": True, "commit": changes["integration_sha"], "developers": developers}))
+            subtask_id=subtask["id"] if subtask else None, lease_epoch=lease_epoch,
+            purpose={"review": True, "commit": commit, "developers": developers,
+                     "subtask": str(subtask["id"]) if subtask else None}))
 
     def _request_text(self, uow: UnitOfWork, task: Row) -> str:
         uow.cur.execute("SELECT path FROM artifacts WHERE id = %s", (task["original_request_artifact_id"],))
@@ -351,13 +395,14 @@ class Reviews:
         uow.cur.execute(
             """
             INSERT INTO reviews (id, task_id, execution_id, commit_sha, reviewer_provider, developer_providers, outcome,
-                                 requirements_met, unmet_requirements, summary)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                 requirements_met, unmet_requirements, summary, subtask_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *
             """,
             (review_id, execution["task_id"], execution["id"], purpose["commit"], execution["provider"],
              list(purpose.get("developers") or []), outcome, bool(review["requirements_met"]),
-             jsonb(review["unmet_requirements"][:50]), review["summary"][:4000]),
+             jsonb(review["unmet_requirements"][:50]), review["summary"][:4000], purpose.get("subtask")),
         )
+        stored = uow.cur.fetchone()
         for finding in review["findings"]:
             uow.cur.execute(
                 "INSERT INTO review_findings (id, review_id, severity, category, path, line, description) "
@@ -372,6 +417,8 @@ class Reviews:
                              + ", ".join(f"{n} {s.lower()}" for s, n in counts.items() if n) if any(counts.values())
                              else f"{outcome.lower().replace('_', ' ')} by {execution['provider']}: no findings",
                      data={"review_id": str(review_id), "commit": purpose["commit"]}, pending=uow.events)
+        for hook in self.on_recorded:
+            hook(uow, stored, execution)
 
 
 # ------------------------------------------------------------------ Quality Gate
@@ -386,6 +433,8 @@ class QualityGate:
         self.reviews = reviews
         approvals.register_handler(ApprovalAction.HIGH_RISK_OPERATION, self._on_exception_decision)
         git.quality_gate = self
+        # Called with (uow, task row, evaluation row) after each evaluation.
+        self.on_evaluated: list[Any] = []
 
     def evaluate(self, uow: UnitOfWork, task_key: str, *, actor: str = "control-plane") -> Row:
         task, project, config = self.git._context(uow, task_key, lock=True)
@@ -406,16 +455,19 @@ class QualityGate:
                     browser_passed = (browser_passed is not False) and r["status"] == "PASSED"
                 else:
                     runs[r["kind"]] = r["status"]
-        uow.cur.execute("SELECT * FROM reviews WHERE task_id = %s AND commit_sha = %s ORDER BY created_at DESC LIMIT 1",
-                        (task["id"], commit))
-        review = uow.cur.fetchone()
+        developers = self.reviews.developer_providers(uow, task)
+        required_reviewers = required_reviewer_set(developers)
+        uow.cur.execute("SELECT DISTINCT ON (reviewer_provider) * FROM reviews WHERE task_id = %s AND commit_sha = %s "
+                        "AND subtask_id IS NULL ORDER BY reviewer_provider, created_at DESC", (task["id"], commit))
+        latest = {r["reviewer_provider"]: r for r in uow.cur.fetchall()}
+        relevant = [latest[p] for p in sorted(latest) if not required_reviewers or p in required_reviewers]
+        review = relevant[0] if relevant else None
         findings: list[Row] = []
-        if review:
-            uow.cur.execute("SELECT * FROM review_findings WHERE review_id = %s AND status = 'OPEN'", (review["id"],))
-            findings = uow.cur.fetchall()
+        for item in relevant:
+            uow.cur.execute("SELECT * FROM review_findings WHERE review_id = %s AND status = 'OPEN'", (item["id"],))
+            findings += uow.cur.fetchall()
         blocking = BLOCKING_ALWAYS | set((config.get("quality_gate") or {}).get("block_on_findings", []))
         current_target = self.ctx.git.refs(project["relative_path"], [changes["target_branch"]])["refs"][changes["target_branch"]]
-        developers = self.reviews.developer_providers(uow, task)
         violations = self._violations(uow, task)
         changed = plan.get("changed_files") or []
 
@@ -444,17 +496,21 @@ class QualityGate:
                 add(name, "PASS" if browser_passed else "FAIL" if browser_passed is False else "PENDING",
                     "browser checks passed" if browser_passed else "browser checks failed or missing")
             elif name == "cross_review":
-                if review is None:
-                    add(name, "FAIL", "no cross-review of this commit")
-                elif review["reviewer_provider"] in developers:
-                    add(name, "FAIL", f"reviewed by {review['reviewer_provider']}, which also developed the change")
+                missing = sorted((required_reviewers or {"any"}) - set(latest)) if required_reviewers else ([] if latest else ["any"])
+                blocked = [r for r in relevant if r["outcome"] == "BLOCKED"]
+                if missing:
+                    add(name, "FAIL", f"missing a review of this commit by {', '.join(missing)}"
+                        + (" (both providers developed it, so each reviews it)" if len(required_reviewers) == 2 else ""))
+                elif blocked:
+                    add(name, "FAIL", f"blocked by {', '.join(r['reviewer_provider'] for r in blocked)}")
                 else:
-                    add(name, "PASS" if review["outcome"] != "BLOCKED" else "FAIL",
-                        f"{review['outcome'].lower()} by {review['reviewer_provider']}", str(review["id"]))
+                    add(name, "PASS", "; ".join(f"{r['outcome'].lower()} by {r['reviewer_provider']}" for r in relevant),
+                        [str(r["id"]) for r in relevant])
             elif name == "requirements":
-                add(name, "PASS" if review and review["requirements_met"] else "FAIL",
-                    "requirements met" if review and review["requirements_met"]
-                    else f"unmet: {'; '.join(review['unmet_requirements'][:5])}" if review else "not assessed")
+                unmet = [u for r in relevant for u in r["unmet_requirements"]]
+                met = bool(relevant) and all(r["requirements_met"] for r in relevant)
+                add(name, "PASS" if met else "FAIL", "requirements met" if met
+                    else f"unmet: {'; '.join(unmet[:5])}" if relevant else "not assessed")
             elif name == "no_blocking_findings":
                 open_blocking = [f for f in findings if f["severity"] in blocking]
                 add(name, "FAIL" if open_blocking else "PASS" if review else "FAIL",
@@ -527,6 +583,8 @@ class QualityGate:
                      summary=f"{outcome} for {commit[:12]} (risk {risk})" + (f"; {'; '.join(failing[:3])}" if failing else ""),
                      data={"evaluation_id": str(evaluation_id), "outcome": outcome}, pending=uow.events)
         self._apply(uow, task, outcome, results, exception)
+        for hook in self.on_evaluated:
+            hook(uow, task, evaluation)
         return evaluation
 
     def _apply(self, uow: UnitOfWork, task: Row, outcome: str, results: list[dict[str, Any]], exception: str | None) -> None:

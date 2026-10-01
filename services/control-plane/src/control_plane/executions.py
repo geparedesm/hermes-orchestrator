@@ -27,6 +27,7 @@ from ho_core.policy.engine import GrantRequest, evaluate_grant
 from ho_core.redact import redact
 from ho_core.statemachine import ACTIVE_STATES, TERMINAL_STATES, Trigger
 
+from . import budgets
 from .agentmgr import AgentManagerError
 from .auth import Principal
 from .context import Context, UnitOfWork
@@ -44,10 +45,6 @@ MAX_DISPATCH_ATTEMPTS = 5
 _WORKSPACE = re.compile(r"^\.hermes/worktrees/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _FAILURE_BY_CODE = {"capacity_exceeded": "CAPACITY", "auth_required": "AUTH", "rejected": "POLICY",
                     "image_not_allowed": "POLICY", "not_found": "UNKNOWN", "docker_error": "TRANSIENT"}
-
-
-class BudgetExhausted(Conflict):
-    pass
 
 
 @dataclass
@@ -72,6 +69,8 @@ class ExecutionRequest:
     inputs: dict[str, str] = field(default_factory=dict)  # small input files (for example runner steps)
     result_schema: str = "agent-result"  # structured answer an agent must return
     purpose: dict[str, Any] = field(default_factory=dict)  # control-plane bookkeeping (review, verification)
+    subtask_id: UUID | None = None
+    lease_epoch: int | None = None  # orchestration decisions: the lease epoch they were made under (fencing)
 
 
 class Executions:
@@ -82,6 +81,8 @@ class Executions:
         self.workspace_check: Any = None
         # Called with (uow, execution row, ExecutionResult) after an agent execution is parsed.
         self.on_agent_result: list[Any] = []
+        # Called with (uow, execution row, final state, failure class) when any execution ends.
+        self.on_finished: list[Any] = []
         tasks.on_cancel.append(self.stop_task_executions)
 
     @property
@@ -180,7 +181,9 @@ class Executions:
         image = req.image or (f"{provider}-{toolchain}" if provider else f"runner-{toolchain}")
 
         self._check_capacity(uow, config, role, replacing=replacing)
-        self._charge_budget(uow, task)
+        epoch = self._lease_epoch(uow, task, req.lease_epoch)
+        reservation, req.timeout_minutes = budgets.reserve(uow, task, agent=bool(req.prompt), retry=bool(req.purpose.get("retry")),
+                                                           timeout_minutes=req.timeout_minutes)
 
         execution_id = uuid7()
         caps = dict(req.capabilities)
@@ -210,6 +213,7 @@ class Executions:
             resource_profile=req.resource_profile or config["resources"]["default_profile"],
             timeout_minutes=req.timeout_minutes,
             provider_identity=self.ctx.provider_identity,
+            lease_epoch=epoch,
         )
         try:
             grant, reductions = evaluate_grant(grant_request, config, self.ctx.platform, now=datetime.now(timezone.utc))
@@ -263,14 +267,15 @@ class Executions:
         uow.cur.execute(
             """
             INSERT INTO executions (id, task_id, project_id, role, provider, provider_identity, image, command, workspace,
-                                    resource_profile, state, spec, requested_by, agent_run, resume_of)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'REQUESTED', %s, %s, %s, %s)
+                                    resource_profile, state, spec, requested_by, agent_run, resume_of, lease_epoch,
+                                    subtask_id, budget_reservation)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'REQUESTED', %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (execution_id, task["id"], project["id"], role.value, provider or "none",
              grant["provider_credential"]["identity"] if grant["provider_credential"] else None,
              image, jsonb(command), workspace, grant["resources"]["profile"], jsonb(spec), principal.value,
-             bool(req.prompt), resume_row["id"] if resume_row else retry_of),
+             bool(req.prompt), resume_row["id"] if resume_row else retry_of, epoch, req.subtask_id, jsonb(reservation)),
         )
         row = uow.cur.fetchone()
         assert row is not None
@@ -317,26 +322,15 @@ class Executions:
         if uow.cur.fetchone()["n"] >= cap:  # type: ignore[index]
             raise Conflict(f"agent worker limit reached ({cap}); try again when a worker finishes")
 
-    def _charge_budget(self, uow: UnitOfWork, task: Row) -> None:
-        uow.cur.execute("SELECT * FROM budgets WHERE task_id = %s FOR UPDATE", (task["id"],))
-        budget = uow.cur.fetchone()
-        assert budget is not None
-        consumed = dict(budget["consumed"])
-        limit = budget["limits"].get("agent_launches")
-        launches = int(consumed.get("agent_launches", 0)) + 1
-        if limit is not None and launches > int(limit):
-            raise BudgetExhausted(f"{task['key']} used its {limit} agent launches")
-        consumed["agent_launches"] = launches
-        percent = 0 if not limit else 100 * launches / int(limit)
-        thresholds = budget["thresholds"]
-        state = "EXHAUSTED" if percent >= 100 else "OPTIMIZE" if percent >= thresholds["optimize_percent"] \
-            else "WARNING" if percent >= thresholds["warning_percent"] else "OK"
-        uow.cur.execute("UPDATE budgets SET consumed = %s, state = %s, updated_at = now() WHERE task_id = %s",
-                        (jsonb(consumed), state, task["id"]))
-        if state != budget["state"] and state != "OK":
-            record_event(uow.cur, "BUDGET_THRESHOLD", actor="control-plane", project_id=task["project_id"], task_id=task["id"],
-                         summary=f"{task['key']} agent launches at {percent:.0f}% of budget", data={"state": state},
-                         pending=uow.events)
+    def _lease_epoch(self, uow: UnitOfWork, task: Row, expected: int | None) -> int:
+        """The task's current lease epoch (1 without a lease). Work decided under an older epoch is
+        refused here, and again at dispatch (docs/design/phase-7.md, change 1)."""
+        uow.cur.execute("SELECT epoch FROM task_leases WHERE task_id = %s FOR UPDATE", (task["id"],))
+        lease = uow.cur.fetchone()
+        current = int(lease["epoch"]) if lease else 1
+        if expected is not None and expected != current:
+            raise Conflict(f"{task['key']}: stale orchestration decision (epoch {expected}, lease is at {current})")
+        return current
 
     def pause_for_budget(self, task_key: str, reason: str) -> None:
         with self.ctx.unit_of_work() as uow:
@@ -353,6 +347,13 @@ class Executions:
             row = self.get(uow, execution_id, lock=True)
             if row["state"] != "REQUESTED":
                 return
+            if (row["spec"].get("purpose") or {}).get("fenced"):
+                uow.cur.execute("SELECT epoch FROM task_leases WHERE task_id = %s FOR UPDATE", (row["task_id"],))
+                lease = uow.cur.fetchone()
+                if lease is None or int(lease["epoch"]) != int(row["lease_epoch"]):
+                    self._intent(uow, row["id"], "ABANDONED", "lease epoch changed before dispatch")
+                    self._finish(uow, row, "CANCELLED", failure_class="POLICY", reason="lease epoch changed before dispatch")
+                    return
             uow.cur.execute("UPDATE executions SET dispatch_attempts = dispatch_attempts + 1, updated_at = now() WHERE id = %s",
                             (row["id"],))
             spec, attempts = row["spec"], row["dispatch_attempts"] + 1
@@ -459,6 +460,8 @@ class Executions:
         assignment = (row["spec"] or {}).get("assignment")
         if not row["agent_run"] or not assignment:
             return None
+        if ((row["spec"] or {}).get("purpose") or {}).get("orchestrator_step"):
+            return None  # orchestration asks for a fresh step instead (its context and epoch would be stale)
         uow.cur.execute("SELECT requested FROM capability_grants WHERE execution_id = %s", (row["id"],))
         requested = uow.cur.fetchone()["requested"]  # type: ignore[index]
         uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (row["task_id"],))
@@ -479,6 +482,9 @@ class Executions:
             resume=str(row["id"]) if row["provider_session_id"] else None,
             max_turns=int(assignment.get("max_turns") or 60),
             model=assignment.get("model"),
+            result_schema=assignment.get("result_schema") or "agent-result",
+            purpose=spec.get("purpose") or {},
+            subtask_id=row["subtask_id"],
         )
         return self.request(uow, principal=Principal("control-plane", "auth-resume"), task_key=task_key, req=req,
                             retry_of=None if row["provider_session_id"] else row["id"])
@@ -599,10 +605,10 @@ class Executions:
             else:
                 state, failure = "FAILED", "TASK"
                 reason = "out of memory" if status.get("oom_killed") else f"exit code {status.get('exit_code')}"
+            if failure == "AUTH":  # before _finish, so its hooks see the task waiting for the login
+                self._auth_required(uow, row, reason or "provider authentication failed")
             self._finish(uow, row, state, failure_class=failure, reason=redact(reason)[0] if reason else None,
                          exit_code=status.get("exit_code"), artifacts=artifact_ids)
-            if failure == "AUTH":
-                self._auth_required(uow, row, reason or "provider authentication failed")
             exec_id = str(row["id"])
             uow.after_commit.append(lambda: self._remove(exec_id))
 
@@ -687,6 +693,19 @@ class Executions:
 
     def _finish(self, uow: UnitOfWork, row: Row, state: str, *, failure_class: str | None, reason: str | None,
                 exit_code: int | None = None, artifacts: list[UUID] | None = None) -> None:
+        uow.cur.execute("SELECT * FROM tasks WHERE id = %s", (row["task_id"],))
+        task = uow.cur.fetchone()
+        reservation = row.get("budget_reservation")
+        if reservation and task is not None:
+            uow.cur.execute("SELECT units FROM usage_records WHERE execution_id = %s", (row["id"],))
+            usage = uow.cur.fetchone()
+            if usage:
+                budgets.settle(uow, task, reservation, usage_units=budgets.usage_units(usage["units"]), lost=False)
+            elif row["state"] == "REQUESTED":
+                budgets.release(uow, task, reservation)  # never started
+            else:
+                budgets.settle(uow, task, reservation, usage_units=None, lost=True)
+            uow.cur.execute("UPDATE executions SET budget_reservation = NULL WHERE id = %s", (row["id"],))
         uow.cur.execute(
             """
             UPDATE executions SET state = %s, failure_class = %s, failure_reason = %s, exit_code = %s,
@@ -706,3 +725,5 @@ class Executions:
         record_event(uow.cur, "GRANT_REVOKED", actor="control-plane", project_id=row["project_id"], task_id=row["task_id"],
                      summary=f"grant for execution {str(row['id'])[:8]} revoked", data={"execution_id": str(row["id"])},
                      pending=uow.events)
+        for hook in self.on_finished:
+            hook(uow, row, state, failure_class)

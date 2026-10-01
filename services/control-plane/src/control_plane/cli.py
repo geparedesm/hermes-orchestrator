@@ -69,6 +69,20 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("show", "pause", "resume", "cancel", "retry", "events"):
         task.add_parser(name).add_argument("key")
     task.add_parser("queue")
+    rv = task.add_parser("revise", help="new requirements version; the orchestrator analyses the impact")
+    rv.add_argument("key")
+    rv.add_argument("text")
+    bd = task.add_parser("budget", help="show the budget, or request an increase (--add agent_launches=5)")
+    bd.add_argument("key")
+    bd.add_argument("--add", action="append", default=[], metavar="COUNTER=N")
+    ins = task.add_parser("inspect", help="orchestration state: lease, plan, actions, budget")
+    ins.add_argument("key")
+    ins.add_argument("--manifest", action="store_true", help="generate an on-demand Task Manifest")
+
+    knowledge = sub.add_parser("knowledge", help="project knowledge proposed by agents").add_subparsers(dest="cmd", required=True)
+    knowledge.add_parser("list").add_argument("project")
+    for name in ("confirm", "reject"):
+        knowledge.add_parser(name).add_argument("id")
 
     approval = sub.add_parser("approval").add_subparsers(dest="cmd", required=True)
     approval.add_parser("list").add_argument("--all", action="store_true")
@@ -192,6 +206,22 @@ def main(argv: list[str] | None = None) -> int:
             return _call("GET", "/v1/events", params={"task": args.key})
         if cmd == "queue":
             return _call("GET", "/v1/queue")
+        if cmd == "revise":
+            return _call("POST", f"/v1/tasks/{args.key}/revise", body={"text": args.text}, mutate=True)
+        if cmd == "budget":
+            if not args.add:
+                return _call("GET", f"/v1/tasks/{args.key}/budget")
+            add = {}
+            for item in args.add:
+                counter, _, amount = item.partition("=")
+                if not amount.isdigit():
+                    parser.error(f"--add expects COUNTER=N, got {item!r}")
+                add[counter] = int(amount)
+            return _call("POST", f"/v1/tasks/{args.key}/budget", body={"add": add}, mutate=True)
+        if cmd == "inspect":
+            if args.manifest:
+                return _call("POST", f"/v1/tasks/{args.key}/manifest", mutate=True)
+            return _call("GET", f"/v1/tasks/{args.key}/orchestration")
         return _call("POST", f"/v1/tasks/{args.key}/{cmd}", mutate=True)
     if g == "approval":
         if cmd == "list":
@@ -252,6 +282,10 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "replace":
             return _call("POST", f"/v1/executions/{args.id}/replace", body={"reason": "replaced by operator"}, mutate=True)
         return _call("POST", f"/v1/executions/{args.id}/stop", body={"reason": "stopped by operator"}, mutate=True)
+    if g == "knowledge":
+        if cmd == "list":
+            return _call("GET", f"/v1/projects/{args.project}/knowledge")
+        return _call("POST", f"/v1/knowledge/{args.id}/decision", body={"decision": cmd.upper()}, mutate=True)
     if g == "workers":
         return _call("GET", "/v1/workers")
     if g == "policy":

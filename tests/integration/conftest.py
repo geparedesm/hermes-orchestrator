@@ -119,7 +119,7 @@ def projects_root(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def services(database: str, projects_root: Path, tmp_path: Path) -> Iterator[Services]:
+def services(request, database: str, projects_root: Path, tmp_path: Path) -> Iterator[Services]:
     platform = load_platform_config(ROOT / "config", "mac-m2-pro")
     platform["platform"]["projects_root_host"] = str(projects_root)
     git_client = TestClient(create_git_app(projects_root, GIT_TOKEN, MERGE_KEY))
@@ -135,7 +135,8 @@ def services(database: str, projects_root: Path, tmp_path: Path) -> Iterator[Ser
         merge_key=MERGE_KEY,
     )
     auth = Authenticator({OPERATOR_TOKEN: "operator", PLUGIN_TOKEN: "hermes-plugin"})
-    yield build_services(ctx, auth, run_scheduler=False)
+    orchestration = request.node.get_closest_marker("orchestration") is not None
+    yield build_services(ctx, auth, run_scheduler=False, orchestration=orchestration)
     db.close()
 
 
