@@ -75,13 +75,13 @@ class Leases:
         uow.cur.execute(
             """
             INSERT INTO task_leases (task_id, holder, provider, epoch, expires_at)
-            VALUES (%s, %s, %s, 1, now() + %s)
+            VALUES (%s, %s, %s, (SELECT COALESCE(max(lease_epoch), 0) + 1 FROM executions WHERE task_id = %s), now() + %s)
             ON CONFLICT (task_id) DO UPDATE SET epoch = task_leases.epoch + 1, holder = EXCLUDED.holder,
                 provider = EXCLUDED.provider, acquired_at = now(), renewed_at = now(), expires_at = EXCLUDED.expires_at
             WHERE task_leases.expires_at < now() OR task_leases.holder = EXCLUDED.holder
             RETURNING epoch
             """,
-            (task_id, self.ctx.instance_id, provider, timedelta(minutes=LEASE_MINUTES)),
+            (task_id, self.ctx.instance_id, provider, task_id, timedelta(minutes=LEASE_MINUTES)),
         )
         row = uow.cur.fetchone()
         if row is None:
@@ -1170,8 +1170,29 @@ class Orchestration:
 
     # ----------------------------------------------------------------- sync
 
+    def adopt_orphans(self) -> int:
+        """Lead again the orchestrated tasks whose lease is missing or expired (a restarted or lost control plane),
+        so they never wait forever; acquiring bumps the epoch, which fences anything decided under the old one."""
+        adopted = 0
+        with self.ctx.unit_of_work() as uow:
+            uow.cur.execute(
+                "SELECT t.* FROM tasks t LEFT JOIN task_leases l ON l.task_id = t.id WHERE t.state = ANY(%s) "
+                "AND t.started_at IS NOT NULL AND (l.task_id IS NULL OR l.expires_at < now()) "
+                "AND EXISTS (SELECT 1 FROM executions e WHERE e.task_id = t.id AND e.role = 'ORCHESTRATOR') FOR UPDATE OF t",
+                ([s.value for s in STEP_STATES],))
+            for task in uow.cur.fetchall():
+                provider = self._route(uow, task, "PLANNING")
+                if provider is None:
+                    continue
+                epoch = self.leases.acquire(uow, task["id"], provider)
+                uow.cur.execute("UPDATE tasks SET step_requested = true WHERE id = %s", (task["id"],))
+                self._event(uow, task, "LEASE_ADOPTED", f"orchestration resumed by {self.ctx.instance_id} with {provider} "
+                            f"(epoch {epoch})", {"provider": provider, "epoch": epoch})
+                adopted += 1
+        return adopted
+
     def sync(self) -> dict[str, int]:
-        stats = {"steps": 0, "launched": self.process_pending()}
+        stats = {"steps": 0, "adopted": self.adopt_orphans(), "launched": self.process_pending()}
         with self.ctx.unit_of_work() as uow:
             uow.cur.execute(
                 """

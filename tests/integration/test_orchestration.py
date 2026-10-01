@@ -441,3 +441,13 @@ def test_dependent_subtasks_start_from_the_accepted_work(api, services, agents, 
     ws = {r["name"]: r for r in q(services, "SELECT name, base_sha, head_sha FROM workspaces")}
     a_ws, b_ws = (ws[Path(d["workspace"]).name] for d in (dev_a, dev_b))
     assert b_ws["base_sha"] == a_ws["head_sha"]  # b is reviewed from a's accepted head: only its own changes
+
+
+def test_orphaned_tasks_are_adopted(api, services, agents, task):
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("a")]})
+    q(services, "DELETE FROM task_leases")  # the leader vanished
+    services.scheduler.run_once()
+    [lease] = q(services, "SELECT * FROM task_leases")
+    assert lease["holder"] == services.ctx.instance_id and lease["epoch"] == 2  # never reuses an epoch
+    assert len(active(services, task, "ORCHESTRATOR")) == 1
+    assert "LEASE_ADOPTED" in [r["type"] for r in q(services, "SELECT type FROM events")]
