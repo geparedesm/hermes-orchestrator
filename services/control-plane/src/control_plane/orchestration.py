@@ -379,7 +379,8 @@ class Orchestration:
 
     def context_bundle(self, uow: UnitOfWork, task: Row) -> str:
         """Everything the orchestrator needs for one step, from durable state (section 47); bounded size."""
-        lines = [f"# Orchestrator step: task {task['key']} ({task['state']})", "",
+        lines = [f"# Orchestrator step: task {task['key']}", "", f"Current task state: {task['state']} (events below are history; "
+                 "this state is authoritative).", "",
                  "You lead this task. Return actions; the platform validates and executes them and enforces policy, budgets,",
                  "and approvals. The platform automatically runs cross-review by the other provider after each developer",
                  "execution, fix cycles, integration, verification, integration reviews, and the Quality Gate: do not ask for",
@@ -411,7 +412,8 @@ class Orchestration:
                              f"{' deps ' + ','.join(deps) if deps else ''}: {s['title']}"
                              f"{' — ' + s['state_reason'] if s['state_reason'] else ''}")
             lines.append("")
-        uow.cur.execute("SELECT type, summary FROM events WHERE task_id = %s AND seq > %s AND type <> 'TASK_STATE_CHANGED' "
+        uow.cur.execute("SELECT type, summary FROM events WHERE task_id = %s AND seq > %s AND type NOT IN "
+                        "('GRANT_ISSUED', 'GRANT_REVOKED', 'WORKER_CREATED', 'AGENT_ASSIGNED') "
                         "ORDER BY seq DESC LIMIT 40", (task["id"], task["orchestrator_cursor_seq"]))
         recent = list(reversed(uow.cur.fetchall()))
         if recent:
