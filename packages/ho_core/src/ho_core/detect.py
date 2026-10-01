@@ -140,8 +140,9 @@ def detect(root: Path) -> DetectionReport:
         # Python without a dependency manifest (standard library only): the standard test runner always exists.
         add(report.profiles, "python")
         add(report.languages, "python")
-        if any(re.match(r"(tests?/.*|.*/)?test_[^/]+\.py$", f) for f in files):
-            report.commands.setdefault("test", "python -m unittest")
+        tests = [f for f in files if re.match(r"(tests?/.*|.*/)?test_[^/]+\.py$", f)]
+        if tests:
+            report.commands.setdefault("test", _unittest_command(tests, files))
 
     # Flutter / Dart
     if "pubspec.yaml" in top:
@@ -255,3 +256,11 @@ def propose_project_config(name: str, report: DetectionReport | dict[str, Any]) 
     if "playwright" in data.get("frameworks", []):
         proposal["browser_tests"] = {"enabled": True}
     return proposal
+
+
+def _unittest_command(tests: list[str], files: list[str]) -> str:
+    """unittest's default discovery only enters packages; a plain test directory needs `-s` (Python 3.12 exits 5 when nothing ran)."""
+    roots = {t.split("/", 1)[0] if "/" in t else "" for t in tests}
+    if len(roots) == 1 and (directory := roots.pop()) and f"{directory}/__init__.py" not in files:
+        return f"python -m unittest discover -s {directory} -v"
+    return "python -m unittest -v"

@@ -519,3 +519,24 @@ def test_reviews_lost_before_the_control_plane_reacted_are_healed(api, services,
     q(services, "UPDATE subtasks SET updated_at = now() - interval '5 minutes'")
     services.scheduler.run_once()
     assert len(active(services, task, "REVIEWER")) == 1 and subtasks(services, task)["a"]["state"] == "IN_REVIEW"
+
+
+def test_review_retry_waits_while_git_service_is_down(api, services, agents, repo, task, monkeypatch):
+    from control_plane.errors import UpstreamError
+
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "x = 1\n"})
+    [rev] = active(services, task, "REVIEWER")
+
+    def down(*_args, **_kwargs):
+        raise UpstreamError("git-service unavailable: connection refused")
+
+    monkeypatch.setattr(services.ctx.git, "_post", down)
+    agents.vanish(str(rev["id"]))
+    services.scheduler.run_once()  # the lost review is still recorded; its retry waits
+    assert q(services, "SELECT state FROM executions WHERE id = %s", rev["id"])[0]["state"] == "LOST"
+    assert subtasks(services, task)["a"]["state"] == "IN_REVIEW"
+    monkeypatch.undo()
+    services.scheduler.run_once()
+    assert len(active(services, task, "REVIEWER")) == 1

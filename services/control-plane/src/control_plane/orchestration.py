@@ -35,7 +35,7 @@ from .auth import Principal
 from .budgets import BudgetExhausted
 from .context import Context, UnitOfWork
 from .db import Row, jsonb
-from .errors import ApiError, Conflict, NotFound
+from .errors import ApiError, Conflict, NotFound, UpstreamError
 from .events import record_event
 from .executions import ACTIVE, ExecutionRequest, Executions
 from .gitops import CONTROL_PLANE, GitChanges
@@ -210,6 +210,8 @@ class Orchestration:
         if blocker is None:
             try:
                 with uow.cur.connection.transaction():
+                    if kind == "SUBTASK_REVIEW" and subtask is not None:  # a queued cross-review
+                        return self._launch_review(uow, task, subtask, request)
                     return self._start(uow, task, request)
             except BudgetExhausted as exc:
                 blocker = f"budget: {exc}"
@@ -218,6 +220,8 @@ class Orchestration:
                 if "stale orchestration decision" in str(exc):
                     raise
                 blocker = str(exc)
+            except UpstreamError as exc:  # a platform service is down: wait, never fail the caller's transaction
+                blocker = f"service unavailable: {exc}"
         if queue:
             uow.cur.execute("INSERT INTO pending_launches (id, task_id, subtask_id, kind, request, reason) VALUES (%s, %s, %s, %s, %s, %s)",
                             (uuid7(), task["id"], subtask["id"] if subtask else None, kind, jsonb(request), blocker[:300]))
@@ -935,8 +939,8 @@ class Orchestration:
                 return
             except BudgetExhausted as exc:
                 uow.after_commit.append(lambda key=task["key"], reason=str(exc): self.executions.pause_for_budget(key, reason))
-            except Conflict:
-                pass
+            except (Conflict, UpstreamError):
+                pass  # queued below; a service outage must not undo the finished execution being recorded
         uow.cur.execute("INSERT INTO pending_launches (id, task_id, subtask_id, kind, request, reason) VALUES (%s, %s, %s, %s, %s, %s)",
                         (uuid7(), task["id"], subtask["id"], "SUBTASK_REVIEW", jsonb(request), "waiting for capacity"))
 

@@ -22,3 +22,18 @@ def test_other_stacks_prefix_task_scoped_names(monkeypatch):
     finally:
         monkeypatch.delenv("HO_STACK")
         importlib.reload(stack)
+
+
+def test_unlabeled_resources_from_before_the_upgrade_belong_to_the_main_stack(monkeypatch):
+    from agent_manager import stack
+    monkeypatch.delenv("HO_STACK", raising=False)
+    importlib.reload(stack)
+    assert stack.owns({"ho.managed": "true"}) and stack.owns({"ho.stack": "hermes-orchestrator"})
+    assert not stack.owns({"ho.stack": "ho-smoke9"})
+    monkeypatch.setenv("HO_STACK", "ho-smoke9")
+    try:
+        importlib.reload(stack)
+        assert stack.owns({"ho.stack": "ho-smoke9"}) and not stack.owns({"ho.managed": "true"})
+    finally:
+        monkeypatch.delenv("HO_STACK")
+        importlib.reload(stack)

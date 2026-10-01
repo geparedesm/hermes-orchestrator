@@ -7,6 +7,7 @@ import base64
 import json
 
 import pytest
+from agent_manager import stack
 
 from conftest import credential_volume  # type: ignore[import-not-found]
 from ho_core.adapters import AgentAssignment, ClaudeAdapter, CodexAdapter, FailureClass, OutputBundle
@@ -131,7 +132,7 @@ def test_session_store_persists_within_the_task_and_is_removed_with_it(api, clie
     assert "empty" in api.run(other)["logs"]  # another task has its own store
     for execution in (first["execution_id"], second["execution_id"]):
         api.client.delete(f"/v1/executions/{execution}", headers=api.headers)
-    volume = f"ho-sess-{first['task'].lower()}-codex"
+    volume = f"ho-sess-{stack.task_slug(first['task'])}-codex"
     assert client.volumes.get(volume)
     api.client.delete(f"/v1/tasks/{first['task']}/environment", headers=api.headers)
     assert not client.volumes.list(filters={"name": volume})

@@ -18,3 +18,10 @@ LABEL = f"ho.stack={NAME}"
 def task_slug(task: str) -> str:
     """The part of a task-scoped resource name that identifies the task within this Docker host."""
     return task.lower() if NAME == MAIN else f"{NAME}-{task.lower()}"
+
+
+def owns(labels: dict[str, str] | None) -> bool:
+    """Whether a managed resource belongs to this stack. Resources created before stacks were labeled
+    (an upgraded installation) belonged to the only stack there was then: the main one."""
+    value = (labels or {}).get("ho.stack")
+    return value == NAME or (value is None and NAME == MAIN)

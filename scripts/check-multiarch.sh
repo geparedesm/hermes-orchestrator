@@ -33,7 +33,7 @@ check "agent-manager imports" "ok" "$(run agent-manager python -c 'import agent_
 echo "== execution images for $PLATFORM"
 HO_PLATFORM="$PLATFORM" HO_VERSION="$TAG" HO_TOOLCHAINS="generic python node" HO_BUILD_BROWSER=1 scripts/build-images.sh
 check "agent-base tools" "git version" "$(run agent-base git --version)"
-check "python toolchain" "Python 3" "$(run runner-python python3 --version 2>/dev/null || run toolchain-python python3 --version)"
+check "python toolchain" "Python 3" "$(run toolchain-python python3 --version)"
 check "node toolchain" "v" "$(run toolchain-node node --version)"
 check "Codex CLI" "$(grep -E '^CODEX_VERSION=' workers/versions.env | cut -d= -f2)" "$(run codex-generic codex --version)"
 # QEMU cannot execute Claude Code's native binary: check the installed binary's ELF machine instead.
@@ -42,9 +42,11 @@ check "Claude Code binary built for $PLATFORM" "$expected" \
   "$(docker run --rm --platform "$PLATFORM" --network none --entrypoint od "hermes-orchestrator/claude-generic:$TAG" \
      -An -tx1 -j18 -N2 /opt/ho/claude/bin/claude 2>&1 | tr -s ' ' | sed 's/^ //')"
 check "browser runner" "Version" "$(run browser-runner python3 -c 'import playwright; from importlib.metadata import version; print("Version", version("playwright"))')"
-check "Hermes image (official, multi-arch)" "Hermes Agent" \
-  "$(docker run --rm --platform "$PLATFORM" --network none --entrypoint hermes \
-     nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7 --version 2>&1 | head -1)"
+HERMES_IMAGE=nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
+# Hermes is the official image, not built here: its pinned digest must be an index with this platform. (Docker
+# Desktop's image store cannot hold a second platform of a digest it already has, so it is not run here.)
+check "Hermes image (official) published for $PLATFORM" "$PLATFORM" \
+  "$(docker buildx imagetools inspect "$HERMES_IMAGE" 2>&1 | grep -o "Platform: *$PLATFORM" | head -1 | tr -s ' ' | cut -d' ' -f2)"
 
 echo
 if [[ $FAILURES -eq 0 ]]; then echo "multi-architecture check ($PLATFORM): all checks passed"; else echo "multi-architecture check: $FAILURES failed"; exit 1; fi

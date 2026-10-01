@@ -109,7 +109,7 @@ class DockerOps:
     # ---------------------------------------------------------------- capacity
 
     def _running_workers(self) -> list[Any]:
-        return self.client.containers.list(filters={"label": ["ho.managed=true", "ho.kind=worker", stack.LABEL]})
+        return [c for c in self.client.containers.list(filters={"label": ["ho.managed=true", "ho.kind=worker"]}) if stack.owns(c.labels)]
 
     def stats(self) -> dict[str, Any]:
         """CPU and memory of running workers (one non-streaming Docker stats sample each), for the Dashboard."""
@@ -421,12 +421,14 @@ class DockerOps:
     def list_managed(self) -> dict[str, list[dict[str, Any]]]:
         containers = [
             {"name": c.name, "status": c.status, "labels": {k: v for k, v in c.labels.items() if k.startswith("ho.")}}
-            for c in self.client.containers.list(all=True, filters={"label": ["ho.managed=true", stack.LABEL]})
+            for c in self.client.containers.list(all=True, filters={"label": "ho.managed=true"}) if stack.owns(c.labels)
         ]
         # Only this stack's resources: another stack's workers on the same Docker host are not orphans.
-        mine = {"label": ["ho.managed=true", stack.LABEL]}
-        networks = [{"name": n.name, "labels": n.attrs.get("Labels") or {}} for n in self.client.networks.list(filters=mine)]
-        volumes = [{"name": v.name, "labels": v.attrs.get("Labels") or {}} for v in self.client.volumes.list(filters=mine)]
+        managed = {"label": "ho.managed=true"}
+        networks = [{"name": n.name, "labels": n.attrs.get("Labels") or {}} for n in self.client.networks.list(filters=managed)
+                    if stack.owns(n.attrs.get("Labels"))]
+        volumes = [{"name": v.name, "labels": v.attrs.get("Labels") or {}} for v in self.client.volumes.list(filters=managed)
+                   if stack.owns(v.attrs.get("Labels"))]
         return {"containers": containers, "networks": networks, "volumes": volumes}
 
     # --------------------------------------------------------------- control
