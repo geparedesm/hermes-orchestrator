@@ -311,7 +311,8 @@ class Orchestration:
             with uow.cur.connection.transaction():
                 self.leases.acquire(uow, task["id"], provider)
         except Conflict:
-            return True  # another control plane leads it; keep dispatching the rest of the queue
+            log.warning("%s is led by another control plane instance; not dispatched", task["key"])
+            return True  # keep dispatching the rest of the queue
         uow.cur.execute("UPDATE tasks SET started_at = COALESCE(started_at, now()), step_requested = true WHERE id = %s", (task["id"],))
         task = self._move(uow, self._task(uow, task["id"]), S.PLANNING, reason=f"orchestrated by {provider}")
         self.request_step(uow, task)

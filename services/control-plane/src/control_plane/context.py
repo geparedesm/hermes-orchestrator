@@ -39,7 +39,9 @@ class Context:
     # Signs merge authorizations for Git Service (HO_MERGE_KEY_FILE).
     merge_key: bytes = b""
     # Identifies this control-plane process as a lease holder.
-    instance_id: str = field(default_factory=lambda: f"{socket.gethostname()}-{os.getpid()}")
+    # Stable across restarts (HO_INSTANCE_ID), so a restarted control plane keeps leading its own tasks
+    # instead of waiting for leases held under its previous container name to expire.
+    instance_id: str = field(default_factory=lambda: os.environ.get("HO_INSTANCE_ID") or socket.gethostname())
 
     @property
     def policy_version(self) -> str:
