@@ -592,6 +592,8 @@ class Orchestration:
         keys = [str(i.get("key") or "").strip() for i in items]
         if len(set(keys)) != len(keys) or not all(re.match(r"^[A-Za-z0-9_-]{1,20}$", k) for k in keys):
             raise ValueError("subtask keys must be unique short identifiers")
+        if any(re.match(r"^T-[0-9]+-[0-9]+$", k) for k in keys):
+            raise ValueError("subtask keys are your own short names (like 'api'); T-n-m keys are assigned by the platform")
         graph = {k: [d for d in (i.get("depends_on") or [])] for k, i in zip(keys, items, strict=True)}
         for key, deps in graph.items():
             unknown = [d for d in deps if d not in graph]
@@ -723,7 +725,8 @@ class Orchestration:
             self._retire_workspace(uow, subtask)
             attempt = int(subtask["attempts"]) + 1
             workspace = self.git.workspace(uow, task["key"], principal=CONTROL_PLANE,
-                                           suffix=f"{subtask['key'].split('-')[-1]}a{attempt}".lower())
+                                           suffix=f"{subtask['key'].split('-')[-1]}a{attempt}".lower(),
+                                           base_ref=self._dependency_base(uow, task, subtask))
             uow.cur.execute("UPDATE subtasks SET workspace_id = %s, attempts = %s WHERE id = %s",
                             (workspace["id"], attempt, subtask["id"]))
         knowledge = self._knowledge_for(uow, task, list((subtask["estimated_scope"] or {}).get("files") or []))
@@ -743,6 +746,23 @@ class Orchestration:
         uow.cur.execute("UPDATE subtasks SET developer_provider = %s, state = 'IN_PROGRESS', updated_at = now() WHERE id = %s",
                         (provider, subtask["id"]))
         return self.launch(uow, task, kind, request, subtask=subtask)
+
+    def _dependency_base(self, uow: UnitOfWork, task: Row, subtask: Row) -> str | None:
+        """A dependent subtask starts from the accepted work it depends on, not from the bare task base."""
+        uow.cur.execute("SELECT w.name FROM subtask_dependencies d JOIN subtasks x ON x.id = d.depends_on_subtask_id "
+                        "JOIN workspaces w ON w.id = x.workspace_id WHERE d.subtask_id = %s AND w.collected_at IS NOT NULL "
+                        "ORDER BY x.key", (subtask["id"],))
+        heads = [f"refs/hermes/workspaces/{r['name']}" for r in uow.cur.fetchall()]
+        if not heads:
+            return None
+        if len(heads) == 1:
+            return heads[0]
+        _, project, _ = self.git._context(uow, task["key"])
+        merged = self.ctx.git.integrate(project["relative_path"], task["key"], task["target_branch"] or project["default_branch"]
+                                        or "main", heads)
+        if not merged.get("ok"):
+            raise Conflict(f"the dependencies of {subtask['key']} conflict: {', '.join(merged.get('conflicts') or [])}")
+        return merged["integration_ref"]
 
     def _retire_workspace(self, uow: UnitOfWork, subtask: Row) -> None:
         if subtask["workspace_id"]:
@@ -871,7 +891,8 @@ class Orchestration:
                         (uuid7(), task["id"], subtask["id"], "SUBTASK_REVIEW", jsonb(request), "waiting for capacity"))
 
     def _launch_review(self, uow: UnitOfWork, task: Row, subtask: Row, request: dict[str, Any]) -> Row:
-        uow.cur.execute("SELECT base_sha FROM git_changes WHERE task_id = %s", (task["id"],))
+        # Review the subtask's own changes: from where its workspace started (its dependencies' work, if any).
+        uow.cur.execute("SELECT base_sha FROM workspaces WHERE id = %s", (subtask["workspace_id"],))
         base = uow.cur.fetchone()["base_sha"]  # type: ignore[index]
         return self.reviews.request_review(uow, task, provider=request["reviewer"], principal=ORCHESTRATOR, ref=request["ref"],
                                            commit=request["head"], base=base, developers=[request["developer"]],

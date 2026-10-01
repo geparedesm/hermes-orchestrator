@@ -426,3 +426,18 @@ def test_rejected_steps_retry_with_feedback_then_block(api, services, agents, ta
         step(services, agents, task, {"type": "ACCEPT_SUBTASK", "subtask": "missing"})
     assert state(api, task) == "BLOCKED"
     assert [a[1] for a in actions(services, task)] == ["REJECTED"] * 3
+
+
+def test_dependent_subtasks_start_from_the_accepted_work(api, services, agents, repo, task):
+    plan_and_start(services, agents, task, plan_item("a"), plan_item("b", depends_on=["a"]))
+    [dev_a] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev_a, {"a.py": "a = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "b", "provider": "codex"})
+    [dev_b] = active(services, task, "DEVELOPER")
+    assert (repo.parent / dev_b["workspace"] / "a.py").read_text() == "a = 1\n"  # a's work is there
+    develop(services, agents, repo, dev_b, {"b.py": "b = 1\n"})
+    assert len(active(services, task, "REVIEWER")) == 1
+    ws = {r["name"]: r for r in q(services, "SELECT name, base_sha, head_sha FROM workspaces")}
+    a_ws, b_ws = (ws[Path(d["workspace"]).name] for d in (dev_a, dev_b))
+    assert b_ws["base_sha"] == a_ws["head_sha"]  # b is reviewed from a's accepted head: only its own changes
