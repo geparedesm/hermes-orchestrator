@@ -4,7 +4,7 @@ Local-first multi-agent platform: Claude Code and Codex work in isolated Docker 
 
 ## Status
 
-Phases 0–6 approved and merged (PRs #2–#7); Phase 7 (multi-agent orchestration, opt-in `HO_ORCHESTRATION=true`) built on `codex/phase-7-orchestration`, awaiting approval. Evidence per phase: `docs/validation/phase-N.md`. Next: 8 recovery, 9 Hermes integration, 10 dashboard, 11 hardening.
+Phases 0–7 approved and merged (PRs #2–#8); orchestration is opt-in with `HO_ORCHESTRATION=true`. Evidence per phase: `docs/validation/phase-N.md`. Next: 8 recovery, 9 Hermes integration, 10 dashboard, 11 hardening.
 
 ## Architecture decisions (ARCHITECTURE.md §2)
 
