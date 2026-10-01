@@ -150,13 +150,13 @@ check "secret file mode 0600" "True" "$([[ "$LOGS" == *mode=600* ]] && echo True
 check "value not in PostgreSQL" "0" "$(dc exec -T postgres psql -U ho_owner -d ho -tAc "SELECT count(*) FROM executions WHERE spec::text LIKE '%$SECRET_VALUE%'")"
 
 echo "== task end releases the session store"
-check "session volume exists while the task is open" "1" "$(docker volume ls -q --filter "name=ho-sess-$(tr 'A-Z' 'a-z' <<<"$T2")-claude" | wc -l | tr -d ' ')"
+check "session volume exists while the task is open" "1" "$(docker volume ls -q --filter "name=ho-sess-$PROJECT-$(tr 'A-Z' 'a-z' <<<"$T2")-claude" | wc -l | tr -d ' ')"
 ho task cancel "$T2" >/dev/null
 for _ in $(seq 1 20); do
-  [[ -z "$(docker volume ls -q --filter "name=ho-sess-$(tr 'A-Z' 'a-z' <<<"$T2")-claude")" ]] && break
+  [[ -z "$(docker volume ls -q --filter "name=ho-sess-$PROJECT-$(tr 'A-Z' 'a-z' <<<"$T2")-claude")" ]] && break
   sleep 2
 done
-check "session volume removed after cancel" "0" "$(docker volume ls -q --filter "name=ho-sess-$(tr 'A-Z' 'a-z' <<<"$T2")-claude" | wc -l | tr -d ' ')"
+check "session volume removed after cancel" "0" "$(docker volume ls -q --filter "name=ho-sess-$PROJECT-$(tr 'A-Z' 'a-z' <<<"$T2")-claude" | wc -l | tr -d ' ')"
 check "credential volumes untouched by cleanup" "2" "$(docker volume ls -q --filter "label=ho.credential" | grep -c "$IDENTITY" || true)"
 
 if [[ "$FAILURES" -ne 0 ]]; then
