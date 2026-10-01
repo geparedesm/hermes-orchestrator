@@ -119,6 +119,7 @@ SEEN="$(docker run --rm --network "${PROJECT}_ho-edge" -v "$PWD/tests/hermes:/ch
   http://hermes:9119 /out/password "$TASK" /out/overview.png 2>&1 | tail -1)"
 check "page login" "200" "$(field 'd["login"]' <<<"$SEEN")"
 check "overview rendered" "True" "$(field 'd["overview"]' <<<"$SEEN")"
+check "tab listed in Hermes's sidebar" "True" "$(field 'd["sidebar"]' <<<"$SEEN")"
 check "board rendered with the task" "True" "$(field 'd["board"]' <<<"$SEEN")"
 check "task detail sections" "10" "$(field 'len(d["task_sections"])' <<<"$SEEN")"
 check "approval decided from the page" "1 0" "$(field 'str(d["pending_in_page"]) + " " + str(d.get("pending_after_approve"))' <<<"$SEEN")"

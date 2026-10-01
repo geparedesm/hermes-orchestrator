@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from . import budgets
 from .context import UnitOfWork
 from .db import Row
 
@@ -100,6 +101,8 @@ def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
     approvals = cur.fetchall()
     cur.execute("SELECT profile, state, limits, consumed, reserved FROM budgets WHERE task_id = %s", (tid,))
     budget = cur.fetchone()
+    if budget is not None:  # runtime is computed from the task's start, not stored (budgets.runtime_minutes)
+        budget["consumed"] = {**budget["consumed"], "runtime_minutes": round(budgets.runtime_minutes(task), 1)}
 
     cur.execute("SELECT outcome, commit_sha, risk, requirements, test_gaps, residual_risk, evaluated_at "
                 "FROM quality_gate_evaluations WHERE task_id = %s ORDER BY evaluated_at DESC LIMIT 1", (tid,))
@@ -166,7 +169,7 @@ def metrics_text(uow: UnitOfWork, queue_length: int) -> str:
     metric("ho_tasks", "gauge", "Tasks by state.", [({"state": r["state"]}, int(r["n"])) for r in cur.fetchall()])
     metric("ho_queue_length", "gauge", "READY tasks waiting for dispatch.", [({}, queue_length)])
     cur.execute("SELECT state, COALESCE(provider, 'none') AS provider, count(*) AS n FROM executions GROUP BY 1, 2 ORDER BY 1, 2")
-    metric("ho_executions_total", "counter", "Executions by state and provider.",
+    metric("ho_executions", "gauge", "Executions by current state and provider.",
            [({"state": r["state"], "provider": r["provider"]}, int(r["n"])) for r in cur.fetchall()])
     cur.execute(f"SELECT u.provider, COALESCE(sum({_TOKENS}), 0) AS tokens FROM usage_records u GROUP BY 1 ORDER BY 1")
     metric("ho_provider_tokens_total", "counter", "Provider tokens reported by the CLIs (input + output + cache creation).",

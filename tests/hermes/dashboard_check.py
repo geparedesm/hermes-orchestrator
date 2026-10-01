@@ -25,6 +25,10 @@ with sync_playwright() as p:
     page.goto(f"{base}/orchestration", wait_until="networkidle")
     page.get_by_text("Required actions").wait_for(timeout=30000)
     seen["overview"] = all(page.get_by_text(text).count() > 0 for text in ("Queue", "Running now", "Recent tests", "Platform"))
+    # Hermes adds plugin tabs to its sidebar once their manifests load; the sidebar renders labels upper-case, so
+    # the rendered text ORCHESTRATION appears only there (the page header keeps "Orchestration").
+    page.wait_for_function("document.body.innerText.includes('ORCHESTRATION')", timeout=20000)
+    seen["sidebar"] = True
     page.screenshot(path=screenshot, full_page=True)
 
     page.get_by_role("button", name="Board", exact=True).click()

@@ -47,7 +47,7 @@ def test_metrics_are_prometheus_text_for_the_operator(api, services, agents, tas
     assert response.status_code == 200 and response.headers["content-type"].startswith("text/plain")
     text = response.text
     assert '# TYPE ho_tasks gauge' in text and 'ho_tasks{state="READY"} 1' in text
-    assert "ho_queue_length 1" in text and "# TYPE ho_executions_total counter" in text
+    assert "ho_queue_length 1" in text and "# TYPE ho_executions gauge" in text
     assert api.get("/metrics", token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 403
 
 
@@ -57,3 +57,9 @@ def test_task_view_for_a_plain_task(api, services, agents, task):
     assert view["timeline"][0]["type"] and "orchestration" not in view  # orchestration is off in this suite
     assert api.get(f"/v1/tasks/{task}/manifests").json()["manifests"] == []
     assert api.get(f"/v1/tasks/{task}/manifests/01a0f000-0000-7000-8000-000000000009").status_code == 404
+
+
+def test_budget_shows_runtime_consumed(api, services, agents, task):
+    q(services, "UPDATE tasks SET started_at = now() - interval '30 minutes' WHERE key = %s", task)
+    view = api.get(f"/v1/dashboard/tasks/{task}").json()
+    assert 29 <= view["budget"]["consumed"]["runtime_minutes"] <= 31

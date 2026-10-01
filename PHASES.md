@@ -201,12 +201,14 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Add only the orchestration views missing from official Hermes.
 
-- [ ] Reuse existing Dashboard administration and suitable Kanban/board functionality.
-- [ ] Add missing project, task, DAG, Kanban, and worker views.
-- [ ] Add missing approval, budget, Quality Gate, review, and test views.
-- [ ] Expose Task Manifests, audit timelines, and task controls.
-- [ ] Show queue state, blocked work, resource usage, provider usage, retries, failures, test results, and duration.
-- [ ] Keep v1 observability lightweight while allowing future OpenTelemetry/Prometheus integration.
+- [x] Reuse existing Dashboard administration and suitable Kanban/board functionality.
+- [x] Add missing project, task, DAG, Kanban, and worker views.
+- [x] Add missing approval, budget, Quality Gate, review, and test views.
+- [x] Expose Task Manifests, audit timelines, and task controls.
+- [x] Show queue state, blocked work, resource usage, provider usage, retries, failures, test results, and duration.
+- [x] Keep v1 observability lightweight while allowing future OpenTelemetry/Prometheus integration.
+
+**Status:** Complete. Merged on 2026-10-01 under the operator's standing authorization (PR #11). The Orchestration tab inside Hermes's Dashboard shows required actions, queue, running work, provider usage, retries, failures, tests, durations, a read-only board, and a task view with DAG, approvals, budget, Quality Gate, reviews, tests, executions, Git, audit timeline, checkpoints, manifests, and controls; projects and workers with CPU and memory; Prometheus-format `/metrics`. Hermes's own administration is reused untouched; its Kanban board is not written to (AD-02). 229 unit and 134 integration tests and a smoke test rendering the tab in headless Chromium pass. Evidence: [docs/validation/phase-10.md](docs/validation/phase-10.md).
 
 **Completion criteria:** Users can inspect progress, evidence, and required actions without duplicating capabilities already supplied by Hermes.
 

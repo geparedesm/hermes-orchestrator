@@ -260,7 +260,7 @@
       ["", function (a) { return h(Decide, { id: a.id, done: load }); }]] });
     else if (view === "projects") body = h(Projects, { projects: data.body.projects });
     else body = h(Workers, { data: data.body, open: open });
-    return h("div", { className: "orch-page" }, h("h2", null, "Orchestration"), nav,
+    return h("div", { className: "orch-page" }, nav,
       error && data ? h("p", { className: "orch-error" }, error) : null, body);
   }
 
