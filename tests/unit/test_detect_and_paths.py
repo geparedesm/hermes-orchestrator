@@ -100,3 +100,19 @@ def test_slugify():
     assert slugify("My App!") == "my-app"
     with pytest.raises(ValueError):
         slugify("!!!")
+
+
+def test_standard_library_python_project_gets_unittest(tmp_path):
+    write(tmp_path, "shop/__init__.py", "x = 1\n")
+    write(tmp_path, "tests/test_shop.py", "import unittest\n")
+    report = detect(tmp_path)
+    assert "python" in report.profiles and report.commands["test"] == "python -m unittest discover -s tests -v"
+    proposal = propose_project_config("shop", report)
+    assert proposal["commands"]["test"] == "python -m unittest discover -s tests -v" and proposal["quality_gate"]["tests"] is True
+
+
+def test_unittest_packages_and_top_level_tests_use_default_discovery(tmp_path):
+    write(tmp_path, "app.py", "x = 1\n")
+    write(tmp_path, "tests/__init__.py", "")
+    write(tmp_path, "tests/test_app.py", "import unittest\n")
+    assert detect(tmp_path).commands["test"] == "python -m unittest -v"

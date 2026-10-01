@@ -10,6 +10,10 @@ import shutil
 
 import pytest
 
+from agent_manager import compose, stack
+
+NETWORK = f"ho-t-{stack.task_slug('T-960001')}-svc"
+
 from ho_core.enums import Role
 
 T = Role.TESTER
@@ -71,11 +75,11 @@ def test_project_services_run_isolated_on_the_task_network(api, client):
     assert services["db"]["health"] == "healthy" and services["app"]["health"] == "healthy"
     for container in client.containers.list(filters={"label": [f"ho.task={task}", "ho.kind=test-service"]}):
         attrs = container.attrs
-        assert set(attrs["NetworkSettings"]["Networks"]) == {"ho-t-t-960001-svc"}  # only the private task network
+        assert set(attrs["NetworkSettings"]["Networks"]) == {NETWORK}  # only the private task network
         assert not any(attrs["NetworkSettings"]["Ports"].get(p) for p in attrs["NetworkSettings"]["Ports"])  # no published ports
         assert "no-new-privileges:true" in attrs["HostConfig"]["SecurityOpt"] and not attrs["HostConfig"]["Privileged"]
         assert attrs["HostConfig"]["Memory"] > 0 and attrs["HostConfig"]["PidsLimit"] == 512
-    network = client.networks.get("ho-t-t-960001-svc")
+    network = client.networks.get(NETWORK)
     assert network.attrs["Internal"] is True
 
     # A test runner on the same network reaches the services, but not the Internet.
@@ -94,10 +98,10 @@ def test_project_services_run_isolated_on_the_task_network(api, client):
     # Test services are removed with their volumes; the task network stays until the task ends.
     assert api.client.delete(f"/v1/tasks/{task}/environment?services_only=true", headers=api.headers).status_code == 200
     assert not client.containers.list(all=True, filters={"label": [f"ho.task={task}", "ho.kind=test-service"]})
-    assert not [v for v in client.volumes.list() if v.name.startswith("ho-t-960001-proj-a")]
-    assert client.networks.get("ho-t-t-960001-svc")
+    assert not [v for v in client.volumes.list() if v.name.startswith(compose.project_name("T-960001", "proj-a"))]
+    assert client.networks.get(NETWORK)
     api.client.delete(f"/v1/tasks/{task}/environment", headers=api.headers)
-    assert not client.networks.list(names=["ho-t-t-960001-svc"])
+    assert not client.networks.list(names=[NETWORK])
 
 
 @pytest.mark.parametrize("patch", ["network_mode: host", "privileged: true", "cap_add: [SYS_ADMIN]",

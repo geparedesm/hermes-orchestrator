@@ -13,6 +13,9 @@ platform:
   approvers:
     - host-cli:operator
     - dashboard:operator
+  # Retention (MASTER_SPEC section 80): artifacts of failed or blocked tasks are kept longer than the
+  # project's artifacts_days; delivered notifications and recovery reports are pruned.
+  retention: {failed_artifacts_days: 90, notifications_days: 30, recovery_runs_days: 30}
   approval_ttl_hours:
     default: 72
     MERGE: 72
@@ -25,6 +28,9 @@ machine:
   max_execution_minutes: 240
   # Memory kept free for platform services; Agent Manager refuses executions beyond the rest.
   docker_memory_reserve_gb: 2
+  # Package-manager download caches per project and ecosystem (pip, npm, Gradle, Pub), never shared
+  # between projects; trimmed least-recently-used first beyond this size (MASTER_SPEC section 71).
+  dependency_cache: {enabled: true, max_gb_per_cache: 2}
   # Provider hostnames for PROVIDER_ONLY/ALLOWLIST egress, from each provider's official network
   # documentation for the pinned CLI versions (workers/versions.env):
   #   Claude Code: code.claude.com/docs/en/network-config (API, claude.ai login, token exchange)

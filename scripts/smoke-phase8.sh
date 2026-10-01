@@ -60,6 +60,7 @@ YAML
 echo "x = 1" > "$ROOT/app/app.py"
 git -C "$ROOT/app" init -q -b main && git -C "$ROOT/app" add -A && git -C "$ROOT/app" commit -qm init
 printf 'HO_MACHINE_PROFILE=mac-m2-pro\nHO_PROJECTS_ROOT_HOST=%s\nHO_VERSION=dev\nHO_PROVIDER_IDENTITY=smoke8\n' "$ROOT" > "$ENV_FILE"
+echo "HO_HERMES_DASHBOARD_PORT=19208" >> "$ENV_FILE"  # never collide with the operator stack's Hermes
 dc up -d --build --wait >/dev/null
 ho project register "$ROOT/app" >/dev/null
 ho approval approve "$(ho project scan app | field 'd["approval"]["id"]')" >/dev/null

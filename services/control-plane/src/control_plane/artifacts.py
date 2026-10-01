@@ -69,7 +69,14 @@ class ArtifactStore:
         return StoredArtifact(artifact_id, relative, digest, len(content))
 
     def read(self, relative: str) -> bytes:
+        return self._path(relative).read_bytes()
+
+    def delete(self, relative: str) -> None:
+        """Remove an artifact's file (retention); its metadata and digest stay in PostgreSQL."""
+        self._path(relative).unlink(missing_ok=True)
+
+    def _path(self, relative: str) -> Path:
         path = (self.root / relative).resolve()
         if self.root.resolve() not in path.parents:
             raise ValueError("artifact path escapes the artifact root")
-        return path.read_bytes()
+        return path

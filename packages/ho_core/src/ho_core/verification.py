@@ -194,6 +194,12 @@ def plan_verification(config: dict[str, Any], paths: list[str], *, insertions: i
             gaps.append({"kind": f"no_{requirement.name}_command", "detail": f"{requirement.name} required ({requirement.source}) "
                                                                                  "but the project has no command for it"})
     needs_approval = []
+    if code and not any(name == "test" for name, _ in steps):
+        # Hard rule: a code change never reaches READY_FOR_MERGE without a test run unless a human accepts it
+        # (whatever the project configuration says).
+        if not any(g["kind"] == "no_test_command" for g in gaps):
+            gaps.append({"kind": "no_tests_ran", "detail": f"{len(code)} code file(s) changed and no test command runs"})
+        needs_approval.append("code change verified without running any test (section 56)")
     if level == Risk.CRITICAL:
         needs_approval.append("critical change (section 57)")
     if gaps and _at_least(level, Risk.HIGH):

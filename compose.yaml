@@ -86,6 +86,7 @@ services:
       HO_HERMES_WEBHOOK_URL: ${HO_HERMES_WEBHOOK_URL:-}
       HO_HERMES_WEBHOOK_SECRET_FILE: /run/secrets/ho_hermes_webhook_secret
       HO_APPROVERS: ${HO_APPROVERS:-}
+      HO_VERSION: ${HO_VERSION:-dev}
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
     secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token, ho_merge_key, ho_hermes_webhook_secret]
     volumes:
@@ -124,6 +125,7 @@ services:
     # Docker Desktop: group 0. Linux: set HO_DOCKER_GID to the host's docker group ID.
     group_add: ["${HO_DOCKER_GID:-0}"]
     environment:
+      HO_STACK: ${COMPOSE_PROJECT_NAME}
       HO_MACHINE_PROFILE: ${HO_MACHINE_PROFILE:?set HO_MACHINE_PROFILE in .env}
       HO_PROJECTS_ROOT_HOST: ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}
       HO_PROJECTS_ROOT: /projects

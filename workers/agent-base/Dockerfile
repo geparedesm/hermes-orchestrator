@@ -10,10 +10,12 @@ RUN apt-get update \
  && groupadd --gid 10001 agent \
  && useradd --uid 10001 --gid agent --home-dir /home/agent --create-home --shell /bin/bash agent \
  && mkdir -p /workspace /output /opt/ho/bin /run/ho-input /run/ho-sessions /run/ho-credentials/claude /run/ho-credentials/codex \
+            /cache/pip /cache/npm /cache/gradle /cache/pub /cache/composer \
  && chown agent:agent /workspace /output /run/ho-input /run/ho-sessions /run/ho-credentials/claude /run/ho-credentials/codex \
+                      /cache/pip /cache/npm /cache/gradle /cache/pub /cache/composer \
  && chmod 700 /run/ho-credentials/claude /run/ho-credentials/codex
 # Mount points owned by the worker user: Docker copies this ownership into a new, empty
-# named volume the first time it is mounted (output, input, and session volumes).
+# named volume the first time it is mounted (output, input, session, and dependency-cache volumes).
 COPY --chmod=755 ho-wait-secrets ho-verify /opt/ho/bin/
 
 LABEL org.hermes-orchestrator.role="agent-base" org.hermes-orchestrator.toolchains="generic"

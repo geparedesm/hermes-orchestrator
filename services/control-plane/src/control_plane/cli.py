@@ -81,6 +81,22 @@ def main(argv: list[str] | None = None) -> int:
 
     ins_cp = task.add_parser("checkpoints", help="durable snapshots of a task's state")
     ins_cp.add_argument("key")
+    update = sub.add_parser("update", help="approval-controlled platform updates (scripts/update.sh)").add_subparsers(dest="cmd", required=True)
+    update.add_parser("list")
+    update.add_parser("request").add_argument("to_version")
+    us = update.add_parser("start")
+    us.add_argument("approval")
+    us.add_argument("--backup")
+    uf = update.add_parser("finish")
+    uf.add_argument("update")
+    uf.add_argument("state", choices=["SUCCEEDED", "ROLLED_BACK", "FAILED"])
+    uf.add_argument("--note", default="")
+    sub.add_parser("maintenance", help="daily maintenance: caches, retention (operator)").add_subparsers(dest="cmd", required=True).add_parser("run")
+    cache = sub.add_parser("cache", help="dependency caches per project and ecosystem").add_subparsers(dest="cmd", required=True)
+    cache.add_parser("list")
+    clear = cache.add_parser("clear")
+    clear.add_argument("project")
+    clear.add_argument("--ecosystem", choices=["pip", "npm", "gradle", "pub", "composer"])
     recovery = sub.add_parser("recovery", help="reconciliation runs and platform health").add_subparsers(dest="cmd", required=True)
     recovery.add_parser("status")
     recovery.add_parser("run", help="reconcile now (operator)")
@@ -290,6 +306,22 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "replace":
             return _call("POST", f"/v1/executions/{args.id}/replace", body={"reason": "replaced by operator"}, mutate=True)
         return _call("POST", f"/v1/executions/{args.id}/stop", body={"reason": "stopped by operator"}, mutate=True)
+    if g == "update":
+        if cmd == "list":
+            return _call("GET", "/v1/platform/updates")
+        if cmd == "request":
+            return _call("POST", "/v1/platform/updates", body={"to_version": args.to_version}, mutate=True)
+        if cmd == "start":
+            return _call("POST", f"/v1/platform/updates/{args.approval}/start", body={"backup": args.backup}, mutate=True)
+        return _call("POST", f"/v1/platform/updates/runs/{args.update}/finish",
+                     body={"state": args.state, "report": {"note": args.note}}, mutate=True)
+    if g == "maintenance":
+        return _call("POST", "/v1/maintenance/run", mutate=True)
+    if g == "cache":
+        if cmd == "list":
+            return _call("GET", "/v1/caches")
+        return _call("DELETE", f"/v1/caches/{args.project}", params={"ecosystem": args.ecosystem} if args.ecosystem else None,
+                     mutate=True)
     if g == "recovery":
         if cmd == "run":
             return _call("POST", "/v1/recovery/run", mutate=True)

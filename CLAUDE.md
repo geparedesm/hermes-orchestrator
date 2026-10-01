@@ -4,7 +4,7 @@ Local-first multi-agent platform: Claude Code and Codex work in isolated Docker 
 
 ## Status
 
-Phases 0–10 merged (PRs #2–#11); Hermes integration in `hermes/` (docs/hermes.md); orchestration is opt-in with `HO_ORCHESTRATION=true`; recovery procedures in `docs/recovery.md`. Evidence per phase: `docs/validation/phase-N.md`. Next: 11 hardening.
+Phases 0–11 merged (PRs #2–#12): the platform is complete per PHASES.md. Hermes integration in `hermes/` (docs/hermes.md); orchestration is opt-in with `HO_ORCHESTRATION=true`; operations (backups, updates, maintenance, caches) in `docs/operations.md`, recovery in `docs/recovery.md`, security test matrix in `docs/security-tests.md`. Evidence per phase: `docs/validation/phase-N.md`.
 
 ## Architecture decisions (ARCHITECTURE.md §2)
 
@@ -38,15 +38,15 @@ Phases 0–10 merged (PRs #2–#11); Hermes integration in `hermes/` (docs/herme
 | Path | Responsibility |
 | --- | --- |
 | `packages/ho_core/` | enums, `statemachine`, `config` (layered + tighten-only), `policy/` (engine, hard, commands), `adapters/` (Claude, Codex), `gitpolicy`, `verification` (risk, gaps, steps), `routing` (provider scores), `redact`, `schemas` |
-| `services/control-plane/.../` | `app.py` (API), `cli.py` (`ho`), `tasks`, `projects`, `approvals`, `scheduler` (+hooks), `executions` (grants, dispatch, sync, finalize), `credentials`, `gitops` (workspaces, integration, merges), `verification` (verifications, reviews, Quality Gate), `orchestration` (leases, steps, actions, subtask cycle, launches), `budgets` (reservations), `manifests`, `recovery` (checkpoints, reconciliation, health), `notifications` (Hermes outbox), `dashboard` (read models, `/metrics`) |
+| `services/control-plane/.../` | `app.py` (API), `cli.py` (`ho`), `tasks`, `projects`, `approvals`, `scheduler` (+hooks), `executions` (grants, dispatch, sync, finalize), `credentials`, `gitops` (workspaces, integration, merges), `verification` (verifications, reviews, Quality Gate), `orchestration` (leases, steps, actions, subtask cycle, launches), `budgets` (reservations), `manifests`, `recovery` (checkpoints, reconciliation, health), `notifications` (Hermes outbox), `dashboard` (read models, `/metrics`), `maintenance` (retention), `updates` (UPDATE approvals) |
 | `services/agent-manager/.../` | `plan.py` (hard invariants), `docker_ops.py` (workers, proxies, inputs, secrets, sessions, test environments), `compose.py` (project Compose sanitizing), `secrets.py`, `images.py` |
 | `services/git-service/.../` | `repo_ops.py` (workspaces, collect, divergence, integrate, merge), `github.py` (`gh`), `gitcmd.py` (hardened git) |
 | `hermes/` | `plugins/orchestration` (tools, `/orch`, CLI, Dashboard tab; thin Task API client), `init.sh` (hermes-init) |
 | `services/egress-proxy/` | CONNECT-only allowlisting proxy, one per agent execution |
 | `workers/` | `agent-base` (+`ho-verify`, `ho-wait-secrets`), `toolchains/*`, `providers/{claude,codex}` (`ho-agent-run`, `ho-auth-login`), `browser-runner` |
-| `migrations/versions/` | `0001`–`0007` (raw SQL) |
+| `migrations/versions/` | `0001`–`0008` (raw SQL) |
 | `schemas/` | JSON Schemas: project, capability, platform, manifest, task, agent-result, review-result, orchestrator-step |
-| `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `smoke-phase{2..10}.sh` |
+| `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `backup.sh`/`restore.sh`, `update.sh`/`rollback.sh`, `check.sh`, `check-multiarch.sh`, `smoke-phase{2..11}.sh` |
 
 ## Commands
 
@@ -55,7 +55,7 @@ make test-unit                      # fast, no services
 make test-integration               # starts throwaway PostgreSQL/Redis (compose.test.yaml)
 HO_TEST_DOCKER=1 .venv/bin/pytest tests/docker -q -p no:warnings   # real Docker (needs make images)
 make lint validate-schemas
-./scripts/smoke-phaseN.sh           # end-to-end on a throwaway Compose stack (N = 2..10)
+./scripts/smoke-phaseN.sh           # end-to-end on a throwaway Compose stack (N = 2..11)
 make images && make up              # rebuild the operator's live stack
 docker compose exec -T control-plane ho <group> <cmd>   # operator CLI
 ```

@@ -19,7 +19,10 @@ import docker
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_manager.app import create_app
+# A stack of its own: the operator's live stack on the same Docker host must not take these workers for its orphans.
+os.environ.setdefault("HO_STACK", "ho-test-docker")
+
+from agent_manager.app import create_app  # noqa: E402  (reads HO_STACK at import)
 from agent_manager.docker_ops import DockerOps
 from agent_manager.secrets import SecretStore
 from ho_core.config import build_project_config, load_platform_config

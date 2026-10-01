@@ -493,6 +493,8 @@ Implemented in Phase 8; procedures in [docs/recovery.md](docs/recovery.md). The 
 - **Hermes outage:** already-authorized executions continue. New approval requests wait in `APPROVAL_REQUIRED`. The outbox retries with backoff.
 - **Redis loss:** queue wake-ups and heartbeats are rebuilt from PostgreSQL; leases are unaffected (AD-08).
 
+**Phase 11:** several stacks may share one Docker host (for example the operator's stack and a smoke-test stack): Agent Manager labels every resource with `ho.stack` (the Compose project name) and lists, reaps, and cleans up only its own; task-scoped names are prefixed with the stack name outside the main stack. Production runs one stack per host.
+
 ## 15. Open Items for Later Phases
 
 | ID | Item | Phase |

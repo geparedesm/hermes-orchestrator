@@ -35,7 +35,7 @@ from .auth import Principal
 from .budgets import BudgetExhausted
 from .context import Context, UnitOfWork
 from .db import Row, jsonb
-from .errors import ApiError, Conflict, NotFound
+from .errors import ApiError, Conflict, NotFound, UpstreamError
 from .events import record_event
 from .executions import ACTIVE, ExecutionRequest, Executions
 from .gitops import CONTROL_PLANE, GitChanges
@@ -50,6 +50,7 @@ STEP_TIMEOUT_MINUTES = 20
 MAX_STEP_FAILURES = 3
 MAX_ACTIONS = 30
 FAILBACK_HOLD = timedelta(minutes=10)
+MAX_REVIEW_RETRIES = 2
 # Only these events make the orchestrator think again (design change 2).
 TRIGGERS = ("ORCHESTRATOR_INPUT", "REQUIREMENTS_REVISED", "APPROVAL_DECIDED", "BUDGET_RAISED")
 STEP_STATES = (S.PLANNING, S.QUEUED, S.RUNNING, S.FIX_REQUIRED)
@@ -148,6 +149,10 @@ class Orchestration:
             task = self.tasks.transition(uow, task, target, trigger=Trigger.SYSTEM, actor="orchestration", reason=reason)
         return task
 
+    def _slug(self, uow: UnitOfWork, task: Row) -> str:
+        uow.cur.execute("SELECT slug FROM projects WHERE id = %s", (task["project_id"],))
+        return uow.cur.fetchone()["slug"]  # type: ignore[index]
+
     def _subtasks(self, uow: UnitOfWork, task: Row) -> list[Row]:
         uow.cur.execute("SELECT * FROM subtasks WHERE task_id = %s AND plan_version = %s ORDER BY key",
                         (task["id"], task["current_plan_version"] or 0))
@@ -205,6 +210,8 @@ class Orchestration:
         if blocker is None:
             try:
                 with uow.cur.connection.transaction():
+                    if kind == "SUBTASK_REVIEW" and subtask is not None:  # a queued cross-review
+                        return self._launch_review(uow, task, subtask, request)
                     return self._start(uow, task, request)
             except BudgetExhausted as exc:
                 blocker = f"budget: {exc}"
@@ -213,6 +220,8 @@ class Orchestration:
                 if "stale orchestration decision" in str(exc):
                     raise
                 blocker = str(exc)
+            except UpstreamError as exc:  # a platform service is down: wait, never fail the caller's transaction
+                blocker = f"service unavailable: {exc}"
         if queue:
             uow.cur.execute("INSERT INTO pending_launches (id, task_id, subtask_id, kind, request, reason) VALUES (%s, %s, %s, %s, %s, %s)",
                             (uuid7(), task["id"], subtask["id"] if subtask else None, kind, jsonb(request), blocker[:300]))
@@ -390,7 +399,10 @@ class Orchestration:
                  "those. Plan small, independent subtasks with accurate `files`; request DEVELOPER executions only for READY",
                  "subtasks; use WAIT when nothing needs deciding. Every subtask kind, TEST_AUTHORING included, runs with role DEVELOPER. Record assumptions instead of guessing silently; HIGH or",
                  "irreversible ambiguity needs RECORD_ASSUMPTION with level HIGH (a human decides).", "",
-                 "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], ""]
+                 "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], "",
+                 "## Project files", "", f"The project's current main branch is mounted read-only at /projects/{self._slug(uow, task)}. "
+                 "Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
+                 "accurate `files`.", ""]
         if task["current_requirements_version"]:
             uow.cur.execute("SELECT a.path FROM requirement_versions r JOIN artifacts a ON a.id = r.artifact_id "
                             "WHERE r.task_id = %s ORDER BY r.version DESC LIMIT 1", (task["id"],))
@@ -792,6 +804,11 @@ class Orchestration:
 
     def _on_execution_finished(self, uow: UnitOfWork, execution: Row, state: str, failure: str | None) -> None:
         purpose = (execution["spec"] or {}).get("purpose") or {}
+        if purpose.get("review") and purpose.get("subtask"):
+            if state != "SUCCEEDED":
+                self._subtask_review_failed(uow, execution["task_id"], UUID(purpose["subtask"]),
+                                            f"review by {execution['provider']} {state.lower()}")
+            return
         if not (purpose.get("orchestrator_step") or purpose.get("kind")):
             return
         uow.cur.execute("SELECT * FROM executions WHERE id = %s", (execution["id"],))
@@ -922,10 +939,44 @@ class Orchestration:
                 return
             except BudgetExhausted as exc:
                 uow.after_commit.append(lambda key=task["key"], reason=str(exc): self.executions.pause_for_budget(key, reason))
-            except Conflict:
-                pass
+            except (Conflict, UpstreamError):
+                pass  # queued below; a service outage must not undo the finished execution being recorded
         uow.cur.execute("INSERT INTO pending_launches (id, task_id, subtask_id, kind, request, reason) VALUES (%s, %s, %s, %s, %s, %s)",
                         (uuid7(), task["id"], subtask["id"], "SUBTASK_REVIEW", jsonb(request), "waiting for capacity"))
+
+    def _subtask_review_failed(self, uow: UnitOfWork, task_id: UUID, subtask_id: UUID, reason: str) -> None:
+        """A subtask review that failed or was lost is retried (bounded); then the orchestrator decides."""
+        task = self._task(uow, task_id)
+        uow.cur.execute("SELECT * FROM subtasks WHERE id = %s FOR UPDATE", (subtask_id,))
+        subtask = uow.cur.fetchone()
+        if subtask is None or subtask["state"] != "IN_REVIEW" or S(task["state"]) not in (S.RUNNING, S.FIX_REQUIRED):
+            return
+        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE subtask_id = %s AND role = 'REVIEWER' AND state <> 'SUCCEEDED' "
+                        "AND state <> ALL(%s)", (subtask_id, list(ACTIVE)))
+        failed = int(uow.cur.fetchone()["n"])  # type: ignore[index]
+        uow.cur.execute("SELECT * FROM workspaces WHERE id = %s", (subtask["workspace_id"],))
+        workspace = uow.cur.fetchone()
+        if failed > MAX_REVIEW_RETRIES or workspace is None or not workspace["head_sha"] or not subtask["developer_provider"]:
+            self._set_subtask(uow, subtask, "FIX_REQUIRED", f"{reason}; review not completed")
+            self._input(uow, task, f"{subtask['key']}: the cross-review could not be completed ({reason})", {"subtask": subtask["key"]})
+            return
+        self._event(uow, task, "RETRY_SCHEDULED", f"{subtask['key']}: {reason}; reviewing again")
+        self._request_subtask_review(uow, task, subtask, subtask["developer_provider"], workspace, workspace["head_sha"])
+
+    def heal_reviews(self) -> int:
+        """Subtasks waiting for a review that nothing is running or queued for (a review lost before this
+        control plane could react) get their review requested again."""
+        with self.ctx.unit_of_work() as uow:
+            uow.cur.execute(
+                "SELECT s.id, s.task_id FROM subtasks s JOIN tasks t ON t.id = s.task_id WHERE s.state = 'IN_REVIEW' "
+                "AND t.state IN ('RUNNING', 'FIX_REQUIRED') AND s.updated_at < now() - interval '2 minutes' "
+                "AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.subtask_id = s.id AND e.role = 'REVIEWER' AND e.state = ANY(%s)) "
+                "AND NOT EXISTS (SELECT 1 FROM pending_launches p WHERE p.subtask_id = s.id)", (list(ACTIVE),))
+            stuck = uow.cur.fetchall()
+        for row in stuck:
+            with self.ctx.unit_of_work() as uow:
+                self._subtask_review_failed(uow, row["task_id"], row["id"], "no review was running")
+        return len(stuck)
 
     def _launch_review(self, uow: UnitOfWork, task: Row, subtask: Row, request: dict[str, Any]) -> Row:
         # Review the subtask's own changes: from where its workspace started (its dependencies' work, if any).
@@ -1251,7 +1302,8 @@ class Orchestration:
         return moved
 
     def sync(self) -> dict[str, int]:
-        stats = {"steps": 0, "adopted": self.adopt_orphans(), "failback": self.failback(), "launched": self.process_pending()}
+        stats = {"steps": 0, "adopted": self.adopt_orphans(), "failback": self.failback(), "reviews_healed": self.heal_reviews(),
+                 "launched": self.process_pending()}
         with self.ctx.unit_of_work() as uow:
             uow.cur.execute(
                 """

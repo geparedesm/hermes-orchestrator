@@ -7,6 +7,7 @@ import json
 import time
 
 import pytest
+from agent_manager import stack
 
 from conftest import expired  # type: ignore[import-not-found]
 from ho_core.enums import Role
@@ -151,7 +152,7 @@ def test_task_service_networks_are_isolated(api, client, credential):
     target.pop("workspace")
     assert api.create(target).status_code == 201
     name = f"ho-w-{target['execution_id'].replace('-', '')[-12:]}"
-    ip = client.containers.get(name).attrs["NetworkSettings"]["Networks"][f"ho-t-{task_a.lower()}-svc"]["IPAddress"]
+    ip = client.containers.get(name).attrs["NetworkSettings"]["Networks"][f"ho-t-{stack.task_slug(task_a)}-svc"]["IPAddress"]
     probe = "timeout 3 bash -c '</dev/tcp/{ip}/9' 2>&1 | grep -qi refused && echo reachable || echo unreachable".format(ip=ip)
 
     same = api.request(Role.TESTER, probe, task=task_a, provider=None, egress="NONE", test_services=True)

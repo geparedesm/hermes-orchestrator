@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+
+from . import stack
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -39,6 +41,16 @@ PROVIDERS = ("claude", "codex")
 CREDENTIAL_MOUNT = "/run/ho-credentials"
 CREDENTIAL_WRITABLE = {"claude": False, "codex": True}
 SESSION_MOUNT = "/run/ho-sessions"
+CACHE_MOUNT = "/cache"
+# Toolchain profile -> (cache name, variable pointing the package manager at it) (MASTER_SPEC section 71).
+# Download caches only: node_modules, virtualenvs, and build outputs stay in the workspace.
+CACHE_ECOSYSTEMS = {
+    "python": ("pip", "PIP_CACHE_DIR"),
+    "node": ("npm", "npm_config_cache"),
+    "java": ("gradle", "GRADLE_USER_HOME"),
+    "flutter": ("pub", "PUB_CACHE"),
+    "php": ("composer", "COMPOSER_CACHE_DIR"),
+}
 INPUT_MOUNT = "/run/ho-input"
 SECRETS_MOUNT = "/run/ho/secrets"
 
@@ -81,6 +93,7 @@ class ContainerPlan:
     # Secret reference -> (NAME, delivery "file" or "env"); values are read only when the container starts.
     secrets: dict[str, tuple[str, str]] = field(default_factory=dict)
     session_volume: str | None = None
+    caches: list[tuple[str, str]] = field(default_factory=list)  # (volume, ecosystem)
 
     @property
     def worker_name(self) -> str:
@@ -96,7 +109,7 @@ class ContainerPlan:
 
     @property
     def service_network(self) -> str:
-        return f"ho-t-{self.task.lower()}-svc"
+        return f"ho-t-{stack.task_slug(self.task)}-svc"
 
     @property
     def output_volume(self) -> str:
@@ -228,8 +241,20 @@ def build_plan(
     if request.get("session"):
         if provider is None:
             raise Rejected("only provider executions keep a session store")
-        session_volume = f"ho-sess-{grant['task'].lower()}-{provider}"
+        session_volume = f"ho-sess-{stack.task_slug(grant['task'])}-{provider}"
         mounts.append(Mount("volume", session_volume, SESSION_MOUNT, read_only=False))
+
+    # Dependency caches: per project and ecosystem, for executions that install packages into a workspace.
+    caches: list[tuple[str, str]] = []
+    cache_config = platform["machine"].get("dependency_cache") or {}
+    if caps["workspace"] == "WRITE" and cache_config.get("enabled", True):
+        toolchains = image.split("-", 1)[1].split("-") if "-" in image else []
+        for profile, (ecosystem, variable) in CACHE_ECOSYSTEMS.items():
+            if profile in toolchains:
+                volume = f"ho-cache-{grant['project']}-{ecosystem}"
+                mounts.append(Mount("volume", volume, f"{CACHE_MOUNT}/{ecosystem}", read_only=False))
+                env[variable] = f"{CACHE_MOUNT}/{ecosystem}"
+                caches.append((volume, ecosystem))
 
     inputs: dict[str, str] = {}
     for name, content in (request.get("inputs") or {}).items():
@@ -255,6 +280,7 @@ def build_plan(
 
     labels = {
         "ho.managed": "true",
+        "ho.stack": stack.NAME,
         "ho.kind": "worker",
         "ho.execution": execution,
         "ho.task": grant["task"],
@@ -290,4 +316,5 @@ def build_plan(
         inputs=inputs,
         secrets=secrets,
         session_volume=session_volume,
+        caches=caches,
     )

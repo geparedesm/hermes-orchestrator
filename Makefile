@@ -82,6 +82,23 @@ smoke-phase5: secrets images ## End-to-end Phase 5 smoke test (workspaces, human
 smoke-phase6: secrets images ## End-to-end Phase 6 smoke test (Compose test services, runners, browser, Quality Gate)
 	./scripts/smoke-phase6.sh
 
+backup: ## Back up critical state (PostgreSQL, Hermes state, config, artifacts) to ./backups
+	scripts/backup.sh
+
+restore: ## Restore a backup: make restore BACKUP=backups/<timestamp>
+	scripts/restore.sh $(BACKUP)
+
+check: ## Health check of the running stack
+	scripts/check.sh
+
+update: ## Approval-controlled update: make update VERSION=x [APPROVAL=id]
+	scripts/update.sh $(VERSION) $(APPROVAL)
+
+test-security: test-env ## The security suite (tests/security_suite.txt; docs/security-tests.md), including real-Docker tests
+	HO_TEST_DATABASE_URL=$(TEST_DB) HO_TEST_REDIS_URL=$(TEST_REDIS) $(VENV)/bin/pytest -q -p no:warnings \
+		$$(grep -v '^#' tests/security_suite.txt | grep -v '^tests/docker/')
+	HO_TEST_DOCKER=1 $(VENV)/bin/pytest -q -p no:warnings $$(grep '^tests/docker/' tests/security_suite.txt)
+
 lint: ## Static checks
 	$(VENV)/bin/ruff check packages services tests migrations scripts
 

@@ -45,6 +45,7 @@ git -C "$ROOT/sample-app" init -q -b main
 git -C "$ROOT/sample-app" add package.json
 git -C "$ROOT/sample-app" -c user.name=smoke -c user.email=smoke@example.com commit -qm init
 printf 'HO_MACHINE_PROFILE=mac-m2-pro\nHO_PROJECTS_ROOT_HOST=%s\nHO_VERSION=dev\nHO_PROVIDER_IDENTITY=smoke3\nHO_PROJECT_SECRETS_HOST=%s\n' "$ROOT" "$WORK/project-secrets" > "$ENV_FILE"
+echo "HO_HERMES_DASHBOARD_PORT=19203" >> "$ENV_FILE"  # never collide with the operator stack's Hermes
 # Phase 4 creates provider credential volumes through a login flow; simulate an empty one.
 mkdir -p "$WORK/project-secrets"
 docker volume create --label ho.credential=codex/smoke3 "$CREDENTIAL" >/dev/null

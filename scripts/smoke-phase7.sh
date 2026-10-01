@@ -77,6 +77,7 @@ git -C "$ROOT/notes" add -A
 git -C "$ROOT/notes" -c user.name=smoke -c user.email=smoke@example.com commit -qm init
 printf 'HO_MACHINE_PROFILE=mac-m2-pro\nHO_PROJECTS_ROOT_HOST=%s\nHO_VERSION=dev\nHO_PROVIDER_IDENTITY=%s\nHO_ORCHESTRATION=true\n' \
   "$ROOT" "$IDENTITY" > "$ENV_FILE"
+echo "HO_HERMES_DASHBOARD_PORT=19207" >> "$ENV_FILE"  # never collide with the operator stack's Hermes
 fake_login claude
 fake_login codex
 dc up -d --build --wait >/dev/null

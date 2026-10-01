@@ -215,3 +215,15 @@ def test_health_check():
     assert not health.ok and "make images" in health.detail
     health = ClaudeAdapter().health_check(pinned_images=["claude-node"], credential_present=True, credential_status="AUTH_REQUIRED")
     assert not health.ok and "auth-claude" in health.detail
+
+
+def test_orchestrator_reads_its_project_through_add_dir():
+    from ho_core.adapters.base import AgentAssignment
+    from ho_core.adapters.claude import ClaudeAdapter
+    from ho_core.enums import Role
+
+    plan = ClaudeAdapter().build_execution(AgentAssignment(role=Role.ORCHESTRATOR, prompt="plan", read_dirs=("/projects/shop",)))
+    index = plan.command.index("--add-dir")
+    assert plan.command[index + 1] == "/projects/shop"
+    plain = ClaudeAdapter().build_execution(AgentAssignment(role=Role.DEVELOPER, prompt="do it"))
+    assert "--add-dir" not in plain.command
