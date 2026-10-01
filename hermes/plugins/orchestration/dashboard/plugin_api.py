@@ -1,8 +1,8 @@
 """Dashboard backend of the orchestration plugin, mounted by Hermes at /api/plugins/orchestration/.
 
-Hermes's Dashboard authentication protects these routes (verified in Phase 9 with unauthenticated
-requests). They proxy the orchestrator Task API as `dashboard:operator`; the control plane enforces
-which actions that principal may take (approvals need it in `platform.approvers`).
+Hermes's Dashboard authentication protects these routes (verified with unauthenticated requests). They proxy
+the orchestrator Task API as `dashboard:operator`; the control plane enforces which actions that principal may
+take (approvals need it in `platform.approvers`). Read models only: no state is kept here.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ _client = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(_client)  # type: ignore[union-attr]
 
 PRINCIPAL = "dashboard:operator"
+TASK_ACTIONS = ("pause", "resume", "cancel", "retry")
 router = APIRouter()
 
 
@@ -42,6 +43,9 @@ def _call(fn, *args: Any) -> Any:
         raise HTTPException(status_code=status, detail=detail) from exc
 
 
+# ---------------------------------------------------------------- reads
+
+
 @router.get("/overview")
 def overview() -> dict[str, Any]:
     api = _api()
@@ -49,20 +53,52 @@ def overview() -> dict[str, Any]:
             "projects": _call(api.projects).get("projects", [])}
 
 
+@router.get("/summary")
+def summary() -> Any:
+    return _call(_api().summary)
+
+
+@router.get("/board")
+def board() -> dict[str, Any]:
+    return {"tasks": _call(_api().tasks, None, None, True).get("tasks", [])}
+
+
+@router.get("/projects")
+def projects() -> Any:
+    return _call(_api().projects)
+
+
+@router.get("/workers")
+def workers() -> Any:
+    return _call(_api().workers)
+
+
+@router.get("/approvals")
+def approvals() -> Any:
+    return _call(_api().approvals)
+
+
 @router.get("/tasks/{key}")
-def task(key: str) -> dict[str, Any]:
-    api = _api()
-    detail = _call(api.task, key)
-    try:
-        detail["orchestration"] = api.inspect(key)
-    except _client.ApiError:
-        detail["orchestration"] = None  # orchestration disabled or task not orchestrated
-    return detail
+def task(key: str) -> Any:
+    return _call(_api().task_view, key)
+
+
+@router.get("/tasks/{key}/manifests/{manifest_id}")
+def manifest(key: str, manifest_id: str) -> Any:
+    return _call(_api().manifest, key, manifest_id)
+
+
+# ---------------------------------------------------------------- actions (the control plane authorizes each one)
+
+
+@router.post("/tasks/{key}/manifest")
+def generate_manifest(key: str) -> Any:
+    return _call(_api().generate_manifest, key)
 
 
 @router.post("/tasks/{key}/{verb}")
 def task_action(key: str, verb: str) -> Any:
-    if verb not in ("pause", "resume", "cancel", "retry"):
+    if verb not in TASK_ACTIONS:
         raise HTTPException(status_code=404, detail="unknown action")
     return _call(_api().action, key, verb)
 

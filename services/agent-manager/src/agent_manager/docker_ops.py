@@ -109,6 +109,29 @@ class DockerOps:
     def _running_workers(self) -> list[Any]:
         return self.client.containers.list(filters={"label": ["ho.managed=true", "ho.kind=worker"]})
 
+    def stats(self) -> dict[str, Any]:
+        """CPU and memory of running workers (one non-streaming Docker stats sample each), for the Dashboard."""
+        out = []
+        for container in self._running_workers():
+            try:
+                raw = container.stats(stream=False)
+            except Exception:  # noqa: BLE001 - a worker that just exited has no stats
+                continue
+            cpu, pre = raw.get("cpu_stats") or {}, raw.get("precpu_stats") or {}
+            cpu_delta = (cpu.get("cpu_usage") or {}).get("total_usage", 0) - (pre.get("cpu_usage") or {}).get("total_usage", 0)
+            system_delta = (cpu.get("system_cpu_usage") or 0) - (pre.get("system_cpu_usage") or 0)
+            cpus = cpu.get("online_cpus") or len((cpu.get("cpu_usage") or {}).get("percpu_usage") or []) or 1
+            memory = raw.get("memory_stats") or {}
+            cache = (memory.get("stats") or {}).get("inactive_file", 0)
+            out.append({
+                "execution": container.labels.get("ho.execution"), "task": container.labels.get("ho.task"),
+                "role": container.labels.get("ho.role"), "provider": container.labels.get("ho.provider"),
+                "cpu_percent": round(100.0 * cpu_delta / system_delta * cpus, 1) if system_delta > 0 and cpu_delta > 0 else 0.0,
+                "memory_bytes": max(0, int(memory.get("usage") or 0) - int(cache or 0)),
+                "memory_limit_bytes": int(memory.get("limit") or 0),
+            })
+        return {"workers": out}
+
     def capacity(self) -> dict[str, Any]:
         workers = self._running_workers()
         agents = [c for c in workers if c.labels.get("ho.role") in _AGENT_ROLES]

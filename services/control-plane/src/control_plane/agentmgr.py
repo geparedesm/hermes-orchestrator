@@ -67,6 +67,9 @@ class AgentManagerClient:
     def capacity(self) -> dict[str, Any]:
         return self._call("GET", "/v1/capacity")
 
+    def stats(self) -> dict[str, Any]:
+        return self._call("GET", "/v1/stats")
+
     def managed(self) -> dict[str, Any]:
         return self._call("GET", "/v1/managed")
 
