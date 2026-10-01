@@ -85,6 +85,8 @@ class Scheduler:
         self.dispatcher = dispatcher or NoWorkersDispatcher()
         # Extra reconciliation passes run on every tick (for example Git merges and verification).
         self.hooks: list[Any] = []
+        # Run once by the scheduler leader before its first pass (recovery reconciliation, ARCHITECTURE section 14).
+        self.startup_hooks: list[Any] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -184,6 +186,11 @@ class Scheduler:
                 log.info("another scheduler holds the lock; standing by")
                 self._stop.wait(poll * 3)
             log.info("scheduler started", extra={"event": "SCHEDULER_STARTED"})
+            for hook in self.startup_hooks:
+                try:
+                    hook()
+                except Exception:  # noqa: BLE001 - recovery problems are reported; scheduling still starts
+                    log.exception("startup hook %s failed", getattr(hook, "__qualname__", hook))
             while not self._stop.is_set():
                 try:
                     stats = self.run_once()

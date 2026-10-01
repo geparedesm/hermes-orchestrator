@@ -81,7 +81,11 @@ class FakeAgentManager:
         return {"agent_workers": sum(1 for c in self.containers.values() if c["state"] == "running")}
 
     def managed(self) -> dict[str, Any]:
-        return {"containers": [], "networks": [], "volumes": []}
+        if self.fail_with:
+            raise self.fail_with
+        containers = [{"name": f"worker-{e}", "status": c["state"], "labels": {"ho.execution": e, "ho.kind": "worker"}}
+                      for e, c in self.containers.items()]
+        return {"containers": containers, "networks": [], "volumes": []}
 
     def start_environment(self, task: str, body: dict[str, Any]) -> dict[str, Any]:
         if self.environment_error:

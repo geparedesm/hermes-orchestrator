@@ -79,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     ins.add_argument("key")
     ins.add_argument("--manifest", action="store_true", help="generate an on-demand Task Manifest")
 
+    ins_cp = task.add_parser("checkpoints", help="durable snapshots of a task's state")
+    ins_cp.add_argument("key")
+    recovery = sub.add_parser("recovery", help="reconciliation runs and platform health").add_subparsers(dest="cmd", required=True)
+    recovery.add_parser("status")
+    recovery.add_parser("run", help="reconcile now (operator)")
+
     knowledge = sub.add_parser("knowledge", help="project knowledge proposed by agents").add_subparsers(dest="cmd", required=True)
     knowledge.add_parser("list").add_argument("project")
     for name in ("confirm", "reject"):
@@ -218,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
                     parser.error(f"--add expects COUNTER=N, got {item!r}")
                 add[counter] = int(amount)
             return _call("POST", f"/v1/tasks/{args.key}/budget", body={"add": add}, mutate=True)
+        if cmd == "checkpoints":
+            return _call("GET", f"/v1/tasks/{args.key}/checkpoints")
         if cmd == "inspect":
             if args.manifest:
                 return _call("POST", f"/v1/tasks/{args.key}/manifest", mutate=True)
@@ -282,6 +290,10 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "replace":
             return _call("POST", f"/v1/executions/{args.id}/replace", body={"reason": "replaced by operator"}, mutate=True)
         return _call("POST", f"/v1/executions/{args.id}/stop", body={"reason": "stopped by operator"}, mutate=True)
+    if g == "recovery":
+        if cmd == "run":
+            return _call("POST", "/v1/recovery/run", mutate=True)
+        return _call("GET", "/v1/recovery")
     if g == "knowledge":
         if cmd == "list":
             return _call("GET", f"/v1/projects/{args.project}/knowledge")

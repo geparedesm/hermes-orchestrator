@@ -48,6 +48,8 @@ class Tasks:
         self.approvals = approvals
         # Called with (uow, task, reason) before a task is cancelled (for example to stop its executions).
         self.on_cancel: list[Any] = []
+        # Called with (uow, updated task, previous state) after every state change (checkpoints, wind-down).
+        self.on_transition: list[Any] = []
         approvals.register_handler(ApprovalAction.BUDGET_UNLIMITED, self._on_budget_unlimited_decision)
 
     # ------------------------------------------------------------------ queries
@@ -192,6 +194,8 @@ class Tasks:
                 summary=f"{task['key']}: {reason or result.state.value}", data=data, pending=uow.events,
             )
         uow.wake_scheduler = True
+        for hook in self.on_transition:
+            hook(uow, updated, current.value)
         return updated
 
     def pause(self, uow: UnitOfWork, key: str, *, principal: Principal) -> Row:

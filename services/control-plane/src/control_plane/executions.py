@@ -514,11 +514,15 @@ class Executions:
                 (list(ACTIVE),),
             )
             rows = uow.cur.fetchall()
+            # While Agent Manager is DEGRADED, new dispatches wait (the health probe keeps checking) instead of
+            # failing; running executions are still reconciled.
+            uow.cur.execute("SELECT 1 FROM component_health WHERE component = 'agent_manager' AND state = 'DEGRADED'")
+            hold_dispatch = uow.cur.fetchone() is not None
         now = datetime.now(timezone.utc)
         for row in rows:
             try:
                 if row["state"] == "REQUESTED":
-                    if now - row["updated_at"] > timedelta(seconds=5):
+                    if not hold_dispatch and now - row["updated_at"] > timedelta(seconds=5):
                         self.dispatch(row["id"])
                         stats["dispatched"] += 1
                     continue

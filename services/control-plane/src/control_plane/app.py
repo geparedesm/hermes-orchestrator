@@ -25,6 +25,7 @@ from .agentmgr import AgentManagerError
 from .errors import ApiError, Conflict, Forbidden, UpstreamError
 from .idempotency import run_idempotent
 from .projects import Projects
+from .recovery import Health, Outbox, Recovery
 from . import budgets, manifests
 from .budgets import BudgetExhausted
 from .executions import ExecutionRequest, Executions
@@ -52,10 +53,13 @@ class Services:
     reviews: Reviews | None = None
     gate: QualityGate | None = None
     orchestration: Orchestration | None = None
+    recovery: Recovery | None = None
+    outbox: Outbox | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None,
-                   orchestration: bool = False) -> Services:
+                   orchestration: bool = False, hermes_webhook_url: str | None = None,
+                   hermes_webhook_token: str | None = None, outbox_client: Any = None) -> Services:
     approvals = Approvals(ctx)
     projects = Projects(ctx, approvals)
     tasks = Tasks(ctx, projects, approvals)
@@ -73,8 +77,13 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
         if dispatcher is None:
             scheduler.dispatcher = orchestrator
         scheduler.hooks.append(orchestrator.sync)
+    health = Health(ctx)
+    recovery = Recovery(ctx, tasks, executions, git, verifications, health, orchestrator)
+    outbox = Outbox(ctx, health, hermes_webhook_url, hermes_webhook_token, client=outbox_client)
+    scheduler.startup_hooks.append(recovery.startup)
+    scheduler.hooks += [recovery.periodic, outbox.deliver]
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
-                    verifications, reviews, gate, orchestrator)
+                    verifications, reviews, gate, orchestrator, recovery, outbox)
 
 
 # ------------------------------------------------------------------ request models
@@ -522,6 +531,24 @@ def create_app(services: Services) -> FastAPI:
             uow.cur.execute("SELECT path FROM artifacts WHERE id = %s", (row["artifact_id"],))
             return 201, json.loads(ctx.artifacts.read(uow.cur.fetchone()["path"]))
         return idempotent(idempotency_key, who, {"op": "manifest", "task": key}, command)
+
+    @app.get("/v1/recovery")
+    def recovery_status(_: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return jsonable(services.recovery.status(uow))  # type: ignore[union-attr]
+
+    @app.post("/v1/recovery/run")
+    def recovery_run(who_identity: Identity = Depends(identity)) -> dict[str, Any]:
+        operator_only(who_identity)
+        return jsonable(services.recovery.run("OPERATOR"))  # type: ignore[union-attr]
+
+    @app.get("/v1/tasks/{key}/checkpoints")
+    def task_checkpoints(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            uow.cur.execute("SELECT seq, reason, state, epoch, snapshot, created_at FROM task_checkpoints WHERE task_id = %s "
+                            "ORDER BY seq DESC LIMIT 50", (task["id"],))
+            return {"task": key, "checkpoints": jsonable(uow.cur.fetchall())}
 
     @app.get("/v1/projects/{slug}/knowledge")
     def list_knowledge(slug: str, _: Identity = Depends(identity)) -> dict[str, Any]:

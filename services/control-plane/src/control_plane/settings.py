@@ -42,6 +42,9 @@ class Settings:
     merge_key: bytes = b""
     # Phase 7: lead READY tasks with the multi-agent orchestrator (off: tasks wait for manual work).
     orchestration: bool = False
+    # Outbox delivery to Hermes (Phase 9 wires the receiving side); unset: notifications wait in the outbox.
+    hermes_webhook_url: str | None = None
+    hermes_webhook_token: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -82,6 +85,8 @@ class Settings:
             provider_identity=env.get("HO_PROVIDER_IDENTITY") or "default",
             merge_key=(_read_secret(env.get("HO_MERGE_KEY_FILE")) or "").encode(),
             orchestration=env.get("HO_ORCHESTRATION", "false").lower() == "true",
+            hermes_webhook_url=env.get("HO_HERMES_WEBHOOK_URL") or None,
+            hermes_webhook_token=_read_secret(env.get("HO_HERMES_WEBHOOK_TOKEN_FILE")),
         )
 
     def platform_config(self) -> dict:
