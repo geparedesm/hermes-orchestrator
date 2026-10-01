@@ -23,6 +23,7 @@ class FakeAgentManager:
         self.services_stopped: list[str] = []
         self.environment_error: AgentManagerError | None = None
         self.volumes: set[tuple[str, str]] = {("claude", "default"), ("codex", "default")}
+        self.networks: list[dict[str, Any]] = []  # managed networks left behind (orphan tests)
 
     def create(self, spec: dict[str, Any]) -> dict[str, Any]:
         if self.fail_with:
@@ -75,13 +76,18 @@ class FakeAgentManager:
     def remove(self, execution: str) -> dict[str, int]:
         self.removed.append(execution)
         self.containers.pop(execution, None)
+        self.networks = [n for n in self.networks if n["labels"].get("ho.execution") != execution]
         return {"containers": 1, "networks": 0, "volumes": 1}
 
     def capacity(self) -> dict[str, Any]:
         return {"agent_workers": sum(1 for c in self.containers.values() if c["state"] == "running")}
 
     def managed(self) -> dict[str, Any]:
-        return {"containers": [], "networks": [], "volumes": []}
+        if self.fail_with:
+            raise self.fail_with
+        containers = [{"name": f"worker-{e}", "status": c["state"], "labels": {"ho.execution": e, "ho.kind": "worker"}}
+                      for e, c in self.containers.items()]
+        return {"containers": containers, "networks": list(self.networks), "volumes": []}
 
     def start_environment(self, task: str, body: dict[str, Any]) -> dict[str, Any]:
         if self.environment_error:

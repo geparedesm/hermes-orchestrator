@@ -29,7 +29,7 @@ from ho_core.ids import uuid7
 from ho_core.routing import ProviderStats, route
 from ho_core.statemachine import WAITING_STATES, Trigger
 
-from . import budgets, manifests
+from . import budgets, manifests, recovery
 from .approvals import Approvals
 from .auth import Principal
 from .budgets import BudgetExhausted
@@ -49,6 +49,7 @@ LEASE_MINUTES = 30
 STEP_TIMEOUT_MINUTES = 20
 MAX_STEP_FAILURES = 3
 MAX_ACTIONS = 30
+FAILBACK_HOLD = timedelta(minutes=10)
 # Only these events make the orchestrator think again (design change 2).
 TRIGGERS = ("ORCHESTRATOR_INPUT", "REQUIREMENTS_REVISED", "APPROVAL_DECIDED", "BUDGET_RAISED")
 STEP_STATES = (S.PLANNING, S.QUEUED, S.RUNNING, S.FIX_REQUIRED)
@@ -472,6 +473,7 @@ class Orchestration:
             self._record_action(uow, task, execution, purpose["epoch"], seq, action, outcome, reason)
             rejected = rejected or outcome == "REJECTED"
         self._after_step(uow, task["id"], rejected)
+        recovery.checkpoint(uow, self._task(uow, task["id"]), "orchestrator step applied")
 
     def _integration_due(self, uow: UnitOfWork, task: Row) -> bool:
         """All subtasks accepted on a RUNNING task: integration starts after this transaction commits."""
@@ -816,6 +818,7 @@ class Orchestration:
         lease = self.leases.get(uow, task["id"], lock=True)
         unavailable = failure in (FailureClass.QUOTA.value, FailureClass.AUTH.value)
         if lease and (unavailable or failures >= 2) and OTHER[lease["provider"]] in self._available(uow):
+            recovery.checkpoint(uow, task, f"failover from {lease['provider']}")
             epoch = self.leases.acquire(uow, task["id"], OTHER[lease["provider"]])  # failover at a step boundary
             self._event(uow, task, "FAILOVER_COMPLETED", f"orchestration moved to {OTHER[lease['provider']]} (epoch {epoch})",
                         {"from": lease["provider"], "to": OTHER[lease["provider"]], "epoch": epoch})
@@ -1224,8 +1227,31 @@ class Orchestration:
                 adopted += 1
         return adopted
 
+    def failback(self) -> int:
+        """Return the lead to Claude (the preferred orchestrator) once it is available again, only at a safe
+        checkpoint and not within FAILBACK_HOLD of the last failover (no flapping)."""
+        if not (self.ctx.platform.get("orchestration") or {}).get("failback", True):
+            return 0
+        moved = 0
+        with self.ctx.unit_of_work() as uow:
+            if "claude" not in self._available(uow):
+                return 0
+            uow.cur.execute(
+                "SELECT t.* FROM tasks t JOIN task_leases l ON l.task_id = t.id WHERE l.provider = 'codex' AND t.state = ANY(%s) "
+                "AND NOT EXISTS (SELECT 1 FROM events e WHERE e.task_id = t.id AND e.type = 'FAILOVER_COMPLETED' "
+                "AND e.occurred_at > now() - %s) FOR UPDATE OF t", ([s.value for s in STEP_STATES], FAILBACK_HOLD))
+            for task in uow.cur.fetchall():
+                if not recovery.at_safe_checkpoint(uow, task):
+                    continue
+                recovery.checkpoint(uow, task, "failback to claude")
+                epoch = self.leases.acquire(uow, task["id"], "claude")
+                self._event(uow, task, "ORCHESTRATOR_FAILBACK", f"orchestration returned to claude (epoch {epoch})",
+                            {"from": "codex", "to": "claude", "epoch": epoch})
+                moved += 1
+        return moved
+
     def sync(self) -> dict[str, int]:
-        stats = {"steps": 0, "adopted": self.adopt_orphans(), "launched": self.process_pending()}
+        stats = {"steps": 0, "adopted": self.adopt_orphans(), "failback": self.failback(), "launched": self.process_pending()}
         with self.ctx.unit_of_work() as uow:
             uow.cur.execute(
                 """
