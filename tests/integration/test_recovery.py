@@ -84,10 +84,12 @@ def test_requested_executions_are_dispatched_again_without_duplicates(api, servi
     execution = run_agent(api, task)
     assert execution_state(services, execution)["state"] == "REQUESTED"
     agents.fail_with = None
-    services.recovery.run("STARTUP")
-    services.recovery.run("STARTUP")  # creation is idempotent per execution
+    assert services.recovery.run("STARTUP")["executions"]["requested"] == 1  # left to Executions.sync
+    q(services, "UPDATE executions SET updated_at = now() - interval '1 minute' WHERE id = %s", execution)
+    services.scheduler.run_once()
+    services.scheduler.run_once()
     assert execution_state(services, execution)["state"] in ("STARTING", "RUNNING")
-    assert list(agents.specs) == [execution]
+    assert list(agents.specs) == [execution]  # one worker
 
 
 def test_orphaned_containers_are_removed(api, services, agents, task):

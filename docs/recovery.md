@@ -15,7 +15,7 @@ Compose starts PostgreSQL and Redis, runs migrations, then the control plane. Th
 
 | Step | What it does |
 | --- | --- |
-| Executions | Each active execution is checked against Agent Manager: finished containers are collected; vanished ones become `LOST`; `REQUESTED` ones are dispatched again (creation is idempotent per execution, so no duplicate worker). |
+| Executions | Each active execution is checked against Agent Manager: finished containers are collected; vanished ones become `LOST`; `REQUESTED` ones are left to the regular execution sync, which dispatches them again after a grace period, one dispatch at a time (no duplicate worker). |
 | Orphans | Containers, networks, and volumes labelled for executions the database does not know, or knows as finished (their output was collected before they were marked finished), are removed. Live work is never touched. |
 | Intents | Operation intents left `PENDING`/`SENT` by a crash are resolved from the state the call would have produced; merges still `MERGING` are re-sent (Git Service is idempotent per approval). |
 | Workspaces | Active development workspaces whose clone vanished become `REMOVED`; their subtask is sent back so the orchestrator starts it again from a fresh clone. |

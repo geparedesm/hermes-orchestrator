@@ -293,9 +293,10 @@ class Recovery:
         return report
 
     def _reconcile_executions(self) -> dict[str, int]:
-        """Active executions vs Agent Manager: finished or vanished containers are finalized (LOST when absent);
-        REQUESTED ones are dispatched again (Agent Manager creation is idempotent per execution)."""
-        stats = {"finalized": 0, "dispatched": 0}
+        """Active executions vs Agent Manager: finished or vanished containers are finalized (LOST when absent).
+        REQUESTED ones are left to Executions.sync, which re-dispatches them after a grace period: dispatching
+        here too could race a dispatch in flight, and two concurrent creations of one worker undo each other."""
+        stats = {"finalized": 0, "requested": 0}
         if self.ctx.agents is None:
             return stats
         with self.ctx.unit_of_work() as uow:
@@ -304,8 +305,7 @@ class Recovery:
         for row in rows:
             try:
                 if row["state"] == "REQUESTED":
-                    self.executions.dispatch(row["id"])
-                    stats["dispatched"] += 1
+                    stats["requested"] += 1
                     continue
                 status = self.ctx.agents.status(str(row["id"]))
                 if status["state"] in ("absent", "exited"):
