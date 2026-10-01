@@ -4,7 +4,7 @@ Local-first multi-agent platform: Claude Code and Codex work in isolated Docker 
 
 ## Status
 
-Phases 0–6 approved and merged (PRs #2–#7). Evidence per phase: `docs/validation/phase-N.md`. Next: Phase 7 (multi-agent orchestration), then 8 recovery, 9 Hermes integration, 10 dashboard, 11 hardening.
+Phases 0–6 approved and merged (PRs #2–#7); Phase 7 (multi-agent orchestration, opt-in `HO_ORCHESTRATION=true`) built on `codex/phase-7-orchestration`, awaiting approval. Evidence per phase: `docs/validation/phase-N.md`. Next: 8 recovery, 9 Hermes integration, 10 dashboard, 11 hardening.
 
 ## Architecture decisions (ARCHITECTURE.md §2)
 
@@ -44,7 +44,7 @@ Phases 0–6 approved and merged (PRs #2–#7). Evidence per phase: `docs/valida
 | `services/egress-proxy/` | CONNECT-only allowlisting proxy, one per agent execution |
 | `workers/` | `agent-base` (+`ho-verify`, `ho-wait-secrets`), `toolchains/*`, `providers/{claude,codex}` (`ho-agent-run`, `ho-auth-login`), `browser-runner` |
 | `migrations/versions/` | `0001`–`0006` (raw SQL) |
-| `schemas/` | JSON Schemas: project, capability, platform, manifest, task, agent-result, review-result |
+| `schemas/` | JSON Schemas: project, capability, platform, manifest, task, agent-result, review-result, orchestrator-step |
 | `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `smoke-phase{2..7}.sh` |
 
 ## Commands

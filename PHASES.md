@@ -144,18 +144,20 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Coordinate planning, implementation, review, and integration within policy and budget.
 
-- [ ] Implement the persistent Claude Orchestrator and structured requirements, assumptions, and risk assessment.
-- [ ] Implement DAG decomposition, task dependencies, and relationships across separate tasks.
-- [ ] Implement scored agent routing using operational metrics and provider availability.
-- [ ] Implement priority-aware and conflict-aware scheduling, safe preemption, and anti-starvation.
-- [ ] Implement mandatory cross-review: Codex reviews Claude's code, and Claude reviews Codex's code.
-- [ ] Implement structured review feedback, fixes, retesting, and configurable review-cycle limits.
-- [ ] Coordinate integration branches and Quality Gate evaluation.
-- [ ] Implement retries, alternate-provider fallback, and bounded dynamic task expansion.
-- [ ] Implement runtime, launch, retry, review, provider-usage, and subtask budgets with `PAUSED_BUDGET` handling.
-- [ ] Implement task deduplication, live requirement revisions, and the ambiguity/assumption policy.
-- [ ] Implement curated Project Memory, knowledge storage, context artifacts, Task Manifests, and decision/audit records.
-- [ ] Maintain `READY_FOR_MERGE` separately from `DONE`; require approved merge and successful post-merge verification for completion.
+- [x] Implement the persistent Claude Orchestrator and structured requirements, assumptions, and risk assessment.
+- [x] Implement DAG decomposition, task dependencies, and relationships across separate tasks.
+- [x] Implement scored agent routing using operational metrics and provider availability.
+- [x] Implement priority-aware and conflict-aware scheduling, safe preemption, and anti-starvation.
+- [x] Implement mandatory cross-review: Codex reviews Claude's code, and Claude reviews Codex's code.
+- [x] Implement structured review feedback, fixes, retesting, and configurable review-cycle limits.
+- [x] Coordinate integration branches and Quality Gate evaluation.
+- [x] Implement retries, alternate-provider fallback, and bounded dynamic task expansion.
+- [x] Implement runtime, launch, retry, review, provider-usage, and subtask budgets with `PAUSED_BUDGET` handling.
+- [x] Implement task deduplication, live requirement revisions, and the ambiguity/assumption policy.
+- [x] Implement curated Project Memory, knowledge storage, context artifacts, Task Manifests, and decision/audit records.
+- [x] Maintain `READY_FOR_MERGE` separately from `DONE`; require approved merge and successful post-merge verification for completion.
+
+**Status:** Built; awaiting the operator's approval (branch `codex/phase-7-orchestration`). 217 unit and 104 integration tests, a Phase 7 end-to-end smoke test, and the Phase 2–6 smoke tests pass. A real run on hello-api with the operator's subscriptions took a task from planning through three subtasks developed and cross-reviewed by Claude and Codex, integration, verification, integration reviews by both providers, and the Quality Gate to `READY_FOR_MERGE`; it also exposed nine orchestration defects, all fixed. Opt-in with `HO_ORCHESTRATION=true`. Evidence, decisions, and limitations: [docs/validation/phase-7.md](docs/validation/phase-7.md).
 
 **Completion criteria:** A task can progress from planning through implementation, cross-review, integration, and Quality Gate to `READY_FOR_MERGE`, with all scope, budget, and approval boundaries enforced.
 

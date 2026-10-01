@@ -61,3 +61,7 @@ Codex (verdict: needs attention) found six problems; all are accepted and change
 | 6 | Soft preemption can starve a suspended task forever (aging applies only to READY). | Suspension is persisted (`launch_suspended_at`); suspended tasks take part in launch selection with aging, so their effective priority rises until they outrank the preemptor; a test proves resumption within the aging bound. |
 
 New validation scenarios from the review: lease change during dispatch; WAIT without external events; concurrent launches near the budget limit; mixed authorship; starvation under repeated preemption.
+
+## Implementation notes (after the real run)
+
+The implementation follows this design with these adjustments, each driven by a defect found in the real run (details in [docs/validation/phase-7.md](../validation/phase-7.md)): a step that leaves nothing running counts as a failure and is retried with feedback (three in a row block the task), so `WAIT` is valid only while work is in flight; dependent subtasks start from their dependencies' accepted heads and are reviewed from there; research subtasks completed without code are accepted without review; lease holders use a stable instance ID and orphaned tasks are adopted with a new, never-reused epoch; results arriving while a task waits are not applied; an exhausted budget during verification pauses the task. Approved scope expansions are bound to the digest of the plan they authorize.
