@@ -83,8 +83,11 @@ services:
       HO_ORCHESTRATION: ${HO_ORCHESTRATION:-false}
       HO_INSTANCE_ID: control-plane
       HO_MERGE_KEY_FILE: /run/secrets/ho_merge_key
+      HO_HERMES_WEBHOOK_URL: ${HO_HERMES_WEBHOOK_URL:-}
+      HO_HERMES_WEBHOOK_SECRET_FILE: /run/secrets/ho_hermes_webhook_secret
+      HO_APPROVERS: ${HO_APPROVERS:-}
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
-    secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token, ho_merge_key]
+    secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token, ho_merge_key, ho_hermes_webhook_secret]
     volumes:
       - ./config:/app/config:ro
       - artifacts:/var/lib/ho/artifacts
@@ -138,16 +141,63 @@ services:
       - ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}:/projects:ro
     networks: [ho-control]
 
+  # Official Hermes, unmodified (AD-01, AD-03): chat channels, notifications, Dashboard, and the
+  # orchestration plugin. It reaches the control plane only (ho-edge) and the Internet for its channels
+  # and model provider (ho-hermes-egress); no Docker socket, no project files.
+  hermes-init:
+    image: &hermes-image nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
+    entrypoint: ["sh", "/opt/ho/init.sh"]
+    environment:
+      HO_HERMES_DELIVER: ${HO_HERMES_DELIVER:-}
+      HO_HERMES_DELIVER_CHAT_ID: ${HO_HERMES_DELIVER_CHAT_ID:-}
+    secrets: [ho_hermes_webhook_secret, ho_hermes_dashboard_password]
+    volumes:
+      - hermes-data:/opt/data
+      - ./hermes/plugins/orchestration:/opt/data/plugins/orchestration:ro
+      - ./hermes/init.sh:/opt/ho/init.sh:ro
+    restart: "no"
+    network_mode: none
+
+  hermes:
+    image: *hermes-image
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    environment:
+      HERMES_DASHBOARD: "1"
+      HERMES_DASHBOARD_HOST: 0.0.0.0
+      HO_API_URL: http://control-plane:8080
+      HO_PLUGIN_TOKEN_FILE: /run/secrets/ho_plugin_token
+      # Chat channel (optional; docs/hermes.md). Only users listed here may talk to Hermes.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+    secrets: [ho_plugin_token]
+    volumes:
+      - hermes-data:/opt/data
+      - ./hermes/plugins/orchestration:/opt/data/plugins/orchestration:ro
+    ports:
+      - "127.0.0.1:${HO_HERMES_DASHBOARD_PORT:-9119}:9119"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:9119/', timeout=3)\""]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    depends_on:
+      hermes-init: {condition: service_completed_successfully}
+      control-plane: {condition: service_healthy}
+    networks: [ho-edge, ho-hermes-egress]
+
 networks:
   ho-data: {internal: true}
   ho-control: {internal: true}
   ho-edge: {internal: true}
   ho-git-egress: {}
+  ho-hermes-egress: {}
 
 volumes:
   pg-data:
   artifacts:
   gh-config:
+  hermes-data:
 
 secrets:
   ho_owner_db_password: {file: ./secrets/ho_owner_db_password}
@@ -158,3 +208,5 @@ secrets:
   ho_git_service_token: {file: ./secrets/ho_git_service_token}
   ho_agent_manager_token: {file: ./secrets/ho_agent_manager_token}
   ho_merge_key: {file: ./secrets/ho_merge_key}
+  ho_hermes_webhook_secret: {file: ./secrets/ho_hermes_webhook_secret}
+  ho_hermes_dashboard_password: {file: ./secrets/ho_hermes_dashboard_password}

@@ -8,8 +8,11 @@ platform:
   # Host directory that contains registered projects (the host view of the git-service mount).
   projects_root_host: /path/to/HermesProjects
   # Principals allowed to decide approvals (SECURITY_MODEL.md section 6.1).
+  # The Dashboard principal is the operator behind Hermes's Dashboard login; chat identities are added with
+  # HO_APPROVERS in .env (for example telegram:123456789).
   approvers:
     - host-cli:operator
+    - dashboard:operator
   approval_ttl_hours:
     default: 72
     MERGE: 72

@@ -184,14 +184,16 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Make official Hermes the primary interface using verified extension mechanisms.
 
-- [ ] Integrate task creation, status, inspection, pause, resume, cancellation, and retry.
-- [ ] Connect Hermes/chat, Dashboard, and CLI to the same Task API, state, and permissions.
-- [ ] Integrate project registration, onboarding, and authentication bootstrap where supported.
-- [ ] Integrate approvals and `READY_FOR_MERGE` actions.
-- [ ] Use official Gateway/channel mechanisms for notifications.
-- [ ] Aggregate routine updates and promptly surface approval, authentication, blocking, budget, definitive test failure, recovery failure, merge readiness, and completion events.
-- [ ] Answer status queries from persistent task state.
-- [ ] Deliver `TASK_COMPLETED` only after approved merge and successful post-merge verification.
+- [x] Integrate task creation, status, inspection, pause, resume, cancellation, and retry.
+- [x] Connect Hermes/chat, Dashboard, and CLI to the same Task API, state, and permissions.
+- [x] Integrate project registration, onboarding, and authentication bootstrap where supported.
+- [x] Integrate approvals and `READY_FOR_MERGE` actions.
+- [x] Use official Gateway/channel mechanisms for notifications.
+- [x] Aggregate routine updates and promptly surface approval, authentication, blocking, budget, definitive test failure, recovery failure, merge readiness, and completion events.
+- [x] Answer status queries from persistent task state.
+- [x] Deliver `TASK_COMPLETED` only after approved merge and successful post-merge verification.
+
+**Status:** Complete. Merged on 2026-10-01 under the operator's standing authorization (PR #10). Official Hermes (pinned image, unmodified) runs in Compose with the `orchestration` plugin: read-and-create LLM tools, `/orch` human actions bound to the gateway's authenticated sender, the `hermes orchestration` CLI, and a Dashboard tab behind Hermes's login; notifications reach a Hermes webhook route signed with HMAC V2 (attention immediately, routine as a digest). 229 unit and 129 integration tests, a smoke test against the real Hermes container, and the Phase 2–8 smoke tests pass. Delivery to a real chat needs the operator's channel (docs/hermes.md). Evidence: [docs/validation/phase-9.md](docs/validation/phase-9.md).
 
 **Completion criteria:** A user can manage the task lifecycle through Hermes, including explicit merge approval, with consistent permissions and persistent status.
 

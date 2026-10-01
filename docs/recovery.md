@@ -40,7 +40,7 @@ Claude is the preferred orchestrator. On Claude login, quota, or repeated step f
 
 ## Hermes outage
 
-Notifications are written to the outbox in the same transaction as their event. The deliverer posts them to `HO_HERMES_WEBHOOK_URL` (bearer token from `HO_HERMES_WEBHOOK_TOKEN_FILE`) in order, backing off 10 s, 20 s, 40 s … up to 15 minutes while Hermes is unreachable, and delivers the backlog when it returns. Work that is already authorized continues meanwhile; decisions wait for a human.
+Notifications are written to the outbox in the same transaction as their event. The deliverer posts them to `HO_HERMES_WEBHOOK_URL` (signed with Hermes HMAC V2 using `HO_HERMES_WEBHOOK_SECRET_FILE`) in order, attention events one by one and routine ones in a digest every 5 minutes, backing off 10 s, 20 s, 40 s … up to 15 minutes while Hermes is unreachable, and delivers the backlog when it returns. Work that is already authorized continues meanwhile; decisions wait for a human.
 
 ## Pause, resume, cancel
 

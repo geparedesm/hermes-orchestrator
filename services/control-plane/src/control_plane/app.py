@@ -25,7 +25,8 @@ from .agentmgr import AgentManagerError
 from .errors import ApiError, Conflict, Forbidden, UpstreamError
 from .idempotency import run_idempotent
 from .projects import Projects
-from .recovery import Health, Outbox, Recovery
+from .notifications import Outbox
+from .recovery import Health, Recovery
 from . import budgets, manifests
 from .budgets import BudgetExhausted
 from .executions import ExecutionRequest, Executions
@@ -59,7 +60,7 @@ class Services:
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None,
                    orchestration: bool = False, hermes_webhook_url: str | None = None,
-                   hermes_webhook_token: str | None = None, outbox_client: Any = None) -> Services:
+                   hermes_webhook_secret: str | None = None, outbox_client: Any = None) -> Services:
     approvals = Approvals(ctx)
     projects = Projects(ctx, approvals)
     tasks = Tasks(ctx, projects, approvals)
@@ -79,7 +80,7 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
         scheduler.hooks.append(orchestrator.sync)
     health = Health(ctx)
     recovery = Recovery(ctx, tasks, executions, git, verifications, health, orchestrator)
-    outbox = Outbox(ctx, health, hermes_webhook_url, hermes_webhook_token, client=outbox_client)
+    outbox = Outbox(ctx, health, hermes_webhook_url, hermes_webhook_secret, client=outbox_client)
     scheduler.startup_hooks.append(recovery.startup)
     scheduler.hooks += [recovery.periodic, outbox.deliver]
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
@@ -263,9 +264,10 @@ def create_app(services: Services) -> FastAPI:
 
     @app.get("/v1/tasks")
     def list_tasks(_: Identity = Depends(identity), project: str | None = None, state: str | None = None,
-                   limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+                   limit: int = Query(default=100, ge=1, le=500), active: bool = False) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
-            return {"tasks": [services.tasks.summary(uow, t) for t in services.tasks.list(uow, project=project, state=state, limit=limit)]}
+            rows = services.tasks.list(uow, project=project, state=state, limit=limit, active=active)
+            return {"tasks": [services.tasks.summary(uow, t) for t in rows]}
 
     @app.get("/v1/tasks/{key}")
     def get_task(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:

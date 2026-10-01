@@ -61,9 +61,12 @@ class Tasks:
             raise NotFound(f"task {key} not found")
         return row
 
-    def list(self, uow: UnitOfWork, *, project: str | None = None, state: str | None = None, limit: int = 100) -> list[Row]:
+    def list(self, uow: UnitOfWork, *, project: str | None = None, state: str | None = None, limit: int = 100,
+             active: bool = False) -> list[Row]:
         query = "SELECT t.*, p.slug AS project_slug FROM tasks t JOIN projects p ON p.id = t.project_id WHERE true"
         params: list[Any] = []
+        if active:  # filtered before the limit, so old active tasks are never hidden by newer finished ones
+            query += " AND t.state NOT IN ('DONE', 'CANCELLED', 'FAILED')"
         if project:
             query += " AND p.slug = %s"
             params.append(project)
