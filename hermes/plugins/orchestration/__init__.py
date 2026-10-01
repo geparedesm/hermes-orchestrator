@@ -17,7 +17,7 @@ import json
 import shlex
 from typing import Any
 
-from .orch_client import ApiError, TaskApi, approval_line, task_line, task_summary
+from .orch_client import UNKNOWN, ApiError, TaskApi, approval_line, task_line, task_summary
 
 AGENT_PRINCIPAL = "hermes:agent"
 HELP = """/orch commands:
@@ -61,8 +61,7 @@ def run_verb(api: TaskApi, words: list[str], *, human: bool) -> str:
         return HELP
     verb, args = words[0].lower(), words[1:]
     if verb == "tasks":
-        result = api.tasks(project=args[0] if args else None)
-        tasks = [t for t in result.get("tasks", []) if t["state"] not in ("DONE", "CANCELLED", "FAILED")]
+        tasks = api.tasks(project=args[0] if args else None, active=True).get("tasks", [])
         return "\n".join(task_line(t) for t in tasks) or "No active tasks."
     if verb == "status":
         _need(args, 1, "status <T-n>")
@@ -129,6 +128,9 @@ def _error(exc: ApiError) -> str:
         return f"Not allowed: {exc.message}"
     if exc.status == 0:
         return f"The orchestrator is unavailable right now ({exc.message}). Your request was not applied."
+    if exc.status == UNKNOWN:
+        return ("The orchestrator did not answer in time, so the request may or may not have been applied. "
+                "Check with /orch tasks or /orch status before repeating it.")
     return f"Error: {exc.message}"
 
 

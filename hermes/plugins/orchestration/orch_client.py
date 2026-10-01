@@ -19,6 +19,9 @@ DEFAULT_URL = "http://control-plane:8080"
 TIMEOUT_SECONDS = 15
 
 
+UNKNOWN = -1  # the request may have been applied: it was sent and no answer arrived
+
+
 class ApiError(Exception):
     def __init__(self, status: int, message: str) -> None:
         super().__init__(message)
@@ -63,8 +66,13 @@ class TaskApi:
             except ValueError:
                 message = detail
             raise ApiError(exc.code, str(message)[:500]) from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise ApiError(0, f"the orchestrator is unreachable: {exc}") from exc
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, (ConnectionRefusedError, ConnectionResetError)) or "Name or service" in str(exc.reason):
+                raise ApiError(0, f"the orchestrator is unreachable: {exc.reason}") from exc
+            raise ApiError(UNKNOWN if method != "GET" else 0, f"no answer from the orchestrator: {exc.reason}") from exc
+        except (TimeoutError, OSError) as exc:
+            # Sent, but no answer: a mutation may have been applied.
+            raise ApiError(UNKNOWN if method != "GET" else 0, f"no answer from the orchestrator: {exc}") from exc
         return json.loads(raw) if raw else {}
 
     # ------------------------------------------------------------ operations
@@ -72,8 +80,10 @@ class TaskApi:
     def projects(self) -> Any:
         return self.call("GET", "/v1/projects")
 
-    def tasks(self, project: str | None = None, state: str | None = None) -> Any:
+    def tasks(self, project: str | None = None, state: str | None = None, active: bool = False) -> Any:
         params = {k: v for k, v in (("project", project), ("state", state)) if v}
+        if active:
+            params["active"] = "true"
         return self.call("GET", "/v1/tasks", params=params or None)
 
     def task(self, key: str) -> Any:

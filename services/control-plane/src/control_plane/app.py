@@ -264,9 +264,10 @@ def create_app(services: Services) -> FastAPI:
 
     @app.get("/v1/tasks")
     def list_tasks(_: Identity = Depends(identity), project: str | None = None, state: str | None = None,
-                   limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+                   limit: int = Query(default=100, ge=1, le=500), active: bool = False) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
-            return {"tasks": [services.tasks.summary(uow, t) for t in services.tasks.list(uow, project=project, state=state, limit=limit)]}
+            rows = services.tasks.list(uow, project=project, state=state, limit=limit, active=active)
+            return {"tasks": [services.tasks.summary(uow, t) for t in rows]}
 
     @app.get("/v1/tasks/{key}")
     def get_task(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:

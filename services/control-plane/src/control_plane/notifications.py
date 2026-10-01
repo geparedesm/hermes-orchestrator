@@ -9,7 +9,7 @@ number: a retry after a failure is delivered again (at least once), while a rese
 is still deduplicated.
 
 Attention notifications go out one by one, in order. Routine ones are aggregated into one digest at most
-every ROUTINE_DIGEST. The oldest pending notification gates delivery, so order survives an outage, and
+every ROUTINE_DIGEST, however large the backlog. The oldest pending notification gates delivery, so order survives an outage, and
 its backoff (10 s doubling to 15 min) is the outbox's backoff while Hermes is unreachable.
 """
 
@@ -72,7 +72,9 @@ def render(payload: dict[str, Any], task: str | None) -> str:
 
 def render_digest(items: list[tuple[dict[str, Any], str | None]]) -> str:
     lines = [f"Progress ({len(items)} update{'s' if len(items) != 1 else ''}):"]
-    lines += [f"- {render(payload, task).splitlines()[0]}" for payload, task in items]
+    lines += [f"- {render(payload, task).splitlines()[0]}" for payload, task in items[:DIGEST_MAX]]
+    if len(items) > DIGEST_MAX:
+        lines.append(f"- … and {len(items) - DIGEST_MAX} more (/orch tasks)")
     return "\n".join(lines)
 
 
@@ -148,10 +150,15 @@ class Outbox:
 
         routine = [r for r in rows if r["priority"] == "ROUTINE"]
         now = datetime.now(timezone.utc)
-        if routine and (len(routine) >= DIGEST_MAX or routine[0]["created_at"] <= now - ROUTINE_DIGEST):
-            if not routine[0]["due"]:
+        if routine and routine[0]["created_at"] <= now - ROUTINE_DIGEST and routine[0]["due"]:
+            # At most one digest per ROUTINE_DIGEST, however large the backlog (it is summarized, not split).
+            with self.ctx.unit_of_work() as uow:
+                uow.cur.execute("SELECT max(delivered_at) AS last FROM notifications WHERE priority = 'ROUTINE' "
+                                "AND state = 'SENT'")
+                last = uow.cur.fetchone()["last"]  # type: ignore[index]
+            if last is not None and last > now - ROUTINE_DIGEST:
                 return stats
-            batch = routine[:DIGEST_MAX]
+            batch = routine
             items = [(r["payload"], task_of(r)[0]) for r in batch]
             error = self._post(f"digest-{batch[0]['id']}:{int(batch[0]['attempts']) + 1}", {"text": render_digest(items), "event": "DIGEST", "task": None,
                                                             "project": None, "priority": "ROUTINE",

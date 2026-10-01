@@ -36,13 +36,16 @@ def _call(fn, *args: Any) -> Any:
     try:
         return fn(*args)
     except _client.ApiError as exc:
-        raise HTTPException(status_code=exc.status or 502, detail=exc.message) from exc
+        status = 504 if exc.status == _client.UNKNOWN else (exc.status or 502)
+        detail = (exc.message + "; the action may have been applied, refresh before repeating it"
+                  if exc.status == _client.UNKNOWN else exc.message)
+        raise HTTPException(status_code=status, detail=detail) from exc
 
 
 @router.get("/overview")
 def overview() -> dict[str, Any]:
     api = _api()
-    return {"tasks": _call(api.tasks).get("tasks", []), "approvals": _call(api.approvals).get("approvals", []),
+    return {"tasks": _call(api.tasks, None, None, True).get("tasks", []), "approvals": _call(api.approvals).get("approvals", []),
             "projects": _call(api.projects).get("projects", [])}
 
 

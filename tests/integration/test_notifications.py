@@ -111,3 +111,32 @@ def test_ready_for_merge_and_completion_messages():
     text = render({"type": "READY_FOR_MERGE", "summary": "T-3: all required checks passed", "data": {}}, "T-3")
     assert text.startswith("[T-3] ") and "/orch status T-3" in text
     assert render({"type": "TASK_COMPLETED", "summary": "T-3: merged and verified"}, "T-3") == "[T-3] T-3: merged and verified"
+
+
+def test_digests_are_rate_limited_however_large_the_backlog(api, services, agents, task, hermes):
+    from control_plane.events import record_event
+    from control_plane.notifications import DIGEST_MAX
+
+    [row] = q(services, "SELECT id, project_id FROM tasks WHERE key = %s", task)
+    with services.ctx.unit_of_work() as uow:
+        for n in range(DIGEST_MAX * 2):
+            record_event(uow.cur, "SUBTASK_ACCEPTED", actor="x", project_id=row["project_id"], task_id=row["id"],
+                         summary=f"subtask {n} accepted")
+    q(services, "UPDATE notifications SET created_at = now() - %s WHERE priority = 'ROUTINE'", ROUTINE_DIGEST * 2)
+    services.outbox.deliver()
+    digests = [m for m in hermes.received if m["event"] == "DIGEST"]
+    assert len(digests) == 1 and "more (/orch tasks)" in digests[0]["text"]
+    with services.ctx.unit_of_work() as uow:  # more routine events right after: no second digest yet
+        record_event(uow.cur, "SUBTASK_ACCEPTED", actor="x", project_id=row["project_id"], task_id=row["id"], summary="late")
+    q(services, "UPDATE notifications SET created_at = now() - %s WHERE state = 'PENDING'", ROUTINE_DIGEST * 2)
+    services.outbox.deliver()
+    assert len([m for m in hermes.received if m["event"] == "DIGEST"]) == 1
+
+
+def test_active_tasks_are_filtered_before_the_limit(api, services, agents, task):
+    q(services, "UPDATE tasks SET state = 'DONE' WHERE key <> %s", task)
+    for _ in range(3):
+        key = api.post("/v1/tasks", {"project": "demo", "request": "noise"}).json()["key"]
+        q(services, "UPDATE tasks SET state = 'CANCELLED' WHERE key = %s", key)
+    keys = [t["key"] for t in api.get("/v1/tasks?limit=2&active=true").json()["tasks"]]
+    assert keys == [task]

@@ -33,7 +33,8 @@ class FakeApi:
         def record(*args, **kwargs):
             self.calls.append((name, args))
             if name == "tasks":
-                return {"tasks": [{"key": "T-1", "state": "RUNNING", "title": "a"}, {"key": "T-2", "state": "DONE", "title": "b"}]}
+                tasks = [{"key": "T-1", "state": "RUNNING", "title": "a"}, {"key": "T-2", "state": "DONE", "title": "b"}]
+                return {"tasks": [t for t in tasks if not kwargs.get("active") or t["state"] != "DONE"]}
             if name == "decide":
                 return {"action": "MERGE", "state": "APPROVED" if args[1] else "REJECTED", "summary": "s"}
             if name == "action":
@@ -46,8 +47,10 @@ class FakeApi:
         return record
 
 
-def test_listing_hides_finished_tasks():
-    assert plugin.run_verb(FakeApi(), ["tasks"], human=False) == "T-1 [RUNNING] a"
+def test_listing_asks_the_server_for_active_tasks():
+    api = FakeApi()
+    assert plugin.run_verb(api, ["tasks"], human=False) == "T-1 [RUNNING] a"
+    assert api.calls == [("tasks", ())]  # filtered server-side (active=True), before the server's limit
 
 
 def test_human_actions_need_an_identity():
@@ -129,3 +132,24 @@ def test_registration_uses_the_verified_contract():
     assert ("command", "orch") in calls and ("cli", "orchestration") in calls
     assert sum(1 for c in calls if c[0] == "tool") == 6
     assert all(set(c[2]) >= {"name", "toolset", "schema", "handler"} for c in calls if c[0] == "tool")
+
+
+def test_unknown_outcomes_are_not_reported_as_not_applied(monkeypatch):
+    def timing_out(principal):
+        api = FakeApi()
+        api.action = lambda key, verb: (_ for _ in ()).throw(client.ApiError(client.UNKNOWN, "no answer"))
+        return api
+    monkeypatch.setattr(plugin, "TaskApi", timing_out)
+    monkeypatch.setattr(plugin, "session_principal", lambda: "telegram:1")
+    message = plugin.handle_slash("retry T-1")
+    assert "may or may not have been applied" in message and "before repeating" in message
+
+
+def test_unreachable_before_sending_is_not_applied(monkeypatch):
+    def refused(principal):
+        api = FakeApi()
+        api.action = lambda key, verb: (_ for _ in ()).throw(client.ApiError(0, "connection refused"))
+        return api
+    monkeypatch.setattr(plugin, "TaskApi", refused)
+    monkeypatch.setattr(plugin, "session_principal", lambda: "telegram:1")
+    assert "was not applied" in plugin.handle_slash("retry T-1")
