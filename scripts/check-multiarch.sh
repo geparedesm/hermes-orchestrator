@@ -23,7 +23,8 @@ for service in control-plane git-service agent-manager; do
   docker build -q --platform "$PLATFORM" -t "hermes-orchestrator/$service:$TAG" -f "services/$service/Dockerfile" . >/dev/null
 done
 arch="$(run control-plane uname -m)"
-check "control-plane runs on $PLATFORM" "${PLATFORM#linux/}" "$( [[ "$arch" == x86_64 ]] && echo amd64 || echo "$arch")"
+case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+check "control-plane runs on $PLATFORM" "${PLATFORM#linux/}" "$arch"
 check "control-plane CLI" "usage: ho" \
   "$(docker run --rm --platform "$PLATFORM" --network none --entrypoint ho "hermes-orchestrator/control-plane:$TAG" --help 2>&1 | head -1)"
 check "git-service imports" "ok" "$(run git-service python -c 'import git_service.app; print("ok")')"
@@ -35,7 +36,11 @@ check "agent-base tools" "git version" "$(run agent-base git --version)"
 check "python toolchain" "Python 3" "$(run runner-python python3 --version 2>/dev/null || run toolchain-python python3 --version)"
 check "node toolchain" "v" "$(run toolchain-node node --version)"
 check "Codex CLI" "$(grep -E '^CODEX_VERSION=' workers/versions.env | cut -d= -f2)" "$(run codex-generic codex --version)"
-check "Claude Code CLI" "$(grep -E '^CLAUDE_CODE_VERSION=' workers/versions.env | cut -d= -f2)" "$(run claude-generic claude --version)"
+# QEMU cannot execute Claude Code's native binary: check the installed binary's ELF machine instead.
+expected="$( [[ "$PLATFORM" == linux/amd64 ]] && echo "3e 00" || echo "b7 00")"
+check "Claude Code binary built for $PLATFORM" "$expected" \
+  "$(docker run --rm --platform "$PLATFORM" --network none --entrypoint od "hermes-orchestrator/claude-generic:$TAG" \
+     -An -tx1 -j18 -N2 /opt/ho/claude/bin/claude 2>&1 | tr -s ' ' | sed 's/^ //')"
 check "browser runner" "Version" "$(run browser-runner python3 -c 'import playwright; from importlib.metadata import version; print("Version", version("playwright"))')"
 check "Hermes image (official, multi-arch)" "Hermes Agent" \
   "$(docker run --rm --platform "$PLATFORM" --network none --entrypoint hermes \

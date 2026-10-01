@@ -115,6 +115,8 @@ APPROVAL="$(sed -n 's/^update to smoke11a requested: approval //p' <<<"$REQUEST"
 check "update requested as an approval" "UPDATE" "$(ho approval show "$APPROVAL" | field 'd["action"]')"
 check "update refused before approval" "1" "$(scripts/update.sh smoke11a "$APPROVAL" >/dev/null 2>&1; echo $?)"
 ho approval approve "$APPROVAL" >/dev/null
+check "an approval cannot deploy another version" "1" "$(scripts/update.sh smoke11z "$APPROVAL" >/dev/null 2>&1; echo $?)"
+check "approval not consumed by the refused attempt" "APPROVED" "$(ho approval show "$APPROVAL" | field 'd["state"]')"
 scripts/update.sh smoke11a "$APPROVAL" >"$WORK/update.log" 2>&1 || tail -5 "$WORK/update.log"
 check "updated version" "smoke11a" "$(version)"
 check "update recorded" "SUCCEEDED" "$(ho update list | field 'd["updates"][0]["state"]')"

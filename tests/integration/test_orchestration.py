@@ -494,3 +494,28 @@ def test_exhausted_budget_during_verification_pauses_and_resumes(api, services, 
     api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
     assert state(api, task) == "TESTING"
     assert latest_verification(services, task)["state"] == "RUNNING"
+
+
+def test_lost_subtask_reviews_are_retried_then_handed_back(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "x = 1\n"})
+    for attempt in range(3):
+        [rev] = active(services, task, "REVIEWER")
+        agents.vanish(str(rev["id"]))  # the worker disappeared (another stack, a crash)
+        services.scheduler.run_once()
+    assert len(executions(services, task, "REVIEWER")) == 3
+    assert subtasks(services, task)["a"]["state"] == "FIX_REQUIRED"
+    assert any("cross-review could not be completed" in r["summary"]
+               for r in q(services, "SELECT summary FROM events WHERE type = 'ORCHESTRATOR_INPUT'"))
+
+
+def test_reviews_lost_before_the_control_plane_reacted_are_healed(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "x = 1\n"})
+    [rev] = active(services, task, "REVIEWER")
+    q(services, "UPDATE executions SET state = 'LOST', ended_at = now() WHERE id = %s", rev["id"])  # no hook ran
+    q(services, "UPDATE subtasks SET updated_at = now() - interval '5 minutes'")
+    services.scheduler.run_once()
+    assert len(active(services, task, "REVIEWER")) == 1 and subtasks(services, task)["a"]["state"] == "IN_REVIEW"

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
+from . import stack
 from .plan import Rejected
 
 _SERVICE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$")
@@ -66,7 +67,7 @@ class Limits:
 
 
 def project_name(task: str, project: str) -> str:
-    return re.sub(r"[^a-z0-9_-]", "-", f"ho-{task.lower()}-{project.lower()}")[:63]
+    return re.sub(r"[^a-z0-9_-]", "-", f"ho-{stack.task_slug(task)}-{project.lower()}")[:63]
 
 
 def _closure(services: dict[str, Any], wanted: list[str]) -> list[str]:
@@ -104,7 +105,7 @@ def sanitize(model: dict[str, Any], *, task: str, project: str, network: str, se
             raise Rejected(f"invalid service name {name!r}")
     selected = _closure(all_services, wanted)
     problems: list[str] = []
-    labels = {"ho.managed": "true", "ho.kind": "test-service", "ho.task": task, "ho.project": project}
+    labels = {"ho.managed": "true", "ho.stack": stack.NAME, "ho.kind": "test-service", "ho.task": task, "ho.project": project}
     top_volumes = model.get("volumes") or {}
     out_services: dict[str, Any] = {}
     used_volumes: set[str] = set()

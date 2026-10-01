@@ -26,8 +26,12 @@ dc stop hermes control-plane >/dev/null 2>&1 || true
 dc up -d --wait postgres >/dev/null
 
 echo "restoring PostgreSQL"
-dc exec -T postgres pg_restore -U ho_owner -d ho --clean --if-exists --no-owner --role=ho_owner --exit-on-error \
-  < "$BACKUP/postgres.dump"
+# Into a fresh database: objects created after the backup (a newer schema) must not survive the restore.
+dc exec -T postgres psql -v ON_ERROR_STOP=1 -U ho_owner -d postgres -q \
+  -c "DROP DATABASE IF EXISTS ho WITH (FORCE)" -c "CREATE DATABASE ho OWNER ho_owner"
+dc exec -T postgres psql -v ON_ERROR_STOP=1 -U ho_owner -d ho -q \
+  -c "REVOKE ALL ON SCHEMA public FROM PUBLIC" -c "GRANT USAGE ON SCHEMA public TO ho_app"   # as scripts/postgres-init.sh
+dc exec -T postgres pg_restore -U ho_owner -d ho --no-owner --role=ho_owner --exit-on-error < "$BACKUP/postgres.dump"
 # Brings an older backup up to the current schema (a no-op when the versions match).
 dc run --rm -T migrate >/dev/null
 
@@ -41,6 +45,12 @@ if [[ -f "$BACKUP/artifacts.tar.gz" ]]; then
   docker run --rm --network none -u 0 --entrypoint sh -v "${PROJECT}_artifacts:/artifacts" -v "$BACKUP:/in:ro" \
     "hermes-orchestrator/control-plane:$(grep -E '^HO_VERSION=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo dev)" \
     -c 'find /artifacts -mindepth 1 -delete && tar -xzf /in/artifacts.tar.gz -C /artifacts && chown -R 10001:10001 /artifacts'
+fi
+
+if [[ -f "$BACKUP/config/images.lock.yaml" ]]; then
+  # The execution images allowed when the backup was taken (an update rebuilds them; a rollback must return).
+  cp "$BACKUP/config/images.lock.yaml" config/images.lock.yaml
+  echo "restored the execution image allowlist"
 fi
 
 echo "starting the platform"

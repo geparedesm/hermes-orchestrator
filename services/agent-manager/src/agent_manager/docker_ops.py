@@ -26,6 +26,7 @@ from docker.errors import APIError, NotFound
 from docker.types import Mount as DockerMount
 
 from . import compose, images
+from . import stack
 from .plan import INPUT_MOUNT, PROXY_PORT, SECRETS_MOUNT, WORKER_UID, ContainerPlan, Rejected, resolve_workspace
 from .secrets import SecretStore
 
@@ -99,7 +100,8 @@ class DockerOps:
         try:
             network = self.client.networks.get(name)
         except NotFound:
-            return self.client.networks.create(name, driver="bridge", internal=internal, labels=labels, check_duplicate=True)
+            return self.client.networks.create(name, driver="bridge", internal=internal,
+                                               labels={"ho.stack": stack.NAME, **labels}, check_duplicate=True)
         if network.attrs.get("Internal") != internal or network.attrs.get("Labels", {}).get("ho.managed") != "true":
             raise Rejected(f"network {name} exists but is not a platform network with the expected isolation")
         return network
@@ -107,7 +109,7 @@ class DockerOps:
     # ---------------------------------------------------------------- capacity
 
     def _running_workers(self) -> list[Any]:
-        return self.client.containers.list(filters={"label": ["ho.managed=true", "ho.kind=worker"]})
+        return self.client.containers.list(filters={"label": ["ho.managed=true", "ho.kind=worker", stack.LABEL]})
 
     def stats(self) -> dict[str, Any]:
         """CPU and memory of running workers (one non-streaming Docker stats sample each), for the Dashboard."""
@@ -268,7 +270,7 @@ class DockerOps:
         try:
             volume = self.client.volumes.get(name)
         except NotFound:
-            self.client.volumes.create(name, labels={"ho.managed": "true", "ho.kind": "cache", "ho.project": project,
+            self.client.volumes.create(name, labels={"ho.managed": "true", "ho.stack": stack.NAME, "ho.kind": "cache", "ho.project": project,
                                                      "ho.ecosystem": ecosystem})
             return
         labels = volume.attrs.get("Labels") or {}
@@ -293,7 +295,12 @@ class DockerOps:
                                                  .get("max_gb_per_cache", 2)) * 1024**3)}
 
     def maintain_caches(self) -> dict[str, Any]:
-        """Trim caches above the size limit, least recently used files first; caches in use are left alone."""
+        """Trim caches above the size limit, least recently used files first; caches in use are left alone.
+        Holds the creation lock, so no worker can mount a cache between the usage check and the trimming."""
+        with self._lock:
+            return self._maintain_caches()
+
+    def _maintain_caches(self) -> dict[str, Any]:
         listing = self.caches()
         limit = listing["max_bytes_per_cache"]
         trimmed = []
@@ -307,13 +314,18 @@ class DockerOps:
             output = self.client.containers.run(self._helper_image(), ["sh", "-c", script], remove=True, network_mode="none",
                                                 user=f"{WORKER_UID}:{WORKER_UID}", volumes={cache["volume"]: {"bind": "/c"}},
                                                 tmpfs={"/tmp": "rw,nosuid,size=64m"},
-                                                labels={"ho.managed": "true", "ho.kind": "maintenance"}, **_SECURITY)
+                                                labels={"ho.managed": "true", "ho.stack": stack.NAME, "ho.kind": "maintenance"},
+                                                **_SECURITY)
             trimmed.append({"volume": cache["volume"], "before": cache["bytes"],
                             "after": int((output or b"0").decode().strip().splitlines()[-1] or 0)})
         return {"trimmed": trimmed}
 
     def clear_cache(self, project: str, ecosystem: str | None = None) -> dict[str, Any]:
         """Invalidate a project's caches (all ecosystems, or one); refused while a worker uses them."""
+        with self._lock:
+            return self._clear_cache(project, ecosystem)
+
+    def _clear_cache(self, project: str, ecosystem: str | None = None) -> dict[str, Any]:
         in_use = self._caches_in_use()
         removed = []
         labels = ["ho.managed=true", "ho.kind=cache", f"ho.project={project}"] + ([f"ho.ecosystem={ecosystem}"] if ecosystem else [])
@@ -333,7 +345,7 @@ class DockerOps:
         try:
             volume = self.client.volumes.get(plan.session_volume)
         except NotFound:
-            labels = {"ho.managed": "true", "ho.kind": "session", "ho.task": plan.task, "ho.project": plan.project,
+            labels = {"ho.managed": "true", "ho.stack": stack.NAME, "ho.kind": "session", "ho.task": plan.task, "ho.project": plan.project,
                       "ho.provider": plan.provider or ""}
             self.client.volumes.create(plan.session_volume, labels=labels)
             return
@@ -409,10 +421,12 @@ class DockerOps:
     def list_managed(self) -> dict[str, list[dict[str, Any]]]:
         containers = [
             {"name": c.name, "status": c.status, "labels": {k: v for k, v in c.labels.items() if k.startswith("ho.")}}
-            for c in self.client.containers.list(all=True, filters={"label": "ho.managed=true"})
+            for c in self.client.containers.list(all=True, filters={"label": ["ho.managed=true", stack.LABEL]})
         ]
-        networks = [{"name": n.name, "labels": n.attrs.get("Labels") or {}} for n in self.client.networks.list(filters={"label": "ho.managed=true"})]
-        volumes = [{"name": v.name, "labels": v.attrs.get("Labels") or {}} for v in self.client.volumes.list(filters={"label": "ho.managed=true"})]
+        # Only this stack's resources: another stack's workers on the same Docker host are not orphans.
+        mine = {"label": ["ho.managed=true", stack.LABEL]}
+        networks = [{"name": n.name, "labels": n.attrs.get("Labels") or {}} for n in self.client.networks.list(filters=mine)]
+        volumes = [{"name": v.name, "labels": v.attrs.get("Labels") or {}} for v in self.client.volumes.list(filters=mine)]
         return {"containers": containers, "networks": networks, "volumes": volumes}
 
     # --------------------------------------------------------------- control
@@ -519,7 +533,7 @@ class DockerOps:
         if rendered.returncode != 0:
             raise Rejected(f"the project's Compose files could not be read: {rendered.stderr.strip()[:300]}")
         limits = self.platform["machine"]["runners"]["test"]
-        network = f"ho-t-{task.lower()}-svc"
+        network = f"ho-t-{stack.task_slug(task)}-svc"
         model = compose.sanitize(json.loads(rendered.stdout), task=task, project=project, network=network, services=services,
                                  workspace_container=str(resolved),
                                  workspace_host=f"{self._projects_root_host(projects_root_host)}/{relative}",

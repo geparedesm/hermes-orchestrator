@@ -50,6 +50,7 @@ STEP_TIMEOUT_MINUTES = 20
 MAX_STEP_FAILURES = 3
 MAX_ACTIONS = 30
 FAILBACK_HOLD = timedelta(minutes=10)
+MAX_REVIEW_RETRIES = 2
 # Only these events make the orchestrator think again (design change 2).
 TRIGGERS = ("ORCHESTRATOR_INPUT", "REQUIREMENTS_REVISED", "APPROVAL_DECIDED", "BUDGET_RAISED")
 STEP_STATES = (S.PLANNING, S.QUEUED, S.RUNNING, S.FIX_REQUIRED)
@@ -792,6 +793,11 @@ class Orchestration:
 
     def _on_execution_finished(self, uow: UnitOfWork, execution: Row, state: str, failure: str | None) -> None:
         purpose = (execution["spec"] or {}).get("purpose") or {}
+        if purpose.get("review") and purpose.get("subtask"):
+            if state != "SUCCEEDED":
+                self._subtask_review_failed(uow, execution["task_id"], UUID(purpose["subtask"]),
+                                            f"review by {execution['provider']} {state.lower()}")
+            return
         if not (purpose.get("orchestrator_step") or purpose.get("kind")):
             return
         uow.cur.execute("SELECT * FROM executions WHERE id = %s", (execution["id"],))
@@ -926,6 +932,40 @@ class Orchestration:
                 pass
         uow.cur.execute("INSERT INTO pending_launches (id, task_id, subtask_id, kind, request, reason) VALUES (%s, %s, %s, %s, %s, %s)",
                         (uuid7(), task["id"], subtask["id"], "SUBTASK_REVIEW", jsonb(request), "waiting for capacity"))
+
+    def _subtask_review_failed(self, uow: UnitOfWork, task_id: UUID, subtask_id: UUID, reason: str) -> None:
+        """A subtask review that failed or was lost is retried (bounded); then the orchestrator decides."""
+        task = self._task(uow, task_id)
+        uow.cur.execute("SELECT * FROM subtasks WHERE id = %s FOR UPDATE", (subtask_id,))
+        subtask = uow.cur.fetchone()
+        if subtask is None or subtask["state"] != "IN_REVIEW" or S(task["state"]) not in (S.RUNNING, S.FIX_REQUIRED):
+            return
+        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE subtask_id = %s AND role = 'REVIEWER' AND state <> 'SUCCEEDED' "
+                        "AND state <> ALL(%s)", (subtask_id, list(ACTIVE)))
+        failed = int(uow.cur.fetchone()["n"])  # type: ignore[index]
+        uow.cur.execute("SELECT * FROM workspaces WHERE id = %s", (subtask["workspace_id"],))
+        workspace = uow.cur.fetchone()
+        if failed > MAX_REVIEW_RETRIES or workspace is None or not workspace["head_sha"] or not subtask["developer_provider"]:
+            self._set_subtask(uow, subtask, "FIX_REQUIRED", f"{reason}; review not completed")
+            self._input(uow, task, f"{subtask['key']}: the cross-review could not be completed ({reason})", {"subtask": subtask["key"]})
+            return
+        self._event(uow, task, "RETRY_SCHEDULED", f"{subtask['key']}: {reason}; reviewing again")
+        self._request_subtask_review(uow, task, subtask, subtask["developer_provider"], workspace, workspace["head_sha"])
+
+    def heal_reviews(self) -> int:
+        """Subtasks waiting for a review that nothing is running or queued for (a review lost before this
+        control plane could react) get their review requested again."""
+        with self.ctx.unit_of_work() as uow:
+            uow.cur.execute(
+                "SELECT s.id, s.task_id FROM subtasks s JOIN tasks t ON t.id = s.task_id WHERE s.state = 'IN_REVIEW' "
+                "AND t.state IN ('RUNNING', 'FIX_REQUIRED') AND s.updated_at < now() - interval '2 minutes' "
+                "AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.subtask_id = s.id AND e.role = 'REVIEWER' AND e.state = ANY(%s)) "
+                "AND NOT EXISTS (SELECT 1 FROM pending_launches p WHERE p.subtask_id = s.id)", (list(ACTIVE),))
+            stuck = uow.cur.fetchall()
+        for row in stuck:
+            with self.ctx.unit_of_work() as uow:
+                self._subtask_review_failed(uow, row["task_id"], row["id"], "no review was running")
+        return len(stuck)
 
     def _launch_review(self, uow: UnitOfWork, task: Row, subtask: Row, request: dict[str, Any]) -> Row:
         # Review the subtask's own changes: from where its workspace started (its dependencies' work, if any).
@@ -1251,7 +1291,8 @@ class Orchestration:
         return moved
 
     def sync(self) -> dict[str, int]:
-        stats = {"steps": 0, "adopted": self.adopt_orphans(), "failback": self.failback(), "launched": self.process_pending()}
+        stats = {"steps": 0, "adopted": self.adopt_orphans(), "failback": self.failback(), "reviews_healed": self.heal_reviews(),
+                 "launched": self.process_pending()}
         with self.ctx.unit_of_work() as uow:
             uow.cur.execute(
                 """

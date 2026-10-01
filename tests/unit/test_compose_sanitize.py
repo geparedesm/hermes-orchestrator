@@ -45,7 +45,7 @@ def test_selected_services_are_confined_to_the_task_network():
     assert db["mem_limit"] == 536870912 and db["cpus"] == 2.0 and db["pids_limit"] == 512
     assert "no-new-privileges:true" in db["security_opt"]
     assert db["labels"]["ho.task"] == "T-1" and db["labels"]["ho.kind"] == "test-service"
-    labels = {"ho.managed": "true", "ho.kind": "test-service", "ho.task": "T-1", "ho.project": "shop"}
+    labels = {"ho.managed": "true", "ho.stack": "hermes-orchestrator", "ho.kind": "test-service", "ho.task": "T-1", "ho.project": "shop"}
     assert result["volumes"] == {"dbdata": {"labels": labels}}  # project-local volume, removed with the environment
 
 

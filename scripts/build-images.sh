@@ -24,7 +24,7 @@ build() {  # build <name> <dockerfile> <context> [build args...]
   local name=$1 dockerfile=$2 context=$3
   shift 3
   echo "building $name" >&2
-  docker build -q ${HO_PLATFORM:+--platform "$HO_PLATFORM"} -t "hermes-orchestrator/$name:$VERSION" -f "$dockerfile" \
+  docker build -q ${HO_PLATFORM:+--platform "$HO_PLATFORM" --build-arg CLI_SELF_CHECK=0} -t "hermes-orchestrator/$name:$VERSION" -f "$dockerfile" \
     "${BUILD_ARGS[@]}" "$@" "$context" >/dev/null
   LOCK+=("  $name: \"$(docker image inspect --format '{{.Id}}' "hermes-orchestrator/$name:$VERSION")\"")
 }

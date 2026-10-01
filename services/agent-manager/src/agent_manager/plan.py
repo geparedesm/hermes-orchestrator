@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+
+from . import stack
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -107,7 +109,7 @@ class ContainerPlan:
 
     @property
     def service_network(self) -> str:
-        return f"ho-t-{self.task.lower()}-svc"
+        return f"ho-t-{stack.task_slug(self.task)}-svc"
 
     @property
     def output_volume(self) -> str:
@@ -239,7 +241,7 @@ def build_plan(
     if request.get("session"):
         if provider is None:
             raise Rejected("only provider executions keep a session store")
-        session_volume = f"ho-sess-{grant['task'].lower()}-{provider}"
+        session_volume = f"ho-sess-{stack.task_slug(grant['task'])}-{provider}"
         mounts.append(Mount("volume", session_volume, SESSION_MOUNT, read_only=False))
 
     # Dependency caches: per project and ecosystem, for executions that install packages into a workspace.
@@ -278,6 +280,7 @@ def build_plan(
 
     labels = {
         "ho.managed": "true",
+        "ho.stack": stack.NAME,
         "ho.kind": "worker",
         "ho.execution": execution,
         "ho.task": grant["task"],

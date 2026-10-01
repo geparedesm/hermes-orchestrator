@@ -25,8 +25,16 @@ fi
 
 FROM="$(grep -E '^HO_VERSION=' "$ENV_FILE" | cut -d= -f2 || true)"
 FROM="${FROM:-dev}"
+# The approval names the version it authorizes: deploy only that one.
+APPROVED="$(ho approval show "$APPROVAL" | field 'd["subject"].get("to_version", "") if d["action"] == "UPDATE" else ""')"
+if [[ "$APPROVED" != "$TO" ]]; then
+  echo "approval $APPROVAL authorizes '${APPROVED:-no platform update}', not $TO" >&2
+  exit 1
+fi
 # Consume the approval first: the snapshot then contains the started update, so its record survives a rollback.
-RUN="$(ho update start "$APPROVAL" | field 'd["id"]')"
+STARTED="$(ho update start "$APPROVAL")"
+RUN="$(field 'd["id"]' <<<"$STARTED")"
+[[ "$(field 'd["to_version"]' <<<"$STARTED")" == "$TO" ]] || { echo "the consumed approval is for another version" >&2; exit 1; }
 echo "== snapshot (update $RUN: $FROM -> $TO)"
 BACKUP="$(HO_BACKUP_DIR="${HO_BACKUP_DIR:-./backups}" scripts/backup.sh | tail -1 | sed 's/^backup complete: //')"
 echo "backup $BACKUP"

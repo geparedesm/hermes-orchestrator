@@ -125,6 +125,7 @@ services:
     # Docker Desktop: group 0. Linux: set HO_DOCKER_GID to the host's docker group ID.
     group_add: ["${HO_DOCKER_GID:-0}"]
     environment:
+      HO_STACK: ${COMPOSE_PROJECT_NAME}
       HO_MACHINE_PROFILE: ${HO_MACHINE_PROFILE:?set HO_MACHINE_PROFILE in .env}
       HO_PROJECTS_ROOT_HOST: ${HO_PROJECTS_ROOT_HOST:?set HO_PROJECTS_ROOT_HOST in .env}
       HO_PROJECTS_ROOT: /projects
