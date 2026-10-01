@@ -85,3 +85,14 @@ def test_post_merge_steps():
     assert post_merge_steps({"commands": COMMANDS}) == [("install", "npm ci"), ("build", "npm run build"), ("test", "npm test")]
     assert post_merge_steps({"commands": {"post_merge": "make verify"}}) == [("post_merge", "make verify")]
     assert post_merge_steps({}) == []
+
+
+def test_code_change_without_any_test_run_needs_an_approval():
+    untested = plan_verification({"commands": {}, "quality_gate": {"tests": False, "full_suite": False, "build": False, "lint": False}},
+                                 ["shop/__init__.py"], insertions=5)
+    assert {g["kind"] for g in untested.gaps} == {"no_tests_ran", "no_test_changes"}
+    assert any("without running any test" in n for n in untested.needs_approval)
+    docs_only = plan_verification({"commands": {}, "quality_gate": {"tests": False}}, ["README.md"], insertions=5)
+    assert docs_only.needs_approval == []  # documentation needs no test run
+    tested = plan_verification(config(), ["src/a.py", "tests/test_a.py"], insertions=10)
+    assert not any("without running any test" in n for n in tested.needs_approval)

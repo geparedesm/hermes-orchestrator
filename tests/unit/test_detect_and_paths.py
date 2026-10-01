@@ -100,3 +100,12 @@ def test_slugify():
     assert slugify("My App!") == "my-app"
     with pytest.raises(ValueError):
         slugify("!!!")
+
+
+def test_standard_library_python_project_gets_unittest(tmp_path):
+    write(tmp_path, "shop/__init__.py", "x = 1\n")
+    write(tmp_path, "tests/test_shop.py", "import unittest\n")
+    report = detect(tmp_path)
+    assert "python" in report.profiles and report.commands["test"] == "python -m unittest"
+    proposal = propose_project_config("shop", report)
+    assert proposal["commands"]["test"] == "python -m unittest" and proposal["quality_gate"]["tests"] is True

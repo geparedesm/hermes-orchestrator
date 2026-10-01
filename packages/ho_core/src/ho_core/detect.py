@@ -136,6 +136,13 @@ def detect(root: Path) -> DetectionReport:
             if re.search(rf"(?im)^\s*[\"']?{dep}\b", text + (_read_text(root, "requirements.txt") or "")):
                 add(report.frameworks, framework)
 
+    elif any(f.endswith(".py") for f in files):
+        # Python without a dependency manifest (standard library only): the standard test runner always exists.
+        add(report.profiles, "python")
+        add(report.languages, "python")
+        if any(re.match(r"(tests?/.*|.*/)?test_[^/]+\.py$", f) for f in files):
+            report.commands.setdefault("test", "python -m unittest")
+
     # Flutter / Dart
     if "pubspec.yaml" in top:
         add(report.profiles, "flutter")

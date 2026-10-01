@@ -17,12 +17,12 @@ Branch `codex/phase-11-hardening`. Operations: [docs/operations.md](../operation
 | Check | Result |
 | --- | --- |
 | `make lint`, `make validate-schemas` | pass |
-| `make test-unit` | 233 passed |
-| `make test-integration` | 147 passed |
+| `make test-unit` | 235 passed |
+| `make test-integration` | 145 passed |
 | `make test-docker` | 48 passed (one real-provider test failed once while emulated builds saturated the machine and passed on rerun) |
 | `make test-security` | 62 passed (39 integration + 23 real-Docker) |
 | `scripts/smoke-phase11.sh` | all checks pass |
-| `scripts/smoke-phase2.sh` … `smoke-phase10.sh` | all pass |
+| `scripts/smoke-phase2.sh` … `smoke-phase10.sh` | all pass (re-run after the stack-isolation change) |
 | `scripts/check-multiarch.sh` (linux/amd64 on Apple Silicon) | see below |
 | Acceptance scenario (§90) with real Claude and Codex | see below |
 
@@ -34,13 +34,34 @@ PostgreSQL stopped (readiness `unavailable`, then reconnection: new tasks accept
 
 All pinned base images are multi-architecture index digests (amd64 and arm64): Python, Debian, Node, Playwright, PostgreSQL, Redis, and Hermes. The macOS profile (`config/mac-m2-pro.yaml`) and the Linux profile (`config/linux.yaml`) are separate and selected by `HO_MACHINE_PROFILE`.
 
+### Acceptance scenario (§90) with real Claude and Codex
+
+On the operator's stack (upgraded in place to this phase: migrations `0007` and `0008` applied to its existing database, `make check` passing) with `HO_ORCHESTRATION=true`, a local project `acceptance-shop` (a small standard-library web app with unit tests, its own Compose service, and a browser check):
+
+1. **Hermes → Task API**: the task was created through Hermes's tool registry (`orch_task_create`): "Add a /health endpoint that returns `{"status": "ok"}` … and show the number of products in the page heading … Add unit tests". T-10.
+2. **Claude** (orchestrator) wrote requirements and a two-subtask plan (S1 → S2).
+3. **Codex** implemented both subtasks in isolated workspaces; **Claude** cross-reviewed and accepted each (S1's first review was lost, see below, and was requested again automatically).
+4. **Git Service** integrated both workspaces; the **Test Runner** ran the full suite and the **Browser Runner** checked the page with the project's Compose service; **Claude** reviewed the integrated commit.
+5. **Quality Gate**: all requirements passed except the policy-violation rule — the agents had run `which docker` / `docker --version` (rule CMD-H07, high-risk, advisory; workers have no Docker) — so the gate asked for an exception, which the operator approved with a note (`HIGH_RISK_OPERATION`).
+6. **READY_FOR_MERGE**: the control plane requested the MERGE approval for the exact integrated commit; nothing merged.
+7. The merge was **approved from Hermes's Dashboard** (`dashboard:operator`); Git Service merged into `main` (`865ca4f`), **post-merge verification passed**, the task became **DONE**, `TASK_COMPLETED` was emitted (waiting in the outbox: no chat channel configured), and READY_FOR_MERGE and FINAL manifests were generated.
+
+The merged repository passes its tests and has the requested endpoint and heading.
+
+### Defects found by the validation runs (all fixed, with tests)
+
+1. **Two stacks on one Docker host destroyed each other's workers**: while the Phase 11 smoke ran next to the acceptance task, the smoke stack's orphan cleanup removed the acceptance task's reviewer (its execution was unknown to the smoke database). Every resource now carries `ho.stack` (the Compose project name); listing, reaping, and orphan cleanup see only their own stack, and task-scoped names (session volumes, task networks, test-service projects) are prefixed outside the main stack.
+2. **A lost subtask review left the subtask waiting forever**: failed or lost reviews are now retried (at most twice, then handed back to the orchestrator), and a subtask in review with nothing running or queued gets its review requested again — which resumed the acceptance task after the fix was deployed.
+3. **Cross-architecture builds of the Claude image failed**: QEMU aborts Claude Code's native x86-64 binary on Apple Silicon. Cross builds skip the image's CLI self-check (`CLI_SELF_CHECK=0`) and `check-multiarch.sh` verifies the binary's ELF machine instead; native builds still run the CLI.
+4. Backup and check scripts: SQLite backup of a WAL database needs a writable mount; `head -n -N` is not portable; `grep -q` under `pipefail` misreports; unset optional settings ended `check.sh` silently.
+
 ## Codex review (`/codex:review --base main`)
 
 Five findings, all fixed: an approval for one version could deploy another (the script now checks the approved target before consuming it, and again after); restore did not bring back the execution image allowlist (now restored from the backup); restoring across a newer schema could fail half-way (now restores into a fresh database); cache trimming could race worker creation (now under Agent Manager's creation lock); the ARM64 check did not map `aarch64`.
 
 ## Known limitations
 
-- The acceptance run uses a local repository; GitHub pull-request merges are verified against a local bare remote and a `gh` stand-in (Phase 5), not a real GitHub repository.
+- The acceptance run used a local repository; GitHub pull-request merges are verified against a local bare remote and a `gh` stand-in (Phase 5), not a real GitHub repository.
 - Delivery to a real chat channel needs the operator's channel (docs/hermes.md).
 - Multi-instance control planes are fenced but not exercised.
 - `scripts/check-multiarch.sh` runs the other architecture under emulation; native Linux hosts were not available.

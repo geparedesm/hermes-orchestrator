@@ -500,7 +500,7 @@ def test_lost_subtask_reviews_are_retried_then_handed_back(api, services, agents
     plan_and_start(services, agents, task)
     [dev] = active(services, task, "DEVELOPER")
     develop(services, agents, repo, dev, {"a.py": "x = 1\n"})
-    for attempt in range(3):
+    for _ in range(3):
         [rev] = active(services, task, "REVIEWER")
         agents.vanish(str(rev["id"]))  # the worker disappeared (another stack, a crash)
         services.scheduler.run_once()
