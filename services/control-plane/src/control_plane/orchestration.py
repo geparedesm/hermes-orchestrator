@@ -149,6 +149,10 @@ class Orchestration:
             task = self.tasks.transition(uow, task, target, trigger=Trigger.SYSTEM, actor="orchestration", reason=reason)
         return task
 
+    def _slug(self, uow: UnitOfWork, task: Row) -> str:
+        uow.cur.execute("SELECT slug FROM projects WHERE id = %s", (task["project_id"],))
+        return uow.cur.fetchone()["slug"]  # type: ignore[index]
+
     def _subtasks(self, uow: UnitOfWork, task: Row) -> list[Row]:
         uow.cur.execute("SELECT * FROM subtasks WHERE task_id = %s AND plan_version = %s ORDER BY key",
                         (task["id"], task["current_plan_version"] or 0))
@@ -391,7 +395,10 @@ class Orchestration:
                  "those. Plan small, independent subtasks with accurate `files`; request DEVELOPER executions only for READY",
                  "subtasks; use WAIT when nothing needs deciding. Every subtask kind, TEST_AUTHORING included, runs with role DEVELOPER. Record assumptions instead of guessing silently; HIGH or",
                  "irreversible ambiguity needs RECORD_ASSUMPTION with level HIGH (a human decides).", "",
-                 "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], ""]
+                 "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], "",
+                 "## Project files", "", f"The project's current main branch is mounted read-only at /projects/{self._slug(uow, task)}. "
+                 "Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
+                 "accurate `files`.", ""]
         if task["current_requirements_version"]:
             uow.cur.execute("SELECT a.path FROM requirement_versions r JOIN artifacts a ON a.id = r.artifact_id "
                             "WHERE r.task_id = %s ORDER BY r.version DESC LIMIT 1", (task["id"],))

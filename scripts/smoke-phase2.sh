@@ -40,6 +40,7 @@ git -C "$ROOT/sample-app" init -q -b main
 git -C "$ROOT/sample-app" add -A
 git -C "$ROOT/sample-app" -c user.name=smoke -c user.email=smoke@example.com commit -qm init
 printf 'HO_MACHINE_PROFILE=mac-m2-pro\nHO_PROJECTS_ROOT_HOST=%s\nHO_VERSION=dev\n' "$ROOT" > "$ENV_FILE"
+echo "HO_HERMES_DASHBOARD_PORT=19202" >> "$ENV_FILE"  # never collide with the operator stack's Hermes
 
 echo "== start stack"
 dc up -d --build --wait >/dev/null

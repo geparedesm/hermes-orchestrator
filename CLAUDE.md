@@ -44,9 +44,9 @@ Phases 0–10 merged (PRs #2–#11); Hermes integration in `hermes/` (docs/herme
 | `hermes/` | `plugins/orchestration` (tools, `/orch`, CLI, Dashboard tab; thin Task API client), `init.sh` (hermes-init) |
 | `services/egress-proxy/` | CONNECT-only allowlisting proxy, one per agent execution |
 | `workers/` | `agent-base` (+`ho-verify`, `ho-wait-secrets`), `toolchains/*`, `providers/{claude,codex}` (`ho-agent-run`, `ho-auth-login`), `browser-runner` |
-| `migrations/versions/` | `0001`–`0007` (raw SQL) |
+| `migrations/versions/` | `0001`–`0008` (raw SQL) |
 | `schemas/` | JSON Schemas: project, capability, platform, manifest, task, agent-result, review-result, orchestrator-step |
-| `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `smoke-phase{2..10}.sh` |
+| `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `smoke-phase{2..11}.sh` |
 
 ## Commands
 
@@ -55,7 +55,7 @@ make test-unit                      # fast, no services
 make test-integration               # starts throwaway PostgreSQL/Redis (compose.test.yaml)
 HO_TEST_DOCKER=1 .venv/bin/pytest tests/docker -q -p no:warnings   # real Docker (needs make images)
 make lint validate-schemas
-./scripts/smoke-phaseN.sh           # end-to-end on a throwaway Compose stack (N = 2..10)
+./scripts/smoke-phaseN.sh           # end-to-end on a throwaway Compose stack (N = 2..11)
 make images && make up              # rebuild the operator's live stack
 docker compose exec -T control-plane ho <group> <cmd>   # operator CLI
 ```

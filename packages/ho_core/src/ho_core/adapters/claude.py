@@ -79,6 +79,9 @@ class ClaudeAdapter:
             command += ["--resume", assignment.resume_session]
         if assignment.model:
             command += ["--model", assignment.model]
+        if assignment.read_dirs:
+            # Claude Code limits file tools to its working directories (/workspace is empty for the orchestrator).
+            command += ["--add-dir", *assignment.read_dirs]
         return ExecutionPlan(
             image=f"claude-{assignment.toolchain}",
             command=command,

@@ -88,6 +88,7 @@ printf '%s\n' "$SECRET_VALUE" > "$SECRETS/sample-app/test/TEST_TOKEN"
 chmod 600 "$SECRETS/sample-app/test/TEST_TOKEN"
 printf 'HO_MACHINE_PROFILE=mac-m2-pro\nHO_PROJECTS_ROOT_HOST=%s\nHO_VERSION=dev\nHO_PROVIDER_IDENTITY=%s\nHO_PROJECT_SECRETS_HOST=%s\n' \
   "$ROOT" "$IDENTITY" "$SECRETS" > "$ENV_FILE"
+echo "HO_HERMES_DASHBOARD_PORT=19204" >> "$ENV_FILE"  # never collide with the operator stack's Hermes
 docker volume rm "cred-claude-$IDENTITY" "cred-codex-$IDENTITY" >/dev/null 2>&1 || true
 dc up -d --build --wait >/dev/null
 check "agent-manager ready" "True" "$(ho health | field 'd["checks"].get("agent_manager")')"

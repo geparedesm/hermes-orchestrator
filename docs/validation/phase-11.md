@@ -17,7 +17,7 @@ Branch `codex/phase-11-hardening`. Operations: [docs/operations.md](../operation
 | Check | Result |
 | --- | --- |
 | `make lint`, `make validate-schemas` | pass |
-| `make test-unit` | 235 passed |
+| `make test-unit` | 238 passed |
 | `make test-integration` | 145 passed |
 | `make test-docker` | 48 passed (one real-provider test failed once while emulated builds saturated the machine and passed on rerun) |
 | `make test-security` | 62 passed (39 integration + 23 real-Docker) |
@@ -53,7 +53,10 @@ The merged repository passes its tests and has the requested endpoint and headin
 1. **Two stacks on one Docker host destroyed each other's workers**: while the Phase 11 smoke ran next to the acceptance task, the smoke stack's orphan cleanup removed the acceptance task's reviewer (its execution was unknown to the smoke database). Every resource now carries `ho.stack` (the Compose project name); listing, reaping, and orphan cleanup see only their own stack, and task-scoped names (session volumes, task networks, test-service projects) are prefixed outside the main stack.
 2. **A lost subtask review left the subtask waiting forever**: failed or lost reviews are now retried (at most twice, then handed back to the orchestrator), and a subtask in review with nothing running or queued gets its review requested again — which resumed the acceptance task after the fix was deployed.
 3. **Cross-architecture builds of the Claude image failed**: QEMU aborts Claude Code's native x86-64 binary on Apple Silicon. Cross builds skip the image's CLI self-check (`CLI_SELF_CHECK=0`) and `check-multiarch.sh` verifies the binary's ELF machine instead; native builds still run the CLI.
-4. Backup and check scripts: SQLite backup of a WAL database needs a writable mount; `head -n -N` is not portable; `grep -q` under `pipefail` misreports; unset optional settings ended `check.sh` silently.
+4. **A gate could pass a code change without running any test**: T-10's repository had an invalid `project.yaml` (`browser_tests.paths`), so verification fell back to a proposal with no test command and the gate passed on build and review alone. A code change verified without a test step now always needs an approval (§56), and standard-library Python projects are detected (`python -m unittest` when `test_*.py` files exist).
+5. **The orchestrator could not see its project**: the read-only checkout at `/projects/<slug>` was mounted, but Claude Code limits file tools to its working directories and the context never named the path, so the orchestrator raised a high-impact assumption ("no workspace mounted"). Orchestrator steps now pass `--add-dir /projects/<slug>` and the context names the path.
+6. **Smoke tests 2–8 collided with the operator's Hermes port** (added in Phase 9): each now uses its own `HO_HERMES_DASHBOARD_PORT`.
+7. Backup and check scripts: SQLite backup of a WAL database needs a writable mount; `head -n -N` is not portable; `grep -q` under `pipefail` misreports; unset optional settings ended `check.sh` silently.
 
 ## Codex review (`/codex:review --base main`)
 

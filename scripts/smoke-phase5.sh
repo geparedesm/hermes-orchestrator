@@ -73,6 +73,7 @@ printf '# shop\n' > "$REPO/README.md"
 git -C "$REPO" init -q -b main && git -C "$REPO" add -A && git -C "$REPO" commit -qm "initial shop"
 printf 'HO_MACHINE_PROFILE=mac-m2-pro\nHO_PROJECTS_ROOT_HOST=%s\nHO_VERSION=dev\nHO_PROVIDER_IDENTITY=%s\nHO_PROJECT_SECRETS_HOST=%s\n' \
   "$ROOT" "$IDENTITY" "$WORK/project-secrets" > "$ENV_FILE"
+echo "HO_HERMES_DASHBOARD_PORT=19205" >> "$ENV_FILE"  # never collide with the operator stack's Hermes
 docker volume create --label "ho.credential=codex/$IDENTITY" "cred-codex-$IDENTITY" >/dev/null
 dc up -d --build --wait >/dev/null
 ho project register "$REPO" >/dev/null

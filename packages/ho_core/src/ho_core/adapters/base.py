@@ -56,6 +56,7 @@ class AgentAssignment:
     max_turns: int = 60
     model: str | None = None
     result_schema: str = "agent-result"  # or "review-result" for cross-reviews
+    read_dirs: tuple[str, ...] = ()  # read-only project checkouts granted to the orchestrator (/projects/<slug>)
 
 
 @dataclass(frozen=True)

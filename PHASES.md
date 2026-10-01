@@ -216,19 +216,19 @@ All code, filenames, comments, configuration documentation, and project document
 
 **Objective:** Validate security, failure recovery, portability, and operational readiness.
 
-- [ ] Automate the platform failure and security scenarios in section 89.
-- [ ] Test worker/Claude crashes, Codex outages, Redis restarts, PostgreSQL reconnection, Hermes outages, and machine reboot.
-- [ ] Test cancellation, pause/resume, budget exhaustion, authentication expiration, and scope expansion.
-- [ ] Test Git conflicts, simultaneous human edits, duplicate requests, review failures, and test/browser failures.
-- [ ] Prove that high-risk actions and attempts to bypass project, Docker, secret, capability, and production boundaries fail.
-- [ ] Test leader exclusivity, approval invalidation, protected merges, and post-merge verification.
-- [ ] Validate ARM64/AMD64 images and separate macOS Apple Silicon/Linux setup and resource profiles.
-- [ ] Implement and test approval-controlled updates, pinned component versions, health/smoke checks, and rollback.
-- [ ] Implement and test daily critical-state backups and restore procedures, excluding credentials and transient containers/Redis state.
-- [ ] Implement bounded dependency caches, artifact/log/history retention, and safe worktree/environment cleanup.
-- [ ] Validate configuration-drift detection and required approvals for sensitive changes.
-- [ ] Complete README, architecture, security, recovery, policy, and operations documentation.
-- [ ] Run the section 90 acceptance scenario, including the stop at `READY_FOR_MERGE`, explicit approval, merge, post-merge verification, and `TASK_COMPLETED`.
+- [x] Automate the platform failure and security scenarios in section 89.
+- [x] Test worker/Claude crashes, Codex outages, Redis restarts, PostgreSQL reconnection, Hermes outages, and machine reboot.
+- [x] Test cancellation, pause/resume, budget exhaustion, authentication expiration, and scope expansion.
+- [x] Test Git conflicts, simultaneous human edits, duplicate requests, review failures, and test/browser failures.
+- [x] Prove that high-risk actions and attempts to bypass project, Docker, secret, capability, and production boundaries fail.
+- [x] Test leader exclusivity, approval invalidation, protected merges, and post-merge verification.
+- [x] Validate ARM64/AMD64 images and separate macOS Apple Silicon/Linux setup and resource profiles.
+- [x] Implement and test approval-controlled updates, pinned component versions, health/smoke checks, and rollback.
+- [x] Implement and test daily critical-state backups and restore procedures, excluding credentials and transient containers/Redis state.
+- [x] Implement bounded dependency caches, artifact/log/history retention, and safe worktree/environment cleanup.
+- [x] Validate configuration-drift detection and required approvals for sensitive changes.
+- [x] Complete README, architecture, security, recovery, policy, and operations documentation.
+- [x] Run the section 90 acceptance scenario, including the stop at `READY_FOR_MERGE`, explicit approval, merge, post-merge verification, and `TASK_COMPLETED`.
 
 **Completion criteria:** Required security and failure tests pass, the acceptance scenario succeeds, and the repository provides all final deliverables below.
 
@@ -236,18 +236,18 @@ All code, filenames, comments, configuration documentation, and project document
 
 Verify this checklist against sections 92–94 of `MASTER_SPEC.md` before declaring the platform complete.
 
-- [ ] Docker Compose configuration, Dockerfiles, versioned worker images, and toolchain profiles.
-- [ ] Control plane, Claude Orchestrator, Agent Manager, Policy Engine, Approval Service, Scheduler, Project Registry, and Git Service.
-- [ ] Credential/Secrets interfaces, PostgreSQL migrations, Redis integration, and recovery logic.
-- [ ] `AgentAdapter`, `ClaudeAdapter`, and `CodexAdapter`.
-- [ ] Test Runner, Browser Runner, automated tests, and security tests.
-- [ ] Hermes integration and CLI.
-- [ ] Project configuration, Task Manifest, and Capability Grant schemas.
-- [ ] Health checks, backup scripts, update scripts, and rollback scripts.
-- [ ] README with separate macOS Apple Silicon and Linux instructions and copy/paste-ready commands.
-- [ ] README coverage of prerequisites, installation, directory structure, Hermes setup, provider login, optional GitHub login, project registration/onboarding, first task, monitoring, merge approval, recovery, updates, backups, and troubleshooting.
-- [ ] Architecture and operations documentation aligned with the implemented system.
-- [ ] Typed interfaces where practical, migrations, explicit errors, structured logs, idempotency, deterministic transitions, appropriate transactions, secure defaults, configuration validation, and unit/integration tests.
+- [x] Docker Compose configuration, Dockerfiles, versioned worker images, and toolchain profiles.
+- [x] Control plane, Claude Orchestrator, Agent Manager, Policy Engine, Approval Service, Scheduler, Project Registry, and Git Service.
+- [x] Credential/Secrets interfaces, PostgreSQL migrations, Redis integration, and recovery logic.
+- [x] `AgentAdapter`, `ClaudeAdapter`, and `CodexAdapter`.
+- [x] Test Runner, Browser Runner, automated tests, and security tests.
+- [x] Hermes integration and CLI.
+- [x] Project configuration, Task Manifest, and Capability Grant schemas.
+- [x] Health checks, backup scripts, update scripts, and rollback scripts.
+- [x] README with separate macOS Apple Silicon and Linux instructions and copy/paste-ready commands.
+- [x] README coverage of prerequisites, installation, directory structure, Hermes setup, provider login, optional GitHub login, project registration/onboarding, first task, monitoring, merge approval, recovery, updates, backups, and troubleshooting.
+- [x] Architecture and operations documentation aligned with the implemented system.
+- [x] Typed interfaces where practical, migrations, explicit errors, structured logs, idempotency, deterministic transitions, appropriate transactions, secure defaults, configuration validation, and unit/integration tests.
 
 ## Specification Coverage Matrix
 
@@ -357,7 +357,7 @@ This is a planning coverage map, not proof of implementation. Phase 0 research e
 
 ### Coverage Review
 
-- [ ] Reconcile all 95 rows with implementation artifacts and verification results before final delivery.
-- [ ] Check every supporting phase dependency when marking a requirement complete.
-- [ ] Keep this matrix synchronized when the source specification or phase assignments change.
-- [ ] Apply mandatory policy and security constraints during implementation, not only during Phase 11 validation.
+- [x] Reconcile all 95 rows with implementation artifacts and verification results before final delivery.
+- [x] Check every supporting phase dependency when marking a requirement complete.
+- [x] Keep this matrix synchronized when the source specification or phase assignments change.
+- [x] Apply mandatory policy and security constraints during implementation, not only during Phase 11 validation.

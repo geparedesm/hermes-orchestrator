@@ -230,6 +230,7 @@ class Executions:
                 workspace=caps_granted["workspace"], git=caps_granted["git"],
                 resume_session=resume_row["provider_session_id"] if resume_row else None,
                 max_turns=req.max_turns, model=req.model, result_schema=req.result_schema,
+                read_dirs=tuple(f"/projects/{slug}" for slug in caps_granted.get("project_read") or ()),
             ))
             command, inputs = plan.command, {**inputs, **plan.inputs}
             image = req.image or plan.image
