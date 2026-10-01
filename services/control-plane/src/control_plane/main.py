@@ -32,7 +32,8 @@ def build_app(settings: Settings):
         provider_identity=settings.provider_identity,
         merge_key=settings.merge_key,
     )
-    services = build_services(ctx, Authenticator(settings.tokens), run_scheduler=settings.run_scheduler)
+    services = build_services(ctx, Authenticator(settings.tokens), run_scheduler=settings.run_scheduler,
+                              orchestration=settings.orchestration)
     return create_app(services)
 
 

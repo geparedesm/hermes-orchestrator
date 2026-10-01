@@ -159,7 +159,7 @@ def image_suffix(profiles: Iterable[str]) -> str:
     return "-".join(chosen) or "generic"
 
 
-RESULT_SCHEMAS = (RESULT_SCHEMA, "review-result")
+RESULT_SCHEMAS = (RESULT_SCHEMA, "review-result", "orchestrator-step")
 
 
 def result_schema(name: str = RESULT_SCHEMA) -> dict[str, Any]:

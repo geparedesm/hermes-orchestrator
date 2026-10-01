@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import socket
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
@@ -36,6 +38,8 @@ class Context:
     provider_identity: str = "default"
     # Signs merge authorizations for Git Service (HO_MERGE_KEY_FILE).
     merge_key: bytes = b""
+    # Identifies this control-plane process as a lease holder.
+    instance_id: str = field(default_factory=lambda: f"{socket.gethostname()}-{os.getpid()}")
 
     @property
     def policy_version(self) -> str:

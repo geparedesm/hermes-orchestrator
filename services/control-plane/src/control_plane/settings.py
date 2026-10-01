@@ -40,6 +40,8 @@ class Settings:
     # Provider identity whose credential volume executions use (cred-<provider>-<identity>).
     provider_identity: str = "default"
     merge_key: bytes = b""
+    # Phase 7: lead READY tasks with the multi-agent orchestrator (off: tasks wait for manual work).
+    orchestration: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -79,6 +81,7 @@ class Settings:
             bind_port=int(env.get("HO_PORT", "8080")),
             provider_identity=env.get("HO_PROVIDER_IDENTITY") or "default",
             merge_key=(_read_secret(env.get("HO_MERGE_KEY_FILE")) or "").encode(),
+            orchestration=env.get("HO_ORCHESTRATION", "false").lower() == "true",
         )
 
     def platform_config(self) -> dict:
