@@ -25,7 +25,7 @@ current="$(dc exec -T postgres psql -U ho_owner -d ho -tAc 'SELECT version_num F
 [[ -n "$head" && "$head" == "$current" ]] || fail "database schema $current is not the code's head ${head:-?}"
 plugins="$(dc exec -T -e HERMES_HOME=/opt/data hermes hermes plugins list 2>/dev/null || true)"
 grep -qiE 'orchestration.*enabled' <<<"$plugins" || fail "Hermes's orchestration plugin is not enabled"
-port="$(grep -E '^HO_HERMES_DASHBOARD_PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2)"
+port="$(grep -E '^HO_HERMES_DASHBOARD_PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || true)"
 code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port:-9119}/api/auth/providers" || true)"
 [[ "$code" == "200" ]] || fail "Hermes Dashboard returned $code"
 echo "check passed: control plane ready, dependencies healthy, schema $current, Hermes plugin and Dashboard up"
