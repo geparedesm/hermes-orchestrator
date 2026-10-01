@@ -44,7 +44,8 @@ class Settings:
     orchestration: bool = False
     # Outbox delivery to Hermes (Phase 9 wires the receiving side); unset: notifications wait in the outbox.
     hermes_webhook_url: str | None = None
-    hermes_webhook_token: str | None = None
+    hermes_webhook_secret: str | None = None  # HMAC V2 key shared with the Hermes webhook route
+    extra_approvers: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -86,7 +87,8 @@ class Settings:
             merge_key=(_read_secret(env.get("HO_MERGE_KEY_FILE")) or "").encode(),
             orchestration=env.get("HO_ORCHESTRATION", "false").lower() == "true",
             hermes_webhook_url=env.get("HO_HERMES_WEBHOOK_URL") or None,
-            hermes_webhook_token=_read_secret(env.get("HO_HERMES_WEBHOOK_TOKEN_FILE")),
+            hermes_webhook_secret=_read_secret(env.get("HO_HERMES_WEBHOOK_SECRET_FILE")),
+            extra_approvers=tuple(a.strip() for a in env.get("HO_APPROVERS", "").split(",") if a.strip()),
         )
 
     def platform_config(self) -> dict:
@@ -94,4 +96,7 @@ class Settings:
         if self.projects_root_host:
             # The Compose mount and the control plane must agree on the root.
             config["platform"]["projects_root_host"] = self.projects_root_host
+        if self.extra_approvers:
+            # Chat identities allowed to approve (for example telegram:<user id>), set by the operator in .env.
+            config["platform"]["approvers"] = sorted(set(config["platform"]["approvers"]) | set(self.extra_approvers))
         return config

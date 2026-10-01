@@ -1,0 +1,11 @@
+{
+  "name": "orchestration",
+  "label": "Orchestration",
+  "description": "hermes-orchestrator tasks, approvals, and progress.",
+  "icon": "Puzzle",
+  "version": "0.9.0",
+  "tab": { "path": "/orchestration", "position": "end" },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}

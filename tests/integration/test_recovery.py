@@ -7,10 +7,10 @@ from __future__ import annotations
 import json
 import shutil
 
-import httpx
 import pytest
 from control_plane.agentmgr import AgentManagerError
-from control_plane.recovery import DEGRADED_AFTER, backoff_seconds
+from control_plane.notifications import backoff_seconds
+from control_plane.recovery import DEGRADED_AFTER
 
 from fake_agents import FakeAgentManager  # type: ignore[import-not-found]
 from test_git import clone, commit, set_state, workspace  # type: ignore[import-not-found]
@@ -158,29 +158,6 @@ def test_repeated_agent_manager_failures_degrade_and_hold_dispatch(api, services
     assert types.index("PLATFORM_DEGRADED") < types.index("PLATFORM_RECOVERED")
 
 
-def test_outbox_waits_for_hermes_and_delivers_in_order(api, services, agents, task):
-    received, up = [], {"value": False}
-
-    def hermes(request: httpx.Request) -> httpx.Response:
-        if not up["value"]:
-            return httpx.Response(503)
-        received.append(json.loads(request.content))
-        return httpx.Response(204)
-
-    outbox = services.outbox
-    outbox.url, outbox.client = "http://hermes.test/notify", httpx.Client(transport=httpx.MockTransport(hermes))
-    pending = q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'PENDING'")[0]["n"]
-    assert pending > 0
-    assert outbox.deliver() == {"sent": 0, "failed": 1}  # Hermes down: one attempt, then back off
-    [first] = q(services, "SELECT * FROM notifications WHERE attempts = 1")
-    assert first["state"] == "PENDING" and first["last_error"]
-    up["value"] = True
-    q(services, "UPDATE notifications SET next_attempt_at = now()")
-    assert outbox.deliver()["sent"] == pending
-    assert q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'PENDING'")[0]["n"] == 0
-    assert received[0]["id"] == str(first["id"])
-
-
 def test_backoff_schedule():
     assert [backoff_seconds(n) for n in (1, 2, 3, 4)] == [10, 20, 40, 80]
     assert backoff_seconds(20) == 900
@@ -295,15 +272,3 @@ def test_orphaned_networks_without_containers_are_removed(api, services, agents,
     agents.networks.append({"name": "ho-x-net", "labels": {"ho.execution": "01a0f000-0000-7000-8000-000000000002"}})
     assert services.recovery.run("PERIODIC")["orphans"]["removed"] == 1
     assert agents.networks == []
-
-
-def test_outbox_head_backoff_gates_later_notifications(api, services, agents, task):
-    calls = []
-    outbox = services.outbox
-    outbox.url = "http://hermes.test/notify"
-    outbox.client = httpx.Client(transport=httpx.MockTransport(lambda r: calls.append(r) or httpx.Response(503)))
-    outbox.deliver()
-    assert len(calls) == 1
-    outbox.deliver()  # the head is backing off: no request, and nothing later jumps ahead
-    assert len(calls) == 1
-    assert q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'SENT'")[0]["n"] == 0

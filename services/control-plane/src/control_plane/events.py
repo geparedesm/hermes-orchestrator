@@ -1,8 +1,8 @@
 """Event log and notification outbox (DATA_MODEL.md sections 3.8 and 7).
 
 Events are written in the same transaction as the state change they describe.
-Attention events also get an outbox row for immediate delivery through Hermes
-(Phase 9); routine events are aggregated later.
+Attention events get an outbox row delivered through Hermes immediately; curated routine events
+are aggregated into a digest; other events are audit only (no notification).
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from psycopg import Cursor
 
 from .db import Row, jsonb
 
+# Delivered through Hermes immediately, one message each (MASTER_SPEC section 74; PHASES.md Phase 9).
 ATTENTION_EVENTS = frozenset(
     {
         "APPROVAL_REQUIRED",
@@ -25,7 +26,29 @@ ATTENTION_EVENTS = frozenset(
         "READY_FOR_MERGE",
         "RECOVERY_FAILED",
         "TASK_COMPLETED",
-        "DEGRADED",
+        "TASK_FAILED",
+        "PLATFORM_DEGRADED",
+    }
+)
+# Aggregated into a periodic digest. Everything else (grants, workers, routing, steps) is audit only.
+ROUTINE_EVENTS = frozenset(
+    {
+        "TASK_CREATED",
+        "TASK_CANCELLED",
+        "PROJECT_READY",
+        "PLAN_VERSIONED",
+        "SUBTASK_ACCEPTED",
+        "INTEGRATION_COMPLETED",
+        "TEST_PASSED",
+        "REVIEW_PASSED",
+        "REVIEW_FAILED",
+        "PR_CREATED",
+        "MERGE_COMPLETED",
+        "BUDGET_THRESHOLD",
+        "FAILOVER_COMPLETED",
+        "ORCHESTRATOR_FAILBACK",
+        "PLATFORM_RECOVERED",
+        "REQUIREMENTS_REVISED",
     }
 )
 AUDIT_EVENTS = frozenset(
@@ -82,11 +105,12 @@ def record_event(
         "task_id": str(task_id) if task_id else None,
         "occurred_at": row["occurred_at"].isoformat(),
     }
-    priority = "ATTENTION" if event_type in ATTENTION_EVENTS else "ROUTINE"
-    cur.execute(
-        "INSERT INTO notifications (id, event_seq, priority, payload, state) VALUES (%s, %s, %s, %s, 'PENDING')",
-        (uuid7(), row["seq"], priority, jsonb(payload)),
-    )
+    if event_type in ATTENTION_EVENTS or event_type in ROUTINE_EVENTS:
+        priority = "ATTENTION" if event_type in ATTENTION_EVENTS else "ROUTINE"
+        cur.execute(
+            "INSERT INTO notifications (id, event_seq, priority, payload, state) VALUES (%s, %s, %s, %s, 'PENDING')",
+            (uuid7(), row["seq"], priority, jsonb({**payload, "data": data or {}})),
+        )
     if pending is not None:
         pending.append(payload)
     return int(row["seq"])

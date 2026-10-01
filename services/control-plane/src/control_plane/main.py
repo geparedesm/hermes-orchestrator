@@ -34,7 +34,7 @@ def build_app(settings: Settings):
     )
     services = build_services(ctx, Authenticator(settings.tokens), run_scheduler=settings.run_scheduler,
                               orchestration=settings.orchestration, hermes_webhook_url=settings.hermes_webhook_url,
-                              hermes_webhook_token=settings.hermes_webhook_token)
+                              hermes_webhook_secret=settings.hermes_webhook_secret)
     return create_app(services)
 
 

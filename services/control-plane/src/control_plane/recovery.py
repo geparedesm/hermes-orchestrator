@@ -6,8 +6,6 @@ never resurrected; every recovery decision is an event.
 Checkpoints     a snapshot of a task's durable state at every state change, accepted step, and result.
 Health          consecutive failures of Agent Manager, Git Service, Redis, and Hermes; DEGRADED after a
                 threshold, with attention events on both edges.
-Outbox          delivers pending notifications to Hermes with capped exponential backoff; while Hermes is
-                unreachable they stay pending and authorized work continues.
 Recovery        reconciliation at startup (before the scheduler's first pass), periodically, and on demand:
                 executions vs managed containers, orphaned resources, stale intents, missing workspaces,
                 verifications never launched, ended tasks' leases and queued launches, cancelled work retained.
@@ -21,7 +19,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-import httpx
 from ho_core.ids import uuid7
 from ho_core.statemachine import TERMINAL_STATES
 
@@ -39,8 +36,6 @@ log = logging.getLogger(__name__)
 DEGRADED_AFTER = 3  # consecutive failed checks
 INTENT_GRACE = timedelta(minutes=2)
 PERIODIC_EVERY = 12  # scheduler passes between periodic reconciliations
-OUTBOX_BATCH = 50
-OUTBOX_MAX_DELAY = 900  # seconds
 
 
 # ------------------------------------------------------------------ checkpoints
@@ -151,61 +146,6 @@ class Health:
         return {"state": "DEGRADED" if any(r["state"] == "DEGRADED" for r in rows) else "HEALTHY",
                 "components": {r["component"]: {"state": r["state"], "consecutive_failures": r["consecutive_failures"],
                                                 "last_error": r["last_error"], "since": r["since"]} for r in rows}}
-
-
-# ------------------------------------------------------------------ outbox
-
-
-def backoff_seconds(attempts: int) -> int:
-    """10 s, 20 s, 40 s, ... capped at 15 minutes: notifications are retried until Hermes returns."""
-    return min(10 * 2 ** max(0, attempts - 1), OUTBOX_MAX_DELAY)
-
-
-class Outbox:
-    def __init__(self, ctx: Context, health: Health, url: str | None, token: str | None,
-                 client: httpx.Client | None = None) -> None:
-        self.ctx = ctx
-        self.health = health
-        self.url = url
-        self.token = token
-        self.client = client or httpx.Client(timeout=5)
-
-    def deliver(self) -> dict[str, int]:
-        stats = {"sent": 0, "failed": 0}
-        if not self.url:
-            return stats  # Hermes integration (Phase 9) not configured: notifications wait in the outbox
-        with self.ctx.unit_of_work() as uow:
-            # Strict order: the oldest pending notification (attention first) gates the rest, and its backoff is
-            # the outbox's backoff while Hermes is unreachable.
-            uow.cur.execute("SELECT *, next_attempt_at <= now() AS due FROM notifications WHERE state = 'PENDING' "
-                            "ORDER BY priority, created_at LIMIT %s", (OUTBOX_BATCH,))
-            rows = uow.cur.fetchall()
-        if not rows or not rows[0]["due"]:
-            return stats
-        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-        for row in rows:
-            try:
-                response = self.client.post(self.url, json={"id": str(row["id"]), "priority": row["priority"],
-                                                            "event_seq": row["event_seq"], "payload": row["payload"]}, headers=headers)
-                response.raise_for_status()
-                error = None
-            except httpx.HTTPError as exc:
-                error = str(exc)[:300] or type(exc).__name__
-            with self.ctx.unit_of_work() as uow:
-                if error is None:
-                    uow.cur.execute("UPDATE notifications SET state = 'SENT', delivered_at = now(), attempts = attempts + 1, "
-                                    "last_error = NULL WHERE id = %s", (row["id"],))
-                    stats["sent"] += 1
-                else:
-                    attempts = int(row["attempts"]) + 1
-                    uow.cur.execute("UPDATE notifications SET attempts = %s, last_error = %s, next_attempt_at = now() + %s "
-                                    "WHERE id = %s", (attempts, error, timedelta(seconds=backoff_seconds(attempts)), row["id"]))
-                    stats["failed"] += 1
-            if error is not None:
-                self.health.record("hermes", False, error)
-                break  # Hermes is down: keep the order, try again after the backoff
-            self.health.record("hermes", True)
-        return stats
 
 
 # ------------------------------------------------------------------ recovery controller

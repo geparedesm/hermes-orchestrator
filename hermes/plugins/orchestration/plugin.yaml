@@ -1,0 +1,11 @@
+name: orchestration
+version: 0.9.0
+description: "hermes-orchestrator: create and follow platform tasks, decide approvals, and receive task notifications. A thin client of the orchestrator Task API; it stores no task state."
+author: "hermes-orchestrator"
+provides_tools:
+  - orch_task_create
+  - orch_task_status
+  - orch_task_list
+  - orch_task_inspect
+  - orch_project_list
+  - orch_approvals_list
