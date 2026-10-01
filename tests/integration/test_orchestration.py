@@ -166,14 +166,21 @@ def test_plan_runs_the_subtask_cycle_to_ready_for_merge(api, services, agents, r
     assert inspect["lease"]["epoch"] == 1 and inspect["subtasks"][0]["state"] == "ACCEPTED"
 
 
-def test_wait_without_new_events_does_not_loop(api, services, agents, task):
+def test_wait_while_work_runs_does_not_loop(api, services, agents, task):
+    plan_and_start(services, agents, task)  # a developer is running
+    q(services, "UPDATE tasks SET step_requested = true")
+    services.scheduler.run_once()
     step(services, agents, task, {"type": "WAIT"})
     for _ in range(3):
         services.scheduler.run_once()
-    assert len(executions(services, task, "ORCHESTRATOR")) == 1
-    api.post(f"/v1/tasks/{task}/revise", {"text": "Also greet in Spanish."})
-    services.scheduler.run_once()
-    assert len(executions(services, task, "ORCHESTRATOR")) == 2  # an external event triggers the next step
+    assert len(executions(services, task, "ORCHESTRATOR")) == 2 and state(api, task) == "RUNNING"
+
+
+def test_steps_that_leave_nothing_running_are_bounded(api, services, agents, task):
+    for _ in range(3):
+        step(services, agents, task, {"type": "WAIT"})
+    assert state(api, task) == "BLOCKED"
+    assert "STEP_STALLED" in [r["type"] for r in q(services, "SELECT type FROM events")]
 
 
 def test_actions_from_a_stale_epoch_are_rejected(api, services, agents, task):

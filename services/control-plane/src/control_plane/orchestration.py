@@ -403,12 +403,12 @@ class Orchestration:
             lines += ["## Assumptions", ""] + [f"- [{a['level']}, {a['status']}] {a['assumption'][:300]}" for a in assumptions] + [""]
         subtasks = self._subtasks(uow, task)
         if subtasks:
-            lines += ["## Plan", ""]
+            lines += ["## Plan (refer to subtasks by their own key, the first word; keep these keys in a revised plan)", ""]
             for s in subtasks:
                 uow.cur.execute("SELECT key FROM subtasks WHERE id IN (SELECT depends_on_subtask_id FROM subtask_dependencies "
                                 "WHERE subtask_id = %s)", (s["id"],))
                 deps = [d["key"] for d in uow.cur.fetchall()]
-                lines.append(f"- {s['key']} ({s['local_key']}) {s['state']} {s['kind']} risk {s['risk']}"
+                lines.append(f"- {s['local_key']} [{s['key']}] {s['state']} {s['kind']} risk {s['risk']}"
                              f"{' dev ' + s['developer_provider'] if s['developer_provider'] else ''}"
                              f"{' deps ' + ','.join(deps) if deps else ''}: {s['title']}"
                              f"{' — ' + s['state_reason'] if s['state_reason'] else ''}")
@@ -472,26 +472,33 @@ class Orchestration:
             rejected = rejected or outcome == "REJECTED"
         self._after_step(uow, task["id"], rejected)
 
+    def _integration_due(self, uow: UnitOfWork, task: Row) -> bool:
+        """All subtasks accepted on a RUNNING task: integration starts after this transaction commits."""
+        subtasks = self._subtasks(uow, task)
+        return task["state"] == S.RUNNING and bool(subtasks) and all(
+            s["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for s in subtasks)
+
     def _after_step(self, uow: UnitOfWork, task_id: UUID, rejected: bool) -> None:
         """A step whose actions were rejected and that left nothing running would stall the task: decide again
         with the rejections as feedback, a bounded number of times (they count as orchestrator failures)."""
         task = self._task(uow, task_id)
-        if not rejected:
+        if S(task["state"]) not in STEP_STATES or self._integration_due(uow, task):
             uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0 WHERE id = %s", (task_id,))
-            return
-        if S(task["state"]) not in STEP_STATES:
             return
         uow.cur.execute("SELECT 1 FROM executions WHERE task_id = %s AND state = ANY(%s) AND role <> 'ORCHESTRATOR' "
                         "UNION ALL SELECT 1 FROM pending_launches WHERE task_id = %s UNION ALL "
                         "SELECT 1 FROM verifications WHERE task_id = %s AND state IN ('PREPARING', 'RUNNING') LIMIT 1",
                         (task["id"], list(ACTIVE), task["id"], task["id"]))
         if uow.cur.fetchone() is not None:
+            uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0 WHERE id = %s", (task_id,))
             return  # something is in flight; its result will trigger the next step
+        self._event(uow, task, "STEP_STALLED", "your last step left nothing running" + (" (some actions were rejected)" if rejected
+                    else "") + ": start READY subtasks with REQUEST_EXECUTION, fix the plan, or REPORT_BLOCKED")
         uow.cur.execute("UPDATE tasks SET orchestrator_failures = orchestrator_failures + 1 WHERE id = %s "
                         "RETURNING orchestrator_failures", (task["id"],))
         failures = int(uow.cur.fetchone()["orchestrator_failures"])  # type: ignore[index]
         if failures >= MAX_STEP_FAILURES:
-            self._move(uow, task, S.BLOCKED, reason=f"the orchestrator's actions were rejected {failures} times in a row")
+            self._move(uow, task, S.BLOCKED, reason=f"{failures} orchestrator steps in a row left nothing running")
         else:
             uow.cur.execute("UPDATE tasks SET step_requested = true WHERE id = %s", (task["id"],))
 
@@ -702,6 +709,8 @@ class Orchestration:
                            "verification and reviews run automatically")
         if subtask["state"] not in ("READY", "FIX_REQUIRED"):
             raise Conflict(f"{subtask['key']} is {subtask['state']}")
+        if task["state"] == S.PLANNING and task["current_plan_version"]:
+            task = self._move(uow, task, S.QUEUED, reason="plan accepted")  # a plan exists (for example after a release)
         if task["state"] not in (S.QUEUED, S.RUNNING, S.FIX_REQUIRED):
             raise Conflict(f"{task['key']} is {task['state']}")
         provider = action.get("provider") or subtask["preferred_provider"]
