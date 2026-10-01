@@ -384,7 +384,7 @@ class Orchestration:
                  "and approvals. The platform automatically runs cross-review by the other provider after each developer",
                  "execution, fix cycles, integration, verification, integration reviews, and the Quality Gate: do not ask for",
                  "those. Plan small, independent subtasks with accurate `files`; request DEVELOPER executions only for READY",
-                 "subtasks; use WAIT when nothing needs deciding. Record assumptions instead of guessing silently; HIGH or",
+                 "subtasks; use WAIT when nothing needs deciding. Every subtask kind, TEST_AUTHORING included, runs with role DEVELOPER. Record assumptions instead of guessing silently; HIGH or",
                  "irreversible ambiguity needs RECORD_ASSUMPTION with level HIGH (a human decides).", "",
                  "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], ""]
         if task["current_requirements_version"]:
@@ -452,10 +452,11 @@ class Orchestration:
                 self._record_action(uow, task, execution, purpose["epoch"], seq, action, "REJECTED", f"task is {task['state']}")
             uow.cur.execute("UPDATE tasks SET step_requested = true WHERE id = %s", (task["id"],))
             return
-        uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0, orchestrator_cursor_seq = GREATEST(orchestrator_cursor_seq, %s) "
+        uow.cur.execute("UPDATE tasks SET orchestrator_cursor_seq = GREATEST(orchestrator_cursor_seq, %s) "
                         "WHERE id = %s", (purpose["cursor"], task["id"]))
         self._event(uow, task, "ORCHESTRATOR_STEP", (result.structured or {}).get("summary", "")[:300] or "step completed",
                     {"execution_id": str(execution["id"]), "actions": [a.get("type") for a in actions[:MAX_ACTIONS]]})
+        rejected = False
         for seq, action in enumerate(actions[:MAX_ACTIONS]):
             task = self._task(uow, task["id"])
             try:
@@ -465,6 +466,31 @@ class Orchestration:
             except (ApiError, ValueError) as exc:
                 outcome, reason = "REJECTED", str(getattr(exc, "message", exc))[:300]
             self._record_action(uow, task, execution, purpose["epoch"], seq, action, outcome, reason)
+            rejected = rejected or outcome == "REJECTED"
+        self._after_step(uow, task["id"], rejected)
+
+    def _after_step(self, uow: UnitOfWork, task_id: UUID, rejected: bool) -> None:
+        """A step whose actions were rejected and that left nothing running would stall the task: decide again
+        with the rejections as feedback, a bounded number of times (they count as orchestrator failures)."""
+        task = self._task(uow, task_id)
+        if not rejected:
+            uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0 WHERE id = %s", (task_id,))
+            return
+        if S(task["state"]) not in STEP_STATES:
+            return
+        uow.cur.execute("SELECT 1 FROM executions WHERE task_id = %s AND state = ANY(%s) AND role <> 'ORCHESTRATOR' "
+                        "UNION ALL SELECT 1 FROM pending_launches WHERE task_id = %s UNION ALL "
+                        "SELECT 1 FROM verifications WHERE task_id = %s AND state IN ('PREPARING', 'RUNNING') LIMIT 1",
+                        (task["id"], list(ACTIVE), task["id"], task["id"]))
+        if uow.cur.fetchone() is not None:
+            return  # something is in flight; its result will trigger the next step
+        uow.cur.execute("UPDATE tasks SET orchestrator_failures = orchestrator_failures + 1 WHERE id = %s "
+                        "RETURNING orchestrator_failures", (task["id"],))
+        failures = int(uow.cur.fetchone()["orchestrator_failures"])  # type: ignore[index]
+        if failures >= MAX_STEP_FAILURES:
+            self._move(uow, task, S.BLOCKED, reason=f"the orchestrator's actions were rejected {failures} times in a row")
+        else:
+            uow.cur.execute("UPDATE tasks SET step_requested = true WHERE id = %s", (task["id"],))
 
     def _record_action(self, uow: UnitOfWork, task: Row, execution: Row, epoch: int, seq: int, action: dict[str, Any],
                        outcome: str, reason: str | None) -> None:
@@ -662,11 +688,13 @@ class Orchestration:
             """, (task["id"],))
 
     def _request_execution(self, uow: UnitOfWork, task: Row, epoch: int, action: dict[str, Any]) -> str:
-        if action.get("role") not in (None, "DEVELOPER"):
-            raise Conflict("only DEVELOPER executions are requested by the orchestrator; testing and reviews run automatically")
         subtask = self._subtask(uow, task, action.get("subtask"))
         if subtask is None:
             raise Conflict(f"unknown subtask {action.get('subtask')!r}")
+        # Writing tests is development work: a TESTER request for a TEST_AUTHORING subtask runs as DEVELOPER.
+        if action.get("role") not in (None, "DEVELOPER") and not (action.get("role") == "TESTER" and subtask["kind"] == "TEST_AUTHORING"):
+            raise Conflict("only DEVELOPER executions are requested by the orchestrator (TEST_AUTHORING subtasks included); "
+                           "verification and reviews run automatically")
         if subtask["state"] not in ("READY", "FIX_REQUIRED"):
             raise Conflict(f"{subtask['key']} is {subtask['state']}")
         if task["state"] not in (S.QUEUED, S.RUNNING, S.FIX_REQUIRED):

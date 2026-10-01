@@ -199,7 +199,7 @@ def test_invalid_actions_are_rejected_and_fed_back(api, services, agents, task):
          {"type": "ACCEPT_SUBTASK", "subtask": "a"})
     outcomes = actions(services, task)
     assert [o[1] for o in outcomes] == ["REJECTED"] * 3
-    assert "cycle" in outcomes[0][2] and "DEVELOPER" in outcomes[1][2]
+    assert "cycle" in outcomes[0][2] and "unknown subtask" in outcomes[1][2]
     api.post(f"/v1/tasks/{task}/revise", {"text": "Same request, retry."})
     services.scheduler.run_once()
     [execution] = active(services, task, "ORCHESTRATOR")
@@ -412,3 +412,17 @@ def test_results_arriving_while_paused_are_not_applied(api, services, agents, ta
     api.post(f"/v1/tasks/{task}/resume")
     services.scheduler.run_once()
     assert len(active(services, task, "ORCHESTRATOR")) == 1  # it decides again once resumed
+
+
+def test_test_authoring_runs_as_development_work(api, services, agents, task):
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("t", kind="TEST_AUTHORING")]},
+         {"type": "REQUEST_EXECUTION", "role": "TESTER", "subtask": "t", "provider": "codex"})
+    [dev] = active(services, task, "DEVELOPER")
+    assert dev["subtask_id"] == subtasks(services, task)["t"]["id"]
+
+
+def test_rejected_steps_retry_with_feedback_then_block(api, services, agents, task):
+    for _ in range(3):
+        step(services, agents, task, {"type": "ACCEPT_SUBTASK", "subtask": "missing"})
+    assert state(api, task) == "BLOCKED"
+    assert [a[1] for a in actions(services, task)] == ["REJECTED"] * 3
