@@ -230,6 +230,8 @@ All code, filenames, comments, configuration documentation, and project document
 - [x] Complete README, architecture, security, recovery, policy, and operations documentation.
 - [x] Run the section 90 acceptance scenario, including the stop at `READY_FOR_MERGE`, explicit approval, merge, post-merge verification, and `TASK_COMPLETED`.
 
+**Status:** Complete. Merged on 2026-10-02 under the operator's standing authorization (PR #12). Dependency caches, daily maintenance and retention, backups and restore, approval-controlled updates with rollback, `check.sh`, stack isolation for several stacks on one Docker host, automatic MERGE approval requests at `READY_FOR_MERGE`, and a hard rule that a code change verified without tests needs an approval. 240 unit, 146 integration, and 48 real-Docker tests, the 62-test security suite, all smoke tests (Phases 2–11), and the amd64 multi-architecture check pass. The section 90 scenario ran twice with real Claude and Codex on a local project, through Hermes, the Dashboard merge approval, post-merge verification, and `DONE` (T-10; T-11 with build, unit, and browser tests). Evidence: [docs/validation/phase-11.md](docs/validation/phase-11.md).
+
 **Completion criteria:** Required security and failure tests pass, the acceptance scenario succeeds, and the repository provides all final deliverables below.
 
 ## Final Delivery Checklist
