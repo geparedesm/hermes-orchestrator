@@ -403,3 +403,13 @@ def test_plan_expansion_needs_an_approval_bound_to_that_plan(api, services, agen
     step(services, agents, task, {"type": "SET_PLAN", "subtasks": bigger})  # the same plan, now authorized
     assert len(subtasks(services, task)) == 5
     assert q(services, "SELECT state FROM approvals WHERE id = %s", approval["id"])[0]["state"] == "CONSUMED"
+
+
+def test_results_arriving_while_paused_are_not_applied(api, services, agents, task):
+    api.post(f"/v1/tasks/{task}/pause")
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("a")]})
+    assert actions(services, task) == [("SET_PLAN", "REJECTED", "task is PAUSED")]
+    assert subtasks(services, task) == {} and len(executions(services, task, "ORCHESTRATOR")) == 1
+    api.post(f"/v1/tasks/{task}/resume")
+    services.scheduler.run_once()
+    assert len(active(services, task, "ORCHESTRATOR")) == 1  # it decides again once resumed

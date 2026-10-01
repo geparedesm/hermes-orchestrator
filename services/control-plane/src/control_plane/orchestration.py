@@ -27,7 +27,7 @@ from ho_core.adapters.base import FailureClass
 from ho_core.enums import ApprovalAction, Priority, Risk, TaskState
 from ho_core.ids import uuid7
 from ho_core.routing import ProviderStats, route
-from ho_core.statemachine import Trigger
+from ho_core.statemachine import WAITING_STATES, Trigger
 
 from . import budgets, manifests
 from .approvals import Approvals
@@ -447,6 +447,11 @@ class Orchestration:
             return
         if not result.ok:
             return  # handled in _on_execution_finished
+        if S(task["state"]) not in STEP_STATES:  # paused or waiting meanwhile: decide again when it resumes
+            for seq, action in enumerate(actions[:MAX_ACTIONS]):
+                self._record_action(uow, task, execution, purpose["epoch"], seq, action, "REJECTED", f"task is {task['state']}")
+            uow.cur.execute("UPDATE tasks SET step_requested = true WHERE id = %s", (task["id"],))
+            return
         uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0, orchestrator_cursor_seq = GREATEST(orchestrator_cursor_seq, %s) "
                         "WHERE id = %s", (purpose["cursor"], task["id"]))
         self._event(uow, task, "ORCHESTRATOR_STEP", (result.structured or {}).get("summary", "")[:300] or "step completed",
@@ -762,7 +767,13 @@ class Orchestration:
         task = self._task(uow, execution["task_id"])
         uow.cur.execute("SELECT * FROM subtasks WHERE id = %s FOR UPDATE", (execution["subtask_id"],))
         subtask = uow.cur.fetchone()
-        if subtask is None or subtask["state"] != "IN_PROGRESS" or S(task["state"]) not in (S.RUNNING, S.FIX_REQUIRED, S.QUEUED):
+        if subtask is None or subtask["state"] != "IN_PROGRESS":
+            return
+        if S(task["state"]) not in (S.RUNNING, S.FIX_REQUIRED, S.QUEUED):
+            if S(task["state"]) not in WAITING_STATES or failure == "AUTH":
+                return  # AUTH: the Phase 4 flow continues this execution after the login
+            self._set_subtask(uow, subtask, "FIX_REQUIRED", f"developer {state.lower()} while the task was {task['state']}")
+            uow.cur.execute("UPDATE tasks SET step_requested = true WHERE id = %s", (task["id"],))
             return
         config = self._config(uow, task)
         retries = config.get("retries") or {}
@@ -846,6 +857,14 @@ class Orchestration:
         uow.cur.execute("SELECT * FROM subtasks WHERE id = %s FOR UPDATE", (review["subtask_id"],))
         subtask = uow.cur.fetchone()
         if subtask is None or subtask["state"] != "IN_REVIEW":
+            return
+        if S(task["state"]) in WAITING_STATES:  # no launches now; the orchestrator decides when the task resumes
+            approved = review["outcome"] == "APPROVED" and review["requirements_met"]
+            self._set_subtask(uow, subtask, "ACCEPTED" if approved else "FIX_REQUIRED",
+                              f"review by {review['reviewer_provider']}: {review['outcome'].lower()} (task was {task['state']})")
+            if approved:
+                self._refresh_ready(uow, task)
+            uow.cur.execute("UPDATE tasks SET step_requested = true WHERE id = %s", (task["id"],))
             return
         config = self._config(uow, task)
         if review["outcome"] == "APPROVED" and review["requirements_met"]:
