@@ -4,7 +4,7 @@ Local-first multi-agent platform: Claude Code and Codex work in isolated Docker 
 
 ## Status
 
-Phases 0–8 merged (PRs #2–#9); orchestration is opt-in with `HO_ORCHESTRATION=true`; recovery procedures in `docs/recovery.md`. Evidence per phase: `docs/validation/phase-N.md`. Next: 9 Hermes integration, 10 dashboard, 11 hardening.
+Phases 0–9 merged (PRs #2–#10); Hermes integration in `hermes/` (docs/hermes.md); orchestration is opt-in with `HO_ORCHESTRATION=true`; recovery procedures in `docs/recovery.md`. Evidence per phase: `docs/validation/phase-N.md`. Next: 10 dashboard, 11 hardening.
 
 ## Architecture decisions (ARCHITECTURE.md §2)
 
@@ -41,11 +41,12 @@ Phases 0–8 merged (PRs #2–#9); orchestration is opt-in with `HO_ORCHESTRATIO
 | `services/control-plane/.../` | `app.py` (API), `cli.py` (`ho`), `tasks`, `projects`, `approvals`, `scheduler` (+hooks), `executions` (grants, dispatch, sync, finalize), `credentials`, `gitops` (workspaces, integration, merges), `verification` (verifications, reviews, Quality Gate), `orchestration` (leases, steps, actions, subtask cycle, launches), `budgets` (reservations), `manifests`, `recovery` (checkpoints, reconciliation, health, outbox) |
 | `services/agent-manager/.../` | `plan.py` (hard invariants), `docker_ops.py` (workers, proxies, inputs, secrets, sessions, test environments), `compose.py` (project Compose sanitizing), `secrets.py`, `images.py` |
 | `services/git-service/.../` | `repo_ops.py` (workspaces, collect, divergence, integrate, merge), `github.py` (`gh`), `gitcmd.py` (hardened git) |
+| `hermes/` | `plugins/orchestration` (tools, `/orch`, CLI, Dashboard tab; thin Task API client), `init.sh` (hermes-init) |
 | `services/egress-proxy/` | CONNECT-only allowlisting proxy, one per agent execution |
 | `workers/` | `agent-base` (+`ho-verify`, `ho-wait-secrets`), `toolchains/*`, `providers/{claude,codex}` (`ho-agent-run`, `ho-auth-login`), `browser-runner` |
 | `migrations/versions/` | `0001`–`0007` (raw SQL) |
 | `schemas/` | JSON Schemas: project, capability, platform, manifest, task, agent-result, review-result, orchestrator-step |
-| `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `smoke-phase{2..8}.sh` |
+| `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `smoke-phase{2..9}.sh` |
 
 ## Commands
 
@@ -54,7 +55,7 @@ make test-unit                      # fast, no services
 make test-integration               # starts throwaway PostgreSQL/Redis (compose.test.yaml)
 HO_TEST_DOCKER=1 .venv/bin/pytest tests/docker -q -p no:warnings   # real Docker (needs make images)
 make lint validate-schemas
-./scripts/smoke-phaseN.sh           # end-to-end on a throwaway Compose stack (N = 2..8)
+./scripts/smoke-phaseN.sh           # end-to-end on a throwaway Compose stack (N = 2..9)
 make images && make up              # rebuild the operator's live stack
 docker compose exec -T control-plane ho <group> <cmd>   # operator CLI
 ```
