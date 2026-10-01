@@ -12,7 +12,7 @@ import pytest
 
 from conftest import git_repo  # type: ignore[import-not-found]
 from fake_agents import FakeAgentManager  # type: ignore[import-not-found]
-from test_git import APP, PROJECT_YAML, REVIEW, commit, finish_verification  # type: ignore[import-not-found]
+from test_git import APP, PROJECT_YAML, REVIEW, commit, finish_verification, latest_verification  # type: ignore[import-not-found]
 
 pytestmark = [pytest.mark.integration, pytest.mark.orchestration]
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "providers"
@@ -469,3 +469,18 @@ def test_research_subtasks_are_accepted_without_code(api, services, agents, task
     assert subtasks(services, task)["a"]["state"] == "READY"
     [execution] = active(services, task, "ORCHESTRATOR")
     assert "exposes greet" in agents.specs[str(execution["id"])]["inputs"]["prompt.md"]
+
+
+def test_exhausted_budget_during_verification_pauses_and_resumes(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "x = 1\n"})
+    [launches] = q(services, "SELECT (consumed->>'agent_launches')::int AS n FROM budgets")
+    q(services, "UPDATE budgets SET limits = limits || jsonb_build_object('agent_launches', %s)", launches["n"])
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])  # accepted -> integrate -> runner needs a launch
+    assert state(api, task) == "PAUSED_BUDGET"
+    assert latest_verification(services, task)["state"] == "PREPARING"
+    approval = api.post(f"/v1/tasks/{task}/budget", {"add": {"agent_launches": 5}}).json()
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    assert state(api, task) == "TESTING"
+    assert latest_verification(services, task)["state"] == "RUNNING"

@@ -258,8 +258,9 @@ class Orchestration:
         """Retry waiting launches, best effective priority first (aging prevents starvation)."""
         started = 0
         with self.ctx.unit_of_work() as uow:
+            # Launches of waiting tasks (paused, budget, approval, login) stay queued until the task resumes.
             uow.cur.execute("SELECT p.*, t.priority, t.launch_suspended_at FROM pending_launches p JOIN tasks t ON t.id = p.task_id "
-                            "ORDER BY p.requested_at")
+                            "WHERE t.state <> ALL(%s) ORDER BY p.requested_at", ([w.value for w in WAITING_STATES],))
             rows = uow.cur.fetchall()
         rows.sort(key=lambda r: (self._rank(r, r["launch_suspended_at"] or r["requested_at"]), r["requested_at"]))
         for row in rows:
@@ -1136,8 +1137,10 @@ class Orchestration:
         uow.cur.execute("UPDATE budgets SET limits = %s, state = 'OK' WHERE task_id = %s", (jsonb(limits), task["id"]))
         self._event(uow, task, "BUDGET_RAISED", f"budget raised by {principal.value}: {approval['subject'].get('add')}")
         if task["state"] == S.PAUSED_BUDGET:
-            self.tasks.transition(uow, task, S(task["resume_state"]), trigger=Trigger.APPROVAL, actor=principal.value,
-                                  reason="budget raised")
+            task = self.tasks.transition(uow, task, S(task["resume_state"]), trigger=Trigger.APPROVAL, actor=principal.value,
+                                         reason="budget raised")
+        if S(task["state"]) not in WAITING_STATES:
+            self.verifications.relaunch_waiting(uow, task)
 
     def request_budget_increase(self, uow: UnitOfWork, task_key: str, add: dict[str, int], *, principal: Principal) -> Row:
         task = self.tasks.get(uow, task_key, lock=True)

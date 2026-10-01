@@ -35,6 +35,7 @@ from ho_core.verification import (
 
 from .agentmgr import AgentManagerError
 from .approvals import Approvals
+from .budgets import BudgetExhausted
 from .auth import Principal
 from .context import Context, UnitOfWork
 from .db import Row, jsonb
@@ -124,8 +125,25 @@ class Verifications:
                 with self.ctx.unit_of_work() as uow:
                     self._fail(uow, verification_id, f"test services did not start: {exc.message}")
                 return
+        try:
+            self._launch_runners(verification_id, environment)
+        except BudgetExhausted as exc:
+            # The verification stays PREPARING; it is launched again when the budget is raised.
+            with self.ctx.unit_of_work() as uow:
+                task_key = self._load(uow, verification_id)[1]["key"]
+            self.executions.pause_for_budget(task_key, str(exc))
+
+    def relaunch_waiting(self, uow: UnitOfWork, task: Row) -> None:
+        """Launch, after this transaction, verifications of `task` left PREPARING (for example by an exhausted budget)."""
+        uow.cur.execute("SELECT id FROM verifications WHERE task_id = %s AND state = 'PREPARING'", (task["id"],))
+        for row in uow.cur.fetchall():
+            uow.after_commit.append(lambda vid=row["id"]: self._launch(vid))
+
+    def _launch_runners(self, verification_id: UUID, environment: dict[str, Any] | None) -> None:
         with self.ctx.unit_of_work() as uow:
             row, task, project, config = self._load(uow, verification_id, lock=True)
+            if row["state"] != "PREPARING":
+                return
             plan = row["plan"]
             allow_waiting = row["purpose"] == "POST_MERGE"
             executions: list[UUID] = []
