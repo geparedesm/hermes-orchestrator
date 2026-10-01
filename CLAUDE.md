@@ -38,14 +38,14 @@ Phases 0–7 approved and merged (PRs #2–#8); orchestration is opt-in with `HO
 | Path | Responsibility |
 | --- | --- |
 | `packages/ho_core/` | enums, `statemachine`, `config` (layered + tighten-only), `policy/` (engine, hard, commands), `adapters/` (Claude, Codex), `gitpolicy`, `verification` (risk, gaps, steps), `routing` (provider scores), `redact`, `schemas` |
-| `services/control-plane/.../` | `app.py` (API), `cli.py` (`ho`), `tasks`, `projects`, `approvals`, `scheduler` (+hooks), `executions` (grants, dispatch, sync, finalize), `credentials`, `gitops` (workspaces, integration, merges), `verification` (verifications, reviews, Quality Gate), `orchestration` (leases, steps, actions, subtask cycle, launches), `budgets` (reservations), `manifests` |
+| `services/control-plane/.../` | `app.py` (API), `cli.py` (`ho`), `tasks`, `projects`, `approvals`, `scheduler` (+hooks), `executions` (grants, dispatch, sync, finalize), `credentials`, `gitops` (workspaces, integration, merges), `verification` (verifications, reviews, Quality Gate), `orchestration` (leases, steps, actions, subtask cycle, launches), `budgets` (reservations), `manifests`, `recovery` (checkpoints, reconciliation, health, outbox) |
 | `services/agent-manager/.../` | `plan.py` (hard invariants), `docker_ops.py` (workers, proxies, inputs, secrets, sessions, test environments), `compose.py` (project Compose sanitizing), `secrets.py`, `images.py` |
 | `services/git-service/.../` | `repo_ops.py` (workspaces, collect, divergence, integrate, merge), `github.py` (`gh`), `gitcmd.py` (hardened git) |
 | `services/egress-proxy/` | CONNECT-only allowlisting proxy, one per agent execution |
 | `workers/` | `agent-base` (+`ho-verify`, `ho-wait-secrets`), `toolchains/*`, `providers/{claude,codex}` (`ho-agent-run`, `ho-auth-login`), `browser-runner` |
-| `migrations/versions/` | `0001`–`0006` (raw SQL) |
+| `migrations/versions/` | `0001`–`0007` (raw SQL) |
 | `schemas/` | JSON Schemas: project, capability, platform, manifest, task, agent-result, review-result, orchestrator-step |
-| `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `smoke-phase{2..7}.sh` |
+| `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `smoke-phase{2..8}.sh` |
 
 ## Commands
 
@@ -54,7 +54,7 @@ make test-unit                      # fast, no services
 make test-integration               # starts throwaway PostgreSQL/Redis (compose.test.yaml)
 HO_TEST_DOCKER=1 .venv/bin/pytest tests/docker -q -p no:warnings   # real Docker (needs make images)
 make lint validate-schemas
-./scripts/smoke-phaseN.sh           # end-to-end on a throwaway Compose stack (N = 2..7)
+./scripts/smoke-phaseN.sh           # end-to-end on a throwaway Compose stack (N = 2..8)
 make images && make up              # rebuild the operator's live stack
 docker compose exec -T control-plane ho <group> <cmd>   # operator CLI
 ```

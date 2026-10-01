@@ -486,7 +486,7 @@ Adaptive reporting (§72): the outbox classifies events. Attention events (`APPR
 
 ## 14. Failure and Recovery Outline
 
-Details belong to Phase 8 (`docs/recovery.md`). The architecture guarantees the inputs:
+Implemented in Phase 8; procedures in [docs/recovery.md](docs/recovery.md). The architecture guarantees the inputs:
 
 - **Durable intents:** before calling Agent Manager or Git Service, the control plane writes an `operation_intent` row; after the call it records the outcome. On restart, pending intents are reconciled against Docker labels and Git refs.
 - **Boot order:** postgres healthy, redis healthy, control plane, then Recovery Controller reconciliation (leases, intents, managed containers, workspaces), then the scheduler resumes. Dead containers are never resurrected; new executions start from checkpoints.
