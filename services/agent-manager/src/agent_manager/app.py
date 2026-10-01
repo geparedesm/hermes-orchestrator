@@ -161,6 +161,18 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
     def managed() -> dict[str, Any]:
         return ops.list_managed()
 
+    @app.get("/v1/caches", dependencies=[Depends(authorized)])
+    def caches_view() -> dict[str, Any]:
+        return ops.caches()
+
+    @app.post("/v1/caches/maintain", dependencies=[Depends(authorized)])
+    def maintain_caches() -> dict[str, Any]:
+        return ops.maintain_caches()
+
+    @app.delete("/v1/caches/{project}", dependencies=[Depends(authorized)])
+    def clear_caches(project: str, ecosystem: str | None = None) -> dict[str, Any]:
+        return ops.clear_cache(project, ecosystem)
+
     @app.get("/v1/stats", dependencies=[Depends(authorized)])
     def stats_view() -> dict[str, Any]:
         return ops.stats()

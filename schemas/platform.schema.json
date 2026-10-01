@@ -70,6 +70,28 @@
             "minimum": 1,
             "maximum": 720
           }
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Platform retention (MASTER_SPEC section 80); project artifact and workspace retention is in the project configuration.",
+          "properties": {
+            "failed_artifacts_days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3650
+            },
+            "notifications_days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3650
+            },
+            "recovery_runs_days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3650
+            }
+          }
         }
       }
     },
@@ -171,6 +193,24 @@
             },
             "codex": {
               "$ref": "#/$defs/domains"
+            }
+          }
+        },
+        "dependency_cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_gb_per_cache"
+          ],
+          "description": "Per-project, per-ecosystem dependency caches (MASTER_SPEC section 71): size limit with LRU cleanup.",
+          "properties": {
+            "max_gb_per_cache": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 200
+            },
+            "enabled": {
+              "type": "boolean"
             }
           }
         }

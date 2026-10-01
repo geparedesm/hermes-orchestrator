@@ -67,6 +67,15 @@ class AgentManagerClient:
     def capacity(self) -> dict[str, Any]:
         return self._call("GET", "/v1/capacity")
 
+    def caches(self) -> dict[str, Any]:
+        return self._call("GET", "/v1/caches")
+
+    def maintain_caches(self) -> dict[str, Any]:
+        return self._call("POST", "/v1/caches/maintain")
+
+    def clear_cache(self, project: str, ecosystem: str | None = None) -> dict[str, Any]:
+        return self._call("DELETE", f"/v1/caches/{project}" + (f"?ecosystem={ecosystem}" if ecosystem else ""))
+
     def stats(self) -> dict[str, Any]:
         return self._call("GET", "/v1/stats")
 

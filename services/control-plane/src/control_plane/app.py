@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from .approvals import Approvals
 from .auth import PRINCIPAL_HEADER, Authenticator, Identity, Principal
 from .context import Context, UnitOfWork
+from .db import Row
 from .credentials import Credentials
 from .gitops import GitChanges
 from .verification import QualityGate, Reviews, Verifications
@@ -25,6 +26,7 @@ from .agentmgr import AgentManagerError
 from .errors import ApiError, Conflict, Forbidden, NotFound, UpstreamError
 from .idempotency import run_idempotent
 from .projects import Projects
+from .maintenance import Maintenance
 from .notifications import Outbox
 from .recovery import Health, Recovery
 from . import budgets, dashboard, manifests
@@ -56,6 +58,7 @@ class Services:
     orchestration: Orchestration | None = None
     recovery: Recovery | None = None
     outbox: Outbox | None = None
+    maintenance: Maintenance | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None,
@@ -82,9 +85,25 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     recovery = Recovery(ctx, tasks, executions, git, verifications, health, orchestrator)
     outbox = Outbox(ctx, health, hermes_webhook_url, hermes_webhook_secret, client=outbox_client)
     scheduler.startup_hooks.append(recovery.startup)
-    scheduler.hooks += [recovery.periodic, outbox.deliver]
+    maintenance = Maintenance(ctx)
+    scheduler.hooks += [recovery.periodic, outbox.deliver, maintenance.tick]
+    gate.on_evaluated.append(_request_merge_when_ready(git))
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
-                    verifications, reviews, gate, orchestrator, recovery, outbox)
+                    verifications, reviews, gate, orchestrator, recovery, outbox, maintenance)
+
+
+def _request_merge_when_ready(git: GitChanges) -> Any:
+    """A passing gate leaves the merge one decision away (MASTER_SPEC section 90): the control plane requests the
+    action-bound MERGE approval itself, so the person approves it from Hermes (/orch approve) or the Dashboard."""
+    def hook(uow: UnitOfWork, task: Row, evaluation: Row) -> None:
+        if evaluation["outcome"] != "PASS":
+            return
+        try:
+            with uow.cur.connection.transaction():
+                git.request_merge(uow, task["key"], principal=Principal("control-plane", "quality-gate"))
+        except ApiError as exc:
+            log.info("merge approval for %s not requested automatically: %s", task["key"], exc)
+    return hook
 
 
 # ------------------------------------------------------------------ request models
@@ -543,6 +562,27 @@ def create_app(services: Services) -> FastAPI:
     def recovery_run(who_identity: Identity = Depends(identity)) -> dict[str, Any]:
         operator_only(who_identity)
         return jsonable(services.recovery.run("OPERATOR"))  # type: ignore[union-attr]
+
+    @app.post("/v1/maintenance/run")
+    def maintenance_run(who_identity: Identity = Depends(identity)) -> dict[str, Any]:
+        operator_only(who_identity)
+        return jsonable(services.maintenance.run())  # type: ignore[union-attr]
+
+    @app.get("/v1/caches")
+    def list_caches(who_identity: Identity = Depends(identity)) -> dict[str, Any]:
+        operator_only(who_identity)
+        try:
+            return ctx.agents.caches()  # type: ignore[union-attr]
+        except AgentManagerError as exc:
+            raise UpstreamError(str(exc)) from exc
+
+    @app.delete("/v1/caches/{project}")
+    def clear_caches(project: str, who_identity: Identity = Depends(identity), ecosystem: str | None = None) -> dict[str, Any]:
+        operator_only(who_identity)
+        try:
+            return ctx.agents.clear_cache(project, ecosystem)  # type: ignore[union-attr]
+        except AgentManagerError as exc:
+            raise (Conflict(exc.message) if exc.status == 409 or exc.status == 400 else UpstreamError(str(exc))) from exc
 
     @app.get("/v1/tasks/{key}/checkpoints")
     def task_checkpoints(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:

@@ -79,6 +79,16 @@ class FakeAgentManager:
         self.networks = [n for n in self.networks if n["labels"].get("ho.execution") != execution]
         return {"containers": 1, "networks": 0, "volumes": 1}
 
+    def caches(self) -> dict[str, Any]:
+        return {"caches": [], "max_bytes_per_cache": 2 * 1024**3}
+
+    def maintain_caches(self) -> dict[str, Any]:
+        self.cache_maintenance = getattr(self, "cache_maintenance", 0) + 1
+        return {"trimmed": []}
+
+    def clear_cache(self, project: str, ecosystem: str | None = None) -> dict[str, Any]:
+        return {"removed": [f"ho-cache-{project}-{ecosystem or 'pip'}"]}
+
     def stats(self) -> dict[str, Any]:
         return {"workers": [{"execution": e, "task": self.specs.get(e, {}).get("task"), "role": None, "provider": None,
                              "cpu_percent": 12.5, "memory_bytes": 100 * 1024**2, "memory_limit_bytes": 2 * 1024**3}
