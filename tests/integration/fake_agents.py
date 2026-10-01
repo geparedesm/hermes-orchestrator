@@ -79,6 +79,11 @@ class FakeAgentManager:
         self.networks = [n for n in self.networks if n["labels"].get("ho.execution") != execution]
         return {"containers": 1, "networks": 0, "volumes": 1}
 
+    def stats(self) -> dict[str, Any]:
+        return {"workers": [{"execution": e, "task": self.specs.get(e, {}).get("task"), "role": None, "provider": None,
+                             "cpu_percent": 12.5, "memory_bytes": 100 * 1024**2, "memory_limit_bytes": 2 * 1024**3}
+                            for e, c in self.containers.items() if c["state"] == "running"]}
+
     def capacity(self) -> dict[str, Any]:
         return {"agent_workers": sum(1 for c in self.containers.values() if c["state"] == "running")}
 

@@ -161,6 +161,10 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
     def managed() -> dict[str, Any]:
         return ops.list_managed()
 
+    @app.get("/v1/stats", dependencies=[Depends(authorized)])
+    def stats_view() -> dict[str, Any]:
+        return ops.stats()
+
     @app.get("/v1/capacity", dependencies=[Depends(authorized)])
     def capacity_view() -> dict[str, Any]:
         return ops.capacity()

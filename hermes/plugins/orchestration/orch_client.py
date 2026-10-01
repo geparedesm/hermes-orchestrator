@@ -113,6 +113,21 @@ class TaskApi:
             return self.call("POST", f"/v1/tasks/{_key(key)}/budget", {"add": add})
         return self.call("GET", f"/v1/tasks/{_key(key)}/budget")
 
+    def summary(self) -> Any:
+        return self.call("GET", "/v1/dashboard/summary")
+
+    def task_view(self, key: str) -> Any:
+        return self.call("GET", f"/v1/dashboard/tasks/{_key(key)}")
+
+    def workers(self) -> Any:
+        return self.call("GET", "/v1/workers")
+
+    def manifest(self, key: str, manifest_id: str) -> Any:
+        return self.call("GET", f"/v1/tasks/{_key(key)}/manifests/{urllib.parse.quote(manifest_id, safe='')}")
+
+    def generate_manifest(self, key: str) -> Any:
+        return self.call("POST", f"/v1/tasks/{_key(key)}/manifest")
+
     def approvals(self, include_decided: bool = False) -> Any:
         return self.call("GET", "/v1/approvals", params={"state": "" if include_decided else "PENDING"})
 

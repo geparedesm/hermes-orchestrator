@@ -164,6 +164,16 @@ def test_plan_runs_the_subtask_cycle_to_ready_for_merge(api, services, agents, r
     assert {(r["subject"], r["reviewer_provider"]) for r in body["reviews"]} == {(f"{task}-1", "claude"), (task, "claude")}
     inspect = api.get(f"/v1/tasks/{task}/orchestration").json()
     assert inspect["lease"]["epoch"] == 1 and inspect["subtasks"][0]["state"] == "ACCEPTED"
+    # Phase 10: the Dashboard's task view shows the whole story from records.
+    view = api.get(f"/v1/dashboard/tasks/{task}").json()
+    assert view["task"]["state"] == "READY_FOR_MERGE" and view["quality_gate"]["outcome"] == "PASS"
+    assert [s["state"] for s in view["dag"]["subtasks"]] == ["ACCEPTED"] and view["dag"]["edges"] == []
+    assert {r["reviewer_provider"] for r in view["reviews"]} == {"claude"} and view["tests"][0]["state"] == "PASSED"
+    assert {e["role"] for e in view["executions"]} >= {"ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER"}
+    assert "READY_FOR_MERGE" in [e["type"] for e in view["timeline"]] and view["checkpoints"]
+    assert view["manifests"][0]["kind"] == "READY_FOR_MERGE" and view["orchestration"]["lease"]["epoch"] == 1
+    manifest = api.get(f"/v1/tasks/{task}/manifests/{view['manifests'][0]['id']}").json()
+    assert manifest["kind"] == "READY_FOR_MERGE" and manifest["task"]["key"] == task
 
 
 def test_wait_while_work_runs_does_not_loop(api, services, agents, task):

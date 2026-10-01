@@ -10,7 +10,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from ho_core.enums import Autonomy
 from ho_core.policy.engine import decide_command
 from pydantic import BaseModel, Field
@@ -22,12 +22,12 @@ from .credentials import Credentials
 from .gitops import GitChanges
 from .verification import QualityGate, Reviews, Verifications
 from .agentmgr import AgentManagerError
-from .errors import ApiError, Conflict, Forbidden, UpstreamError
+from .errors import ApiError, Conflict, Forbidden, NotFound, UpstreamError
 from .idempotency import run_idempotent
 from .projects import Projects
 from .notifications import Outbox
 from .recovery import Health, Recovery
-from . import budgets, manifests
+from . import budgets, dashboard, manifests
 from .budgets import BudgetExhausted
 from .executions import ExecutionRequest, Executions
 from .scheduler import Scheduler
@@ -603,9 +603,65 @@ def create_app(services: Services) -> FastAPI:
         if ctx.agents is None:
             raise UpstreamError("agent-manager is not configured")
         try:
-            return {"capacity": ctx.agents.capacity(), "managed": ctx.agents.managed()}
+            capacity, managed = ctx.agents.capacity(), ctx.agents.managed()
         except AgentManagerError as exc:
             raise UpstreamError(str(exc)) from exc
+        try:
+            stats = {w["execution"]: w for w in ctx.agents.stats().get("workers", [])}
+        except AgentManagerError:
+            stats = {}  # CPU and memory are best effort
+        with ctx.unit_of_work() as uow:
+            uow.cur.execute("SELECT e.id::text AS id, e.role, e.provider, e.state, e.started_at, t.key AS task FROM executions e "
+                            "JOIN tasks t ON t.id = e.task_id WHERE e.state IN ('STARTING', 'RUNNING', 'STOPPING') "
+                            "ORDER BY e.started_at")
+            running = [{**jsonable(r), **{k: v for k, v in stats.get(r["id"], {}).items()
+                                          if k in ("cpu_percent", "memory_bytes", "memory_limit_bytes")}}
+                       for r in uow.cur.fetchall()]
+        return {"capacity": capacity, "managed": managed, "running": running}
+
+    # ---------------------------------------------------------------- dashboard (Phase 10)
+
+    @app.get("/v1/dashboard/summary")
+    def dashboard_summary(_: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            queue = [e.as_json() for e in services.scheduler.queue(uow)]
+            health = services.recovery.health.summary(uow) if services.recovery else {}
+            return jsonable(dashboard.summary(uow, queue, health))
+
+    @app.get("/v1/dashboard/tasks/{key}")
+    def dashboard_task(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            body = {"task": services.tasks.summary(uow, task), **dashboard.task_detail(uow, task)}
+            if services.orchestration is not None:
+                body["orchestration"] = services.orchestration.inspect(uow, key)
+            return jsonable(body)
+
+    @app.get("/v1/tasks/{key}/manifests")
+    def list_manifests(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            uow.cur.execute("SELECT id, kind, sha256, generated_at FROM manifests WHERE task_id = %s ORDER BY generated_at DESC",
+                            (task["id"],))
+            return {"task": key, "manifests": jsonable(uow.cur.fetchall())}
+
+    @app.get("/v1/tasks/{key}/manifests/{manifest_id}")
+    def get_manifest(key: str, manifest_id: UUID, _: Identity = Depends(identity)) -> Any:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            uow.cur.execute("SELECT a.path FROM manifests m JOIN artifacts a ON a.id = m.artifact_id WHERE m.id = %s "
+                            "AND m.task_id = %s", (manifest_id, task["id"]))
+            row = uow.cur.fetchone()
+            if row is None:
+                raise NotFound("manifest not found")
+            return json.loads(ctx.artifacts.read(row["path"]))
+
+    @app.get("/metrics")
+    def metrics(who_identity: Identity = Depends(identity)) -> Response:
+        operator_only(who_identity)
+        with ctx.unit_of_work() as uow:
+            text = dashboard.metrics_text(uow, len(services.scheduler.queue(uow)))
+        return Response(content=text, media_type="text/plain; version=0.0.4")
 
     @app.get("/v1/queue")
     def queue(_: Identity = Depends(identity)) -> dict[str, Any]:
