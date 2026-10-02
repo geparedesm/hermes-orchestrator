@@ -52,6 +52,12 @@ class GitServiceClient:
         return self._post("/v1/workspaces/conflict", {"path": path, "name": name, "branch": branch,
                                                       "target_branch": target_branch, "incoming_ref": incoming_ref})
 
+    def read_view(self, path: str, branch: str) -> dict[str, Any]:
+        return self._post("/v1/read-views", {"path": path, "branch": branch})
+
+    def prune_read_views(self, path: str, keep: list[str], min_age_seconds: int = 3600) -> dict[str, Any]:
+        return self._post("/v1/read-views/prune", {"path": path, "keep": keep, "min_age_seconds": min_age_seconds})
+
     def remove_workspace(self, path: str, name: str) -> dict[str, Any]:
         return self._post("/v1/workspaces/remove", {"path": path, "name": name})
 

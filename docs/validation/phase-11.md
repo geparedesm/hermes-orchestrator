@@ -73,3 +73,11 @@ Second review (commits after the first review): three findings, all fixed with t
 - Delivery to a real chat channel needs the operator's channel (docs/hermes.md).
 - Multi-instance control planes are fenced but not exercised.
 - `scripts/check-multiarch.sh` runs the other architecture under emulation; native Linux hosts were not available.
+
+## Post-release fix: project read views
+
+Found while registering the operator's first real project (an Odoo base repository with ignored `secrets/`, `.env`, and `backups/`, and a nested add-on repository): the orchestrator's read-only project access bind-mounted the **live project directory**, so ignored local secrets and nested repositories were readable by the orchestrator, and nested projects could not be orchestrated at all (only directories directly under the projects root were accepted). Since Phase 7; harmless for the test projects used so far, which held no local secrets.
+
+Fix: Git Service builds a read view per commit (`git archive` of the default branch into `<project>/.hermes/read/<commit>/`, tracked files only, excluded from `git status`); the control plane requests it for every execution with project read and pins its commit in the execution's spec; Agent Manager mounts only that exact path form; daily maintenance prunes views no unfinished execution uses and unused for an hour. Codex's adversarial review of the design found that a count-based retention ("keep the last three") could delete a view under a running or queued execution; retention is by use and age instead.
+
+Tests: unit (mount validation: only view paths, nested projects, traversal, symbolic links; Git Service: only tracked files, no `.git`, `.env`, ignored secrets, nested repository, or escaping links; reuse per commit; pruning keeps views in use or recent; redirected `.hermes` refused), integration (the orchestrator's spec points at a view with exactly the tracked files; maintenance prunes it after use), real Docker (the orchestrator lists only tracked files, cannot read the ignored file or write; the live directory is refused).

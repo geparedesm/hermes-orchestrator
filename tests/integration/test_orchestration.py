@@ -5,6 +5,7 @@ budgets, and the scenarios from the Codex adversarial review of the design."""
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -540,3 +541,14 @@ def test_review_retry_waits_while_git_service_is_down(api, services, agents, rep
     monkeypatch.undo()
     services.scheduler.run_once()
     assert len(active(services, task, "REVIEWER")) == 1
+
+
+def test_orchestrator_reads_a_view_of_tracked_files_that_maintenance_prunes(api, services, agents, repo, task):
+    [orchestrator] = executions(services, task, "ORCHESTRATOR")
+    [item] = orchestrator["spec"]["project_read"]
+    view = repo / item["path"].split("/", 1)[1]
+    assert item["path"].split("/")[-3:-1] == [".hermes", "read"] and view.name == item["sha"]
+    assert sorted(str(p.relative_to(view)) for p in view.rglob("*") if p.is_file()) == [".hermes/project.yaml", "README.md", "app.py"]
+    q(services, "UPDATE executions SET state = 'SUCCEEDED', ended_at = now() WHERE id = %s", orchestrator["id"])
+    os.utime(view, (0, 0))  # unused for long
+    assert services.maintenance.run()["read_views"]["removed"] == 1 and not view.exists()

@@ -22,6 +22,8 @@ from typing import Any
 from ho_core import schemas
 from ho_core.paths import PathOutsideRoot, resolve_inside
 
+_SHA = re.compile(r"^[0-9a-f]{40}$")
+
 WORKER_UID = 10001
 PROXY_PORT = 3128
 AGENT_ROLES = {"ORCHESTRATOR", "DEVELOPER", "REVIEWER"}
@@ -154,13 +156,22 @@ def _project_read_mounts(request: dict[str, Any], projects_root: Path, projects_
     for item in request.get("project_read", []):
         if item["slug"] not in allowed:
             raise Rejected(f"project {item['slug']} is not in the grant's project_read")
+        # Only a Git Service read view (<project>/.hermes/read/<commit>: tracked files only), never the live
+        # project directory with its ignored files (local secrets, .env) and nested repositories.
         relative = PurePosixPath(item["path"])
+        if (len(relative.parts) < 4 or relative.parts[-3:-1] != (".hermes", "read") or not _SHA.match(relative.name)
+                or ".." in relative.parts or relative.is_absolute()):
+            raise Rejected(f"{relative} is not a project read view")
+        project = PurePosixPath(*relative.parts[:-3])
         try:
             resolved = resolve_inside(projects_root, str(relative))
         except PathOutsideRoot as exc:
             raise Rejected(str(exc)) from exc
-        if resolved == projects_root.resolve() or len(relative.parts) != 1 or not (resolved / ".git").exists():
-            raise Rejected(f"{relative} is not a project repository directly inside the projects root")
+        lexical = projects_root.resolve() / relative
+        if resolved != lexical or not resolved.is_dir():  # no symbolic link anywhere on the way
+            raise Rejected(f"{relative} is not a project read view")
+        if not (projects_root.resolve() / project / ".git").exists():
+            raise Rejected(f"{project} is not a project repository")
         mounts.append(Mount("bind", f"{projects_root_host.rstrip('/')}/{relative}", f"/projects/{item['slug']}", read_only=True))
     if set(allowed) - {i["slug"] for i in request.get("project_read", [])}:
         raise Rejected("every project in the grant's project_read needs a path")

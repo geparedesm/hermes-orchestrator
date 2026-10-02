@@ -53,7 +53,7 @@ class Maintenance:
     def run(self) -> dict[str, Any]:
         started = datetime.now(timezone.utc)
         report: dict[str, Any] = {}
-        for name, step in (("caches", self._caches), ("artifacts", self._artifacts), ("workspaces", self._workspaces),
+        for name, step in (("caches", self._caches), ("artifacts", self._artifacts), ("workspaces", self._workspaces), ("read_views", self._read_views),
                            ("history", self._history)):
             try:
                 report[name] = step()
@@ -95,6 +95,23 @@ class Maintenance:
                 self.ctx.artifacts.delete(row["path"])
                 uow.cur.execute("UPDATE artifacts SET purged_at = now() WHERE id = %s", (row["id"],))
         return {"purged": len(rows)}
+
+    def _read_views(self) -> dict[str, int]:
+        """Project read views no unfinished execution uses (an execution keeps its view until it ends)."""
+        with self.ctx.unit_of_work() as uow:
+            uow.cur.execute(
+                "SELECT p.relative_path, COALESCE(array_agg(DISTINCT r->>'sha') FILTER (WHERE r IS NOT NULL), '{}') AS keep "
+                "FROM projects p LEFT JOIN executions e ON e.project_id = p.id AND e.ended_at IS NULL "
+                "LEFT JOIN LATERAL jsonb_array_elements(COALESCE(e.spec->'project_read', '[]'::jsonb)) r ON true "
+                "WHERE p.status <> 'UNREGISTERED' GROUP BY p.relative_path")
+            rows = uow.cur.fetchall()
+        removed = 0
+        for row in rows:
+            try:
+                removed += len(self.ctx.git.prune_read_views(row["relative_path"], list(row["keep"]))["removed"])
+            except Exception:  # noqa: BLE001 - a missing or moved project must not stop the others
+                log.warning("read views of %s not pruned", row["relative_path"], exc_info=True)
+        return {"removed": removed}
 
     def _workspaces(self) -> dict[str, int]:
         with self.ctx.unit_of_work() as uow:

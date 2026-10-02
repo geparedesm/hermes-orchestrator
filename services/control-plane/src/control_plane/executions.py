@@ -263,7 +263,10 @@ class Executions:
         if workspace:
             spec["workspace"] = workspace
         if grant["capabilities"]["project_read"]:
-            spec["project_read"] = [{"slug": project["slug"], "path": project["relative_path"]}]
+            # Never the live directory (ignored secrets, .env, other repositories): the branch's tracked files.
+            view = self.ctx.git.read_view(project["relative_path"], project["default_branch"] or "main")
+            spec["project_read"] = [{"slug": project["slug"], "path": f"{project['relative_path']}/{view['path']}",
+                                     "sha": view["sha"]}]
 
         uow.cur.execute(
             """
