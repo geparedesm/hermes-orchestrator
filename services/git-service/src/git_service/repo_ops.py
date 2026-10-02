@@ -16,12 +16,12 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ho_core.gitpolicy import ChangeLevel, FileChange, classify_divergence, parse_hunks, valid_branch, valid_sha, valid_workspace
 
-from .gitcmd import GitError, git, run, try_git
+from .gitcmd import GitError, git, popen, run, try_git
 
 WORKTREES = Path(".hermes") / "worktrees"
 READ_VIEWS = Path(".hermes") / "read"
@@ -189,12 +189,12 @@ def _read_views_dir(repo: Path) -> Path:
 def read_view(repo: Path, branch: str) -> dict[str, Any]:
     """An immutable copy of the branch's tracked files for agents that only read the project (the orchestrator).
 
-    Built with `git archive`: no `.git`, nothing ignored or untracked (local secrets, `.env`, backups, other
-    tasks' workspaces), no submodules or nested repositories. One directory per commit, reused while the
-    branch stays there; `prune_read_views` removes the ones no execution uses.
+    Written straight from the commit's objects: no `.git`, nothing ignored or untracked (local secrets, `.env`,
+    backups, other tasks' workspaces), no submodules or nested repositories, and no attribute or filter
+    processing (`export-ignore`, `export-subst`, smudge filters): exactly what was committed. One directory per
+    commit, reused while the branch stays there; `prune_read_views` removes the ones no execution uses.
     """
     import shutil
-    import tarfile
     import tempfile
 
     if not valid_branch(branch):
@@ -209,12 +209,9 @@ def read_view(repo: Path, branch: str) -> dict[str, Any]:
         views.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=f".tmp-{sha[:12]}-", dir=views))
         try:
-            archive = staging / "view.tar"
-            run(repo, "archive", "--format=tar", "-o", str(archive), sha, timeout=_FETCH_TIMEOUT)
             tree = staging / "tree"
-            with tarfile.open(archive) as tar:
-                tar.extractall(tree, filter=_inside_tree)
-            tree.chmod(0o755)
+            tree.mkdir(mode=0o755)
+            _write_tree(repo, sha, tree)
             tree.rename(target)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
@@ -222,15 +219,44 @@ def read_view(repo: Path, branch: str) -> dict[str, Any]:
     return {"sha": sha, "path": str(target.relative_to(repo))}
 
 
-def _inside_tree(member: Any, dest: str) -> Any:
-    """tarfile's `data` filter, skipping (not failing on) members it refuses: absolute paths, `..`, links that
-    would leave the view, special files."""
-    import tarfile
-
+def _write_tree(repo: Path, sha: str, dest: Path) -> None:
+    entries = []
+    listing = run(repo, "ls-tree", "-r", "-z", "--full-tree", sha, timeout=_FETCH_TIMEOUT).stdout
+    for record in filter(None, listing.split("\0")):
+        meta, name = record.split("\t", 1)
+        mode, kind, obj = meta.split()
+        parts = PurePosixPath(name).parts
+        if kind != "blob" or not parts or name.startswith("/") or any(p in ("", ".", "..", ".git") for p in parts):
+            continue  # submodules (commits), and paths Git itself would refuse
+        entries.append((mode, obj, parts))
+    root = dest.resolve()
+    process = popen(repo, "cat-file", "--batch")
+    assert process.stdin is not None and process.stdout is not None
     try:
-        return tarfile.data_filter(member, dest)
-    except tarfile.FilterError:
-        return None
+        for mode, obj, parts in entries:
+            process.stdin.write(f"{obj}\n".encode())
+            process.stdin.flush()
+            header = process.stdout.readline().split()
+            if len(header) != 3:
+                raise GitError(f"object {obj} unreadable")
+            data = process.stdout.read(int(header[2]))
+            process.stdout.read(1)  # the newline after each object
+            path = dest.joinpath(*parts)
+            if path.parent.resolve() != root.joinpath(*parts[:-1]):
+                continue  # never write through a link the view itself contains
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if mode == "120000":
+                link = data.decode("utf-8", "replace")
+                # Links stay inside the view: absolute or escaping targets are dropped.
+                if link.startswith("/") or not (path.parent / link).resolve().is_relative_to(root):
+                    continue
+                path.symlink_to(link)
+            else:
+                path.write_bytes(data)
+                path.chmod(0o755 if mode == "100755" else 0o644)
+    finally:
+        process.stdin.close()
+        process.wait(timeout=30)
 
 
 def prune_read_views(repo: Path, keep: set[str], min_age_seconds: int) -> dict[str, Any]:

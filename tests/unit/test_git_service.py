@@ -467,3 +467,22 @@ def test_read_view_refuses_a_redirected_hermes_directory(api, root, tmp_path):
     (repo / ".hermes").symlink_to(tmp_path / "elsewhere")
     response = api("/v1/read-views", {"path": "app", "branch": "main"})
     assert response.status_code == 409 and not any((tmp_path / "elsewhere").iterdir())
+
+
+def test_read_view_ignores_archive_attributes(api, root):
+    repo = root / "app"
+    commit(repo, "attributes", {".gitattributes": "docs/ export-ignore\nversion.txt export-subst\n", "version.txt": "$Format:%H$\n"})
+    view = repo / api("/v1/read-views", {"path": "app", "branch": "main"}).json()["path"]
+    assert (view / "docs" / "guide.md").read_text() == "guide\n"  # export-ignore does not hide tracked files
+    assert (view / "version.txt").read_text() == "$Format:%H$\n"  # nor does export-subst rewrite them
+
+
+def test_read_view_of_an_empty_commit(api, tmp_path):
+    projects = tmp_path / "projects"
+    empty = projects / "empty"
+    empty.mkdir(parents=True)
+    sh(empty, "init", "-q", "-b", "main")
+    sh(empty, "commit", "-q", "--allow-empty", "-m", "start")
+    response = api("/v1/read-views", {"path": "empty", "branch": "main"})
+    assert response.status_code == 200, response.text
+    assert list((empty / response.json()["path"]).iterdir()) == []
