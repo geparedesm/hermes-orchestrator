@@ -27,6 +27,7 @@ import httpx
 
 from .context import Context
 from .db import Row
+from .events import record_event
 
 log = logging.getLogger(__name__)
 BATCH = 50
@@ -76,6 +77,24 @@ def render_digest(items: list[tuple[dict[str, Any], str | None]]) -> str:
     if len(items) > DIGEST_MAX:
         lines.append(f"- … and {len(items) - DIGEST_MAX} more (/orch tasks)")
     return "\n".join(lines)
+
+
+def suppress(uow: Any, *, before: datetime, actor: str) -> int:
+    """Withdraw pending notifications created before `before` (for example a backlog from before a chat channel
+    was connected). They stay in the outbox as SUPPRESSED, with an audit event; nothing is deleted."""
+    uow.cur.execute("UPDATE notifications SET state = 'SUPPRESSED' WHERE state = 'PENDING' AND created_at < %s RETURNING priority",
+                    (before,))
+    rows = uow.cur.fetchall()
+    counts = {p: sum(1 for r in rows if r["priority"] == p) for p in ("ATTENTION", "ROUTINE")}
+    record_event(uow.cur, "NOTIFICATIONS_SUPPRESSED", actor=actor, summary=f"{len(rows)} pending notifications suppressed",
+                 data={"before": before.isoformat(), **{k.lower(): v for k, v in counts.items()}}, pending=uow.events)
+    return len(rows)
+
+
+def send_test(uow: Any, *, actor: str) -> int:
+    """A test notification through the normal outbox (attention: delivered on the next pass)."""
+    return record_event(uow.cur, "NOTIFICATION_TEST", actor=actor, pending=uow.events,
+                        summary="Test notification from hermes-orchestrator: approvals and completed tasks will be reported here.")
 
 
 class Outbox:

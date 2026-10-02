@@ -152,7 +152,7 @@ services:
     environment:
       HO_HERMES_DELIVER: ${HO_HERMES_DELIVER:-}
       HO_HERMES_DELIVER_CHAT_ID: ${HO_HERMES_DELIVER_CHAT_ID:-}
-    secrets: [ho_hermes_webhook_secret, ho_hermes_dashboard_password]
+    secrets: [ho_hermes_webhook_secret, ho_hermes_dashboard_password, ho_hermes_dashboard_session_secret]
     volumes:
       - hermes-data:/opt/data
       - ./hermes/plugins/orchestration:/opt/data/plugins/orchestration:ro
@@ -212,3 +212,4 @@ secrets:
   ho_merge_key: {file: ./secrets/ho_merge_key}
   ho_hermes_webhook_secret: {file: ./secrets/ho_hermes_webhook_secret}
   ho_hermes_dashboard_password: {file: ./secrets/ho_hermes_dashboard_password}
+  ho_hermes_dashboard_session_secret: {file: ./secrets/ho_hermes_dashboard_session_secret}

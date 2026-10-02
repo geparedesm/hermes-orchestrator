@@ -32,7 +32,9 @@ fi
 
 hermes config set dashboard.basic_auth.username operator >/dev/null
 hermes config set dashboard.basic_auth.password "$(secret ho_hermes_dashboard_password)" >/dev/null
-hermes config set dashboard.basic_auth.secret "$(secret ho_hermes_webhook_secret)-dashboard" >/dev/null
+# Signs the Dashboard's login sessions. Its own secret: config.yaml is readable by Hermes, so no other secret
+# may be derivable from this value.
+hermes config set dashboard.basic_auth.secret "$(secret ho_hermes_dashboard_session_secret)" >/dev/null
 
 chown -R 10000:10000 /opt/data 2>/dev/null || true
 echo "hermes-init: orchestration plugin enabled"

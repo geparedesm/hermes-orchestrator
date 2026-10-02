@@ -35,7 +35,14 @@ HO_HERMES_WEBHOOK_URL=http://hermes:8644/webhooks/orchestration
 
 `hermes-init` then enables Hermes's webhook platform with the route `orchestration` (`deliver_only`: the message is delivered without an agent turn), signed with `ho_hermes_webhook_secret` (HMAC V2, 5-minute replay window). Without `HO_HERMES_DELIVER` the route is not created and notifications wait in the outbox; `/orch` and the Dashboard still show everything, and the backlog is delivered once a channel is connected.
 
-Other Hermes channels (Discord, Slack, Signal, …) work the same way with their own Hermes settings and `HO_HERMES_DELIVER=<platform>`.
+Other Hermes channels (Discord, Slack, Signal, WhatsApp, …) work the same way with their own Hermes settings and `HO_HERMES_DELIVER=<platform>`. Without `HO_HERMES_DELIVER_CHAT_ID`, Hermes delivers to the platform's home channel: send `/sethome` from the chat that should receive notifications. WhatsApp, for example: pair it in Hermes (`hermes whatsapp`), send `/sethome` from your chat, then set `HO_HERMES_DELIVER=whatsapp`, `HO_HERMES_WEBHOOK_URL=http://hermes:8644/webhooks/orchestration`, and `HO_APPROVERS=whatsapp:<your WhatsApp user ID as Hermes reports it>`.
+
+When a channel is connected after the platform has been running, the outbox may hold a backlog (it was kept on purpose, see above). Withdraw it before connecting, so only new events are delivered, and check the channel with a test message:
+
+```bash
+docker compose exec -T control-plane ho notifications suppress        # pending ones become SUPPRESSED (audited, not deleted)
+docker compose exec -T control-plane ho notifications test            # an attention message on the next delivery pass
+```
 
 ## Check it
 
@@ -52,3 +59,4 @@ In the chat: `/orch tasks`, then `/orch status T-n`. A pending approval arrives 
 - The plugin's service token (`ho_plugin_token`) cannot run Git, review, or gate operations (operator-only routes refuse it); it forwards the human principal, and the control plane decides.
 - The chat identity comes from Hermes's gateway after it authorized the sender (`TELEGRAM_ALLOWED_USERS`), bound to the message being handled; a model turn has no identity and cannot perform human actions.
 - Notifications carry summaries and identifiers only — never secrets, diffs, or model output.
+- The Dashboard's session-signing secret (`ho_hermes_dashboard_session_secret`) is independent of every other secret: Hermes's `config.yaml` holds it, so nothing else may be derivable from it.

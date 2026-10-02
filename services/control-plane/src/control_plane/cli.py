@@ -96,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
     uf.add_argument("update")
     uf.add_argument("state", choices=["SUCCEEDED", "ROLLED_BACK", "FAILED"])
     uf.add_argument("--note", default="")
+    notes = sub.add_parser("notifications", help="chat notifications (operator)").add_subparsers(dest="cmd", required=True)
+    sup = notes.add_parser("suppress", help="withdraw pending notifications (kept as SUPPRESSED, audited)")
+    sup.add_argument("--before", help="only those created before this ISO time (default: all pending now)")
+    notes.add_parser("test", help="send a test notification to the configured chat")
     sub.add_parser("maintenance", help="daily maintenance: caches, retention (operator)").add_subparsers(dest="cmd", required=True).add_parser("run")
     cache = sub.add_parser("cache", help="dependency caches per project and ecosystem").add_subparsers(dest="cmd", required=True)
     cache.add_parser("list")
@@ -325,6 +329,10 @@ def main(argv: list[str] | None = None) -> int:
             return _call("POST", f"/v1/platform/updates/{args.approval}/start", body={"backup": args.backup}, mutate=True)
         return _call("POST", f"/v1/platform/updates/runs/{args.update}/finish",
                      body={"state": args.state, "report": {"note": args.note}}, mutate=True)
+    if g == "notifications":
+        if cmd == "suppress":
+            return _call("POST", "/v1/notifications/suppress", body={"before": args.before} if args.before else {}, mutate=True)
+        return _call("POST", "/v1/notifications/test", mutate=True)
     if g == "maintenance":
         return _call("POST", "/v1/maintenance/run", mutate=True)
     if g == "cache":

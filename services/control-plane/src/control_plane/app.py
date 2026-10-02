@@ -6,6 +6,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID
 
@@ -31,7 +32,7 @@ from .projects import Projects
 from .maintenance import Maintenance
 from .notifications import Outbox
 from .recovery import Health, Recovery
-from . import budgets, dashboard, manifests
+from . import budgets, dashboard, manifests, notifications
 from .budgets import BudgetExhausted
 from .executions import ExecutionRequest, Executions
 from .scheduler import Scheduler
@@ -151,6 +152,10 @@ class GitResolve(BaseModel):
 
 class ReviewRequest(BaseModel):
     provider: Literal["claude", "codex"]
+
+
+class SuppressNotifications(BaseModel):
+    before: datetime | None = None  # default: now (the whole pending backlog)
 
 
 class UpdateRequest(BaseModel):
@@ -609,6 +614,20 @@ def create_app(services: Services) -> FastAPI:
         operator_only(who_identity)
         with ctx.unit_of_work() as uow:
             return jsonable(services.updates.finish(uow, update_id, state=body.state, report=body.report))  # type: ignore[union-attr]
+
+    @app.post("/v1/notifications/suppress")
+    def suppress_notifications(body: SuppressNotifications, who_identity: Identity = Depends(identity),
+                               who: Principal = Depends(principal)) -> dict[str, Any]:
+        operator_only(who_identity)
+        before = body.before or datetime.now(timezone.utc)
+        with ctx.unit_of_work() as uow:
+            return {"suppressed": notifications.suppress(uow, before=before, actor=who.value), "before": before.isoformat()}
+
+    @app.post("/v1/notifications/test")
+    def test_notification(who_identity: Identity = Depends(identity), who: Principal = Depends(principal)) -> dict[str, Any]:
+        operator_only(who_identity)
+        with ctx.unit_of_work() as uow:
+            return {"event_seq": notifications.send_test(uow, actor=who.value)}
 
     @app.post("/v1/maintenance/run")
     def maintenance_run(who_identity: Identity = Depends(identity)) -> dict[str, Any]:
