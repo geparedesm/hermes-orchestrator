@@ -28,3 +28,11 @@
 .orch-link { text-decoration: underline; cursor: pointer; }
 .orch-error { color: #d23c3c; }
 .orch-muted { opacity: 0.7; }
+.orch-new { margin-left: auto; font-weight: 600; }
+.orch-form { display: flex; flex-direction: column; gap: 0.6rem; max-width: 46rem; }
+.orch-form h3 { margin: 0.2rem 0; }
+.orch-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.88rem; }
+.orch-form input, .orch-form select, .orch-form textarea { font: inherit; color: inherit; background: transparent; border: 1px solid rgba(127, 127, 127, 0.35); border-radius: 0.4rem; padding: 0.35rem 0.5rem; }
+.orch-form select option { color: #000; }
+.orch-form-row { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.orch-form-row label { flex: 1 1 10rem; }

@@ -1,7 +1,7 @@
 (function () {
   "use strict";
   // hermes-orchestrator Dashboard tab (docs/design/phase-10.md). Only the orchestration views Hermes lacks:
-  // overview with required actions, a read-only board, task detail (DAG, approvals, budget, Quality Gate,
+  // overview with required actions, a new-task form, a board (state changes only through the platform), task detail (DAG, approvals, budget, Quality Gate,
   // reviews, tests, executions, audit timeline, checkpoints, manifests, controls), projects, workers, approvals.
   // Data comes from /api/plugins/orchestration/, which proxies the orchestrator Task API behind Hermes's login.
   const SDK = window.__HERMES_PLUGIN_SDK__;
@@ -114,6 +114,63 @@
             h("strong", null, t.key), " ", h("span", { className: "orch-muted" }, t.project), h("div", null, t.title));
         }));
     }));
+  }
+
+  function newKey() {
+    const bytes = new Uint8Array(12);
+    window.crypto.getRandomValues(bytes);
+    return "dash-" + Array.from(bytes, function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  }
+
+  // A new task: the control plane validates it and records the Dashboard operator as its creator. One
+  // idempotency key per form, so a double click or a retried request creates one task.
+  function NewTask(props) {
+    const [projects, setProjects] = React.useState(null);
+    const [form, setForm] = React.useState({ project: "", request: "", title: "", priority: "NORMAL", budget: "", depends_on: "" });
+    const [key] = React.useState(newKey);
+    const [busy, setBusy] = React.useState(false);
+    const [error, setError] = React.useState(null);
+    React.useEffect(function () {
+      api("/projects").then(function (d) {
+        const ready = (d.projects || []).filter(function (p) { return p.status === "PROJECT_READY"; });
+        setProjects(ready);
+        if (ready.length === 1) setForm(function (f) { return Object.assign({}, f, { project: ready[0].slug }); });
+      }).catch(function (e) { setError(String(e.message || e)); });
+    }, []);
+    function field(name) {
+      return function (e) { const value = e.target.value; setForm(function (f) { const n = Object.assign({}, f); n[name] = value; return n; }); };
+    }
+    function submit(e) {
+      e.preventDefault();
+      setBusy(true);
+      setError(null);
+      post("/tasks", { project: form.project, request: form.request, title: form.title || null, priority: form.priority,
+        budget: form.budget || null, idempotency_key: key,
+        depends_on: form.depends_on.split(/[\s,]+/).filter(function (k) { return k; }) })
+        .then(function (t) { props.created(t.key); })
+        .catch(function (e) { setError(String(e.message || e)); setBusy(false); });
+    }
+    if (projects === null) return h("p", null, error || "Loading…");
+    if (!projects.length) return h("p", { className: "orch-muted" }, "No project is ready: register a project and approve its configuration first.");
+    return h("form", { className: "orch-form", onSubmit: submit },
+      h("h3", null, "New task"),
+      h("label", null, "Project", h("select", { value: form.project, onChange: field("project"), required: true },
+        h("option", { value: "" }, "Choose a project…"),
+        projects.map(function (p) { return h("option", { key: p.slug, value: p.slug }, p.slug); }))),
+      h("label", null, "What should be done", h("textarea", { value: form.request, onChange: field("request"), required: true, rows: 6,
+        maxLength: 20000, placeholder: "Be concrete: what to change, where, and how to tell it works." })),
+      h("label", null, "Title (optional)", h("input", { value: form.title, onChange: field("title"), maxLength: 200 })),
+      h("div", { className: "orch-form-row" },
+        h("label", null, "Priority", h("select", { value: form.priority, onChange: field("priority") },
+          ["LOW", "NORMAL", "HIGH", "CRITICAL"].map(function (p) { return h("option", { key: p, value: p }, p); }))),
+        h("label", null, "Budget", h("select", { value: form.budget, onChange: field("budget") },
+          h("option", { value: "" }, "Project default"),
+          ["SMALL", "NORMAL", "LARGE"].map(function (b) { return h("option", { key: b, value: b }, b); }))),
+        h("label", null, "Depends on (optional)", h("input", { value: form.depends_on, onChange: field("depends_on"), placeholder: "T-12, T-13" }))),
+      h("div", null,
+        h("button", { className: "orch-button", type: "submit", disabled: busy || !form.project || !form.request.trim() }, busy ? "Creating…" : "Create task"),
+        h("button", { className: "orch-button", type: "button", onClick: props.cancel }, "Cancel")),
+      error ? h("div", { className: "orch-error" }, error) : null);
   }
 
   function Dag(props) {
@@ -237,20 +294,23 @@
     const [task, setTask] = React.useState(null);
     const [data, setData] = React.useState(null);
     const [error, setError] = React.useState(null);
+    const [creating, setCreating] = React.useState(false);
     const sources = { overview: "/summary", board: "/board", approvals: "/approvals", projects: "/projects", workers: "/workers" };
     const load = React.useCallback(function () {
-      if (task) return;
+      if (task || creating) return;
       api(sources[view]).then(function (d) { setData({ view: view, body: d }); setError(null); })
         .catch(function (e) { setError(String(e.message || e)); });
-    }, [view, task]);
+    }, [view, task, creating]);
     React.useEffect(function () { setData(null); load(); const t = setInterval(load, 10000); return function () { clearInterval(t); }; }, [load]);
-    function open(key) { setTask(key); }
+    function open(key) { setCreating(false); setTask(key); }
     const nav = h("nav", { className: "orch-nav" }, VIEWS.map(function (v) {
-      return h("button", { key: v[0], className: "orch-tab" + (v[0] === view && !task ? " orch-active" : ""),
-        onClick: function () { setTask(null); setView(v[0]); } }, v[1]);
-    }));
+      return h("button", { key: v[0], className: "orch-tab" + (v[0] === view && !task && !creating ? " orch-active" : ""),
+        onClick: function () { setTask(null); setCreating(false); setView(v[0]); } }, v[1]);
+    }).concat([h("button", { key: "new", className: "orch-tab orch-new" + (creating ? " orch-active" : ""),
+      onClick: function () { setTask(null); setCreating(true); } }, "+ New task")]));
     let body;
-    if (task) body = h(TaskView, { task: task, back: function () { setTask(null); } });
+    if (creating) body = h(NewTask, { created: open, cancel: function () { setCreating(false); } });
+    else if (task) body = h(TaskView, { task: task, back: function () { setTask(null); } });
     else if (!data || data.view !== view) body = h("p", null, error || "Loading…");
     else if (view === "overview") body = h(Overview, { data: data.body, open: open, reload: load });
     else if (view === "board") body = h(Board, { tasks: data.body.tasks, open: open });
