@@ -42,7 +42,8 @@ echo "backup $BACKUP"
 echo "== update"
 cp "$ENV_FILE" "$ENV_FILE.pre-update"
 set_version() { if grep -qE '^HO_VERSION=' "$ENV_FILE"; then sed -i.bak "s/^HO_VERSION=.*/HO_VERSION=$1/" "$ENV_FILE" && rm -f "$ENV_FILE.bak"; else echo "HO_VERSION=$1" >> "$ENV_FILE"; fi; }
-if HO_VERSION="$TO" make images >/dev/null && set_version "$TO" && dc up -d --build --wait >/dev/null && scripts/check.sh; then
+# init-secrets.sh only adds secrets a newer version needs (existing files are kept).
+if scripts/init-secrets.sh >/dev/null && HO_VERSION="$TO" make images >/dev/null && set_version "$TO" && dc up -d --build --wait >/dev/null && scripts/check.sh; then
   ho update finish "$RUN" SUCCEEDED --note "updated from $FROM; backup $BACKUP" >/dev/null
   echo "update to $TO succeeded"
   exit 0

@@ -27,6 +27,7 @@ import httpx
 
 from .context import Context
 from .db import Row
+from .events import record_event
 
 log = logging.getLogger(__name__)
 BATCH = 50
@@ -78,6 +79,24 @@ def render_digest(items: list[tuple[dict[str, Any], str | None]]) -> str:
     return "\n".join(lines)
 
 
+def suppress(uow: Any, *, before: datetime, actor: str) -> int:
+    """Withdraw pending notifications created before `before` (for example a backlog from before a chat channel
+    was connected). They stay in the outbox as SUPPRESSED, with an audit event; nothing is deleted."""
+    uow.cur.execute("UPDATE notifications SET state = 'SUPPRESSED' WHERE state = 'PENDING' AND created_at < %s RETURNING priority",
+                    (before,))
+    rows = uow.cur.fetchall()
+    counts = {p: sum(1 for r in rows if r["priority"] == p) for p in ("ATTENTION", "ROUTINE")}
+    record_event(uow.cur, "NOTIFICATIONS_SUPPRESSED", actor=actor, summary=f"{len(rows)} pending notifications suppressed",
+                 data={"before": before.isoformat(), **{k.lower(): v for k, v in counts.items()}}, pending=uow.events)
+    return len(rows)
+
+
+def send_test(uow: Any, *, actor: str) -> int:
+    """A test notification through the normal outbox (attention: delivered on the next pass)."""
+    return record_event(uow.cur, "NOTIFICATION_TEST", actor=actor, pending=uow.events,
+                        summary="Test notification from hermes-orchestrator: approvals and completed tasks will be reported here.")
+
+
 class Outbox:
     def __init__(self, ctx: Context, health: Any, url: str | None, secret: str | None,
                  client: httpx.Client | None = None) -> None:
@@ -109,11 +128,21 @@ class Outbox:
                             "WHERE t.id::text = ANY(%s)", (ids,))
             return {r["id"]: (r["key"], r["slug"]) for r in uow.cur.fetchall()}
 
-    def _mark(self, rows: list[Row], error: str | None) -> None:
+    def _send(self, rows: list[Row], request_id: str, body: Any) -> tuple[str | None, list[Row]]:
+        """Post rows that are still PENDING, holding them while posting: a concurrent suppression waits, and
+        rows it already withdrew are not sent. Returns the error (or None) and the rows actually sent."""
+        error = None
         with self.ctx.unit_of_work() as uow:
+            uow.cur.execute("SELECT id FROM notifications WHERE id = ANY(%s) AND state = 'PENDING' FOR UPDATE",
+                            ([r["id"] for r in rows],))
+            live = {r["id"] for r in uow.cur.fetchall()}
+            rows = [r for r in rows if r["id"] in live]
+            if not rows:
+                return None, []
+            error = self._post(request_id, body(rows))
             if error is None:
                 uow.cur.execute("UPDATE notifications SET state = 'SENT', delivered_at = now(), attempts = attempts + 1, "
-                                "last_error = NULL WHERE id = ANY(%s)", ([r["id"] for r in rows],))
+                                "last_error = NULL WHERE id = ANY(%s) AND state = 'PENDING'", ([r["id"] for r in rows],))
             else:
                 head = rows[0]
                 attempts = int(head["attempts"]) + 1
@@ -121,6 +150,7 @@ class Outbox:
                                 "WHERE id = %s", (attempts, error, timedelta(seconds=backoff_seconds(attempts)), head["id"]))
         if self.health is not None:
             self.health.record("hermes", error is None, error)
+        return error, rows
 
     def deliver(self) -> dict[str, int]:
         stats = {"sent": 0, "failed": 0, "digests": 0}
@@ -140,13 +170,12 @@ class Outbox:
         for row in [r for r in rows if r["priority"] == "ATTENTION"]:
             task, project = task_of(row)
             payload = row["payload"]
-            error = self._post(f"{row['id']}:{int(row['attempts']) + 1}", {"text": render(payload, task), "event": payload.get("type"), "task": task,
-                                                "project": project, "priority": "ATTENTION", "id": str(row["id"])})
-            self._mark([row], error)
+            error, sent = self._send([row], f"{row['id']}:{int(row['attempts']) + 1}", lambda _, p=payload, t=task, pr=project, i=row["id"]: {
+                "text": render(p, t), "event": p.get("type"), "task": t, "project": pr, "priority": "ATTENTION", "id": str(i)})
             if error:
                 stats["failed"] += 1
                 return stats
-            stats["sent"] += 1
+            stats["sent"] += len(sent)
 
         routine = [r for r in rows if r["priority"] == "ROUTINE"]
         now = datetime.now(timezone.utc)
@@ -159,14 +188,12 @@ class Outbox:
             if last is not None and last > now - ROUTINE_DIGEST:
                 return stats
             batch = routine
-            items = [(r["payload"], task_of(r)[0]) for r in batch]
-            error = self._post(f"digest-{batch[0]['id']}:{int(batch[0]['attempts']) + 1}", {"text": render_digest(items), "event": "DIGEST", "task": None,
-                                                            "project": None, "priority": "ROUTINE",
-                                                            "id": f"digest-{batch[0]['id']}"})
-            self._mark(batch, error)
+            error, sent = self._send(batch, f"digest-{batch[0]['id']}:{int(batch[0]['attempts']) + 1}", lambda live: {
+                "text": render_digest([(r["payload"], task_of(r)[0]) for r in live]), "event": "DIGEST", "task": None,
+                "project": None, "priority": "ROUTINE", "id": f"digest-{batch[0]['id']}"})
             if error:
                 stats["failed"] += 1
-            else:
-                stats["sent"] += len(batch)
+            elif sent:
+                stats["sent"] += len(sent)
                 stats["digests"] += 1
         return stats

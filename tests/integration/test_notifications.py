@@ -13,6 +13,7 @@ import pytest
 from control_plane.notifications import ROUTINE_DIGEST, render, sign
 
 import test_git  # type: ignore[import-not-found]
+from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
 
 pytestmark = pytest.mark.integration
 agents = pytest.fixture(test_git.agents.__wrapped__)
@@ -140,3 +141,42 @@ def test_active_tasks_are_filtered_before_the_limit(api, services, agents, task)
         q(services, "UPDATE tasks SET state = 'CANCELLED' WHERE key = %s", key)
     keys = [t["key"] for t in api.get("/v1/tasks?limit=2&active=true").json()["tasks"]]
     assert keys == [task]
+
+
+def test_a_backlog_is_suppressed_before_a_channel_is_connected(api, services, task, hermes):
+    pending = q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'PENDING'")[0]["n"]
+    assert pending > 0
+    assert api.post("/v1/notifications/suppress", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 403
+    response = api.post("/v1/notifications/suppress", {})
+    assert response.status_code == 200 and response.json()["suppressed"] == pending
+    assert q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'PENDING'")[0]["n"] == 0
+    [audit] = q(services, "SELECT actor, data FROM events WHERE type = 'NOTIFICATIONS_SUPPRESSED'")
+    assert audit["actor"] == "host-cli:operator" and audit["data"]["attention"] + audit["data"]["routine"] == pending
+    # Nothing old is delivered; what happens afterwards is.
+    assert api.post("/v1/notifications/test").status_code == 200
+    services.outbox.deliver()
+    assert [r["event"] for r in hermes.received] == ["NOTIFICATION_TEST"]
+    assert "approvals and completed tasks will be reported here" in hermes.received[0]["text"]
+
+
+def test_suppression_can_be_limited_to_older_notifications(api, services, task):
+    cutoff = q(services, "SELECT max(created_at) AS t FROM notifications")[0]["t"]
+    api.post("/v1/notifications/test")
+    response = api.post("/v1/notifications/suppress", {"before": cutoff.isoformat()})
+    assert response.status_code == 200
+    rows = q(services, "SELECT n.state FROM notifications n JOIN events e ON e.seq = n.event_seq WHERE e.type = 'NOTIFICATION_TEST'")
+    assert [r["state"] for r in rows] == ["PENDING"]
+
+
+def test_notifications_withdrawn_while_a_delivery_pass_runs_are_not_sent(api, services, task, hermes, monkeypatch):
+    original = services.outbox._keys
+
+    def suppress_meanwhile(rows):  # the pass has read its batch; the operator withdraws it before it is posted
+        api.post("/v1/notifications/suppress", {})
+        return original(rows)
+
+    monkeypatch.setattr(services.outbox, "_keys", suppress_meanwhile)
+    q(services, "UPDATE notifications SET created_at = now() - interval '1 hour'")  # routine ones are due for a digest
+    services.outbox.deliver()
+    assert hermes.received == []
+    assert q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'SENT'")[0]["n"] == 0

@@ -28,6 +28,7 @@ ATTENTION_EVENTS = frozenset(
         "TASK_COMPLETED",
         "TASK_FAILED",
         "PLATFORM_DEGRADED",
+        "NOTIFICATION_TEST",
     }
 )
 # Aggregated into a periodic digest. Everything else (grants, workers, routing, steps) is audit only.
@@ -53,6 +54,7 @@ ROUTINE_EVENTS = frozenset(
 )
 AUDIT_EVENTS = frozenset(
     {
+        "NOTIFICATIONS_SUPPRESSED",
         "PROJECT_REGISTERED",
         "PROJECT_UNREGISTERED",
         "PROJECT_READY",
