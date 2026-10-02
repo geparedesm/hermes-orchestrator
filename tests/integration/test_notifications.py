@@ -166,3 +166,17 @@ def test_suppression_can_be_limited_to_older_notifications(api, services, task):
     assert response.status_code == 200
     rows = q(services, "SELECT n.state FROM notifications n JOIN events e ON e.seq = n.event_seq WHERE e.type = 'NOTIFICATION_TEST'")
     assert [r["state"] for r in rows] == ["PENDING"]
+
+
+def test_notifications_withdrawn_while_a_delivery_pass_runs_are_not_sent(api, services, task, hermes, monkeypatch):
+    original = services.outbox._keys
+
+    def suppress_meanwhile(rows):  # the pass has read its batch; the operator withdraws it before it is posted
+        api.post("/v1/notifications/suppress", {})
+        return original(rows)
+
+    monkeypatch.setattr(services.outbox, "_keys", suppress_meanwhile)
+    q(services, "UPDATE notifications SET created_at = now() - interval '1 hour'")  # routine ones are due for a digest
+    services.outbox.deliver()
+    assert hermes.received == []
+    assert q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'SENT'")[0]["n"] == 0
