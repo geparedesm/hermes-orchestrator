@@ -11,6 +11,7 @@ principal host-cli:operator. The Hermes CLI integration (`hermes orchestration
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -63,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--priority", choices=["CRITICAL", "HIGH", "NORMAL", "LOW"])
     t.add_argument("--budget", choices=["SMALL", "NORMAL", "LARGE", "UNLIMITED"])
     t.add_argument("--depends-on", action="append", default=[])
+    t.add_argument("--attach", action="append", default=[], metavar="PATH",
+                   help="attach a file readable inside this container (repeatable)")
+    t.add_argument("--attach-stdin", metavar="NAME",
+                   help="attach standard input as NAME (from the host: ... --attach-stdin design.png < design.png)")
     lst = task.add_parser("list")
     lst.add_argument("--project")
     lst.add_argument("--state")
@@ -219,6 +224,11 @@ def main(argv: list[str] | None = None) -> int:
                 body["budget_profile"] = args.budget
             if args.depends_on:
                 body["related_tasks"] = [{"task": k, "kind": "DEPENDENCY"} for k in args.depends_on]
+            files = [(Path(p).name, Path(p).read_bytes()) for p in args.attach]
+            if args.attach_stdin:
+                files.append((args.attach_stdin, sys.stdin.buffer.read()))
+            if files:
+                body["attachments"] = [{"name": n, "content_base64": base64.b64encode(c).decode()} for n, c in files]
             return _call("POST", "/v1/tasks", body=body, mutate=True)
         if cmd == "list":
             return _call("GET", "/v1/tasks", params={k: v for k, v in (("project", args.project), ("state", args.state)) if v})

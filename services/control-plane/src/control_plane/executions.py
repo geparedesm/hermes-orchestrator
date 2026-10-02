@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -22,6 +23,7 @@ from uuid import UUID
 
 from ho_core.adapters import AgentAssignment, ExecutionResult, FailureClass, OutputBundle, adapter_for, image_suffix
 from ho_core.enums import ProjectStatus, Role, TaskState
+from ho_core.hashing import sha256_hex
 from ho_core.ids import uuid7
 from ho_core.policy.engine import GrantRequest, evaluate_grant
 from ho_core.redact import redact
@@ -45,6 +47,13 @@ MAX_DISPATCH_ATTEMPTS = 5
 _WORKSPACE = re.compile(r"^\.hermes/worktrees/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _FAILURE_BY_CODE = {"capacity_exceeded": "CAPACITY", "auth_required": "AUTH", "rejected": "POLICY",
                     "image_not_allowed": "POLICY", "not_found": "UNKNOWN", "docker_error": "TRANSIENT"}
+
+
+class AttachmentUnavailable(Exception):
+    """An attachment of the execution's task cannot be read back intact from the artifact store."""
+
+
+_HYDRATING = threading.BoundedSemaphore(2)
 
 
 @dataclass
@@ -222,6 +231,13 @@ class Executions:
 
         command = list(req.command)
         inputs: dict[str, str] = dict(req.inputs)
+        # Agents of the task see the files the person attached; the spec keeps references only, the content is
+        # read from the artifact store and verified each time the execution is sent to Agent Manager.
+        attached: list[dict[str, Any]] = []
+        if req.prompt:
+            uow.cur.execute("SELECT artifact_id, name, media_type, size_bytes, sha256 FROM task_attachments "
+                            "WHERE task_id = %s ORDER BY position", (task["id"],))
+            attached = [{**a, "artifact_id": str(a["artifact_id"])} for a in uow.cur.fetchall()]
         if req.prompt:
             assert provider is not None
             caps_granted = grant["capabilities"]
@@ -231,6 +247,7 @@ class Executions:
                 resume_session=resume_row["provider_session_id"] if resume_row else None,
                 max_turns=req.max_turns, model=req.model, result_schema=req.result_schema,
                 read_dirs=tuple(f"/projects/{slug}" for slug in caps_granted.get("project_read") or ()),
+                attachments=tuple((a["name"], a["media_type"], int(a["size_bytes"])) for a in attached),
             ))
             command, inputs = plan.command, {**inputs, **plan.inputs}
             image = req.image or plan.image
@@ -260,6 +277,8 @@ class Executions:
             spec["assignment"] = {"prompt": req.prompt, "max_turns": req.max_turns, "model": req.model,
                                   "secrets": list(req.secrets), "resume_of": str(resume_row["id"]) if resume_row else None,
                                   "result_schema": req.result_schema}
+        if attached:
+            spec["attachments"] = attached
         if workspace:
             spec["workspace"] = workspace
         if grant["capabilities"]["project_read"]:
@@ -346,6 +365,40 @@ class Executions:
 
     # ---------------------------------------------------------------- dispatch
 
+    def _send(self, spec: dict[str, Any], attempts: int) -> dict[str, Any]:
+        refs = spec.get("attachments") or []
+        if refs and attempts > 1:
+            # A retry after a lost answer: if the worker exists, it already has its files.
+            try:
+                status = self.agents.status(spec["execution_id"])
+                if status.get("state") not in (None, "absent"):
+                    return status
+            except AgentManagerError:
+                pass
+        if not refs:
+            return self.agents.create(spec)
+        with _HYDRATING:  # at most a couple of executions' files in memory at once
+            return self.agents.create({**spec, "attachment_files": self._attachment_files(refs)})
+
+    def _attachment_files(self, refs: list[dict[str, Any]]) -> dict[str, str]:
+        files = {}
+        with self.ctx.unit_of_work() as uow:
+            uow.cur.execute("SELECT id, path, sha256, purged_at FROM artifacts WHERE id = ANY(%s)",
+                            ([UUID(r["artifact_id"]) for r in refs],))
+            stored = {str(a["id"]): a for a in uow.cur.fetchall()}
+        for ref in refs:
+            artifact = stored.get(ref["artifact_id"])
+            try:
+                if artifact is None or artifact["purged_at"] is not None:
+                    raise FileNotFoundError(ref["name"])
+                content = self.ctx.artifacts.read(artifact["path"])
+            except (OSError, ValueError) as exc:
+                raise AttachmentUnavailable(f"attachment {ref['name']} is missing from the artifact store") from exc
+            if sha256_hex(content) != ref["sha256"] or artifact["sha256"] != ref["sha256"]:
+                raise AttachmentUnavailable(f"attachment {ref['name']} does not match its recorded SHA-256")
+            files[ref["name"]] = base64.b64encode(content).decode()
+        return files
+
     def dispatch(self, execution_id: UUID | str) -> None:
         with self.ctx.unit_of_work() as uow:
             row = self.get(uow, execution_id, lock=True)
@@ -367,7 +420,15 @@ class Executions:
                             (row["id"],))
             spec, attempts = row["spec"], row["dispatch_attempts"] + 1
         try:
-            status = self.agents.create(spec)
+            status = self._send(spec, attempts)
+        except AttachmentUnavailable as exc:
+            # Lost or altered on the artifact volume: nothing can be sent; say which file, do not retry blindly.
+            with self.ctx.unit_of_work() as uow:
+                row = self.get(uow, execution_id, lock=True)
+                if row["state"] == "REQUESTED":
+                    self._intent(uow, row["id"], "FAILED", str(exc))
+                    self._finish(uow, row, "FAILED", failure_class="POLICY", reason=str(exc))
+            return
         except AgentManagerError as exc:
             with self.ctx.unit_of_work() as uow:
                 row = self.get(uow, execution_id, lock=True)

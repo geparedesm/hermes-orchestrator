@@ -8,7 +8,7 @@ Phase 9 makes official Hermes (`nousresearch/hermes-agent`, pinned by digest, un
 | --- | --- | --- |
 | Chat: `/orch …` | `tasks`, `status T-n`, `create <project> <request>`, `approvals`, `approve <id>`, `reject <id> [note]`, `pause/resume/cancel/retry T-n`, `revise T-n <text>`, `budget T-n [counter=N]`, `projects` | Anyone Hermes lets talk to it can read and create; human actions use the sender's identity (`telegram:<user id>`); approving needs that identity in `HO_APPROVERS` |
 | Chat: Hermes's agent | Tools `orch_task_create`, `orch_task_status`, `orch_task_list`, `orch_task_inspect`, `orch_project_list`, `orch_approvals_list` | Read and create only: the model can never approve, cancel, or change budgets (AD-10) |
-| Dashboard: Orchestration tab | New tasks (**+ New task**: project, request, title, priority, budget, dependencies), pending approvals (approve/reject), and active tasks (pause/resume) | The operator behind the Dashboard login (`dashboard:operator`) |
+| Dashboard: Orchestration tab | New tasks (**+ New task**: project, request, title, priority, budget, dependencies, attachments), pending approvals (approve/reject), and active tasks (pause/resume) | The operator behind the Dashboard login (`dashboard:operator`) |
 | Host: `docker compose exec hermes hermes orchestration <verb>` | The same verbs as `/orch` | Principal `hermes-cli:<user>`; approvals still need an approver |
 | Notifications | Approvals, logins needed, blocked tasks, budgets, definitive test failures, recovery problems, degraded platform, ready for merge, failed and completed tasks — immediately, with the command to answer. Progress — one digest every 5 minutes. | — |
 

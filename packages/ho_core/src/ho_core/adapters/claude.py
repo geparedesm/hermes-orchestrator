@@ -23,6 +23,7 @@ from typing import Any, Iterable
 
 from ..enums import Role
 from .base import (
+    ATTACHMENTS_DIR,
     MAX_EVENTS,
     RUNNER,
     AdapterEvent,
@@ -79,9 +80,10 @@ class ClaudeAdapter:
             command += ["--resume", assignment.resume_session]
         if assignment.model:
             command += ["--model", assignment.model]
-        if assignment.read_dirs:
+        extra_dirs = [*assignment.read_dirs, *([ATTACHMENTS_DIR] if assignment.attachments else [])]
+        if extra_dirs:
             # Claude Code limits file tools to its working directories (/workspace is empty for the orchestrator).
-            command += ["--add-dir", *assignment.read_dirs]
+            command += ["--add-dir", *extra_dirs]
         return ExecutionPlan(
             image=f"claude-{assignment.toolchain}",
             command=command,

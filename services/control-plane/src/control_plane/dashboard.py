@@ -140,10 +140,14 @@ def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
     checkpoints = cur.fetchall()
     cur.execute("SELECT id, kind, sha256, generated_at FROM manifests WHERE task_id = %s ORDER BY generated_at DESC", (tid,))
     manifests = cur.fetchall()
+    cur.execute("SELECT id, name, media_type, size_bytes, sha256, added_by, created_at FROM task_attachments WHERE task_id = %s "
+                "ORDER BY position", (tid,))
+    attachments = cur.fetchall()
     return {"dag": {"plan_version": task.get("current_plan_version"),
                     "subtasks": [{k: v for k, v in s.items() if k != "id"} for s in subtasks], "edges": edges},
             "approvals": approvals, "budget": budget, "quality_gate": gate, "reviews": reviews, "tests": tests,
-            "executions": executions, "git": git, "timeline": timeline, "checkpoints": checkpoints, "manifests": manifests}
+            "executions": executions, "git": git, "timeline": timeline, "checkpoints": checkpoints, "manifests": manifests,
+            "attachments": attachments}
 
 
 # ---------------------------------------------------------------- metrics

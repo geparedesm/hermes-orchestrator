@@ -144,6 +144,15 @@ ho task create my-app "Add OAuth authentication" --priority HIGH
 ho task list
 ```
 
+**Attachments** (designs, specifications, sample data): add them in the Dashboard form, or from the CLI with `--attach-stdin NAME < file` (the CLI runs inside the container, so host files come through standard input):
+
+```bash
+docker compose exec -T control-plane ho task create my-app "Build the login page from the attached design" \
+  --attach-stdin design.png < ~/Desktop/design.png
+```
+
+Up to 10 files, 10 MiB each, 25 MiB per task: text, code, CSV, JSON, XML, PNG/JPEG/GIF/WebP, and PDF. The orchestrator, developers, and reviewers of the task read them from `/run/ho-input/attachments/`; they are sent to the AI providers, so never attach passwords, keys, or personal data.
+
 With `HO_ORCHESTRATION=true` the orchestrator takes it from there. Without it, drive the steps yourself:
 
 ```bash

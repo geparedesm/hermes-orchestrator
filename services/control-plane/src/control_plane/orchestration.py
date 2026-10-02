@@ -403,6 +403,12 @@ class Orchestration:
                  "## Project files", "", f"The tracked files of the project's main branch are mounted read-only at /projects/{self._slug(uow, task)} "
                  "(no Git metadata; files the project ignores, such as local secrets, are not there). Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
                  "accurate `files`.", ""]
+        uow.cur.execute("SELECT name FROM task_attachments WHERE task_id = %s ORDER BY position", (task["id"],))
+        attached = [r["name"] for r in uow.cur.fetchall()]
+        if attached:
+            lines += ["## Attachments", "", f"The person attached {len(attached)} file(s): {', '.join(attached)} (listed with "
+                      "their paths below the assignment). Developers and reviewers of this task receive the same files: name the "
+                      "ones each subtask should follow in its description.", ""]
         if task["current_requirements_version"]:
             uow.cur.execute("SELECT a.path FROM requirement_versions r JOIN artifacts a ON a.id = r.artifact_id "
                             "WHERE r.task_id = %s ORDER BY r.version DESC LIMIT 1", (task["id"],))
