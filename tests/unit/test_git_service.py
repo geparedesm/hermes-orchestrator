@@ -407,3 +407,82 @@ def test_remote_detection(api, root, monkeypatch):
 
 def test_fake_gh_is_executable():
     assert os.access(FIXTURES / "fake_gh.py", os.X_OK) or sys.platform == "win32"
+
+
+# ---------------------------------------------------------------- read views (orchestrator's project access)
+
+def test_read_view_has_only_tracked_files(api, root):
+    repo = root / "app"
+    commit(repo, "ignore local files", {".gitignore": "secrets/*\n.env\n/addons/*\n"})
+    write(repo, "secrets/db_password", "hunter2\n")
+    write(repo, ".env", "TOKEN=abc\n")
+    nested = repo / "addons" / "job"
+    nested.mkdir(parents=True)
+    sh(nested, "init", "-q", "-b", "main")
+    commit(nested, "nested", {"module.py": "x = 1\n"})
+    (repo / "outside-link").symlink_to("/etc")
+    commit(repo, "links", {"inner": "inner\n"})
+    os.symlink("inner", repo / "ok-link")
+    os.symlink("../../../../secrets/db_password", repo / "escape-link")
+    sh(repo, "add", "ok-link", "escape-link")
+    sh(repo, "commit", "-q", "-m", "symlinks")
+    write(repo, "notes.txt", "untracked\n")
+
+    response = api("/v1/read-views", {"path": "app", "branch": "main"})
+    assert response.status_code == 200, response.text
+    view = repo / response.json()["path"]
+    files = sorted(str(p.relative_to(view)) for p in view.rglob("*"))
+    assert "app.py" in files and "docs/guide.md" in files and ".gitignore" in files
+    leaked = {"secrets/db_password", ".env", "notes.txt", ".git", "addons/job/module.py", "outside-link"} & set(files)
+    assert not leaked, leaked
+    assert (view / "ok-link").read_text() == "inner\n" and not (view / "escape-link").exists(follow_symlinks=False)
+    assert response.json()["sha"] == sh(repo, "rev-parse", "main") and view.name == response.json()["sha"]
+    assert sh(repo, "status", "--porcelain") == "?? notes.txt"  # the view is excluded from the user's status
+
+
+def test_read_view_follows_the_branch_and_is_reused(api, root):
+    repo = root / "app"
+    first = api("/v1/read-views", {"path": "app", "branch": "main"}).json()
+    assert api("/v1/read-views", {"path": "app", "branch": "main"}).json() == first
+    commit(repo, "more", {"new.py": "y = 2\n"})
+    second = api("/v1/read-views", {"path": "app", "branch": "main"}).json()
+    assert second["sha"] != first["sha"] and (repo / second["path"] / "new.py").exists()
+    assert not (repo / first["path"] / "new.py").exists()
+
+
+def test_read_views_in_use_or_recent_are_kept(api, root):
+    repo = root / "app"
+    first = api("/v1/read-views", {"path": "app", "branch": "main"}).json()
+    commit(repo, "more", {"new.py": "y = 2\n"})
+    second = api("/v1/read-views", {"path": "app", "branch": "main"}).json()
+    assert api("/v1/read-views/prune", {"path": "app", "keep": []}).json() == {"removed": []}  # both recent
+    assert api("/v1/read-views/prune", {"path": "app", "keep": [first["sha"]], "min_age_seconds": 0}).json() == {
+        "removed": [second["sha"]]}
+    assert (repo / first["path"]).is_dir()
+
+
+def test_read_view_refuses_a_redirected_hermes_directory(api, root, tmp_path):
+    repo = root / "app"
+    (tmp_path / "elsewhere").mkdir()
+    (repo / ".hermes").symlink_to(tmp_path / "elsewhere")
+    response = api("/v1/read-views", {"path": "app", "branch": "main"})
+    assert response.status_code == 409 and not any((tmp_path / "elsewhere").iterdir())
+
+
+def test_read_view_ignores_archive_attributes(api, root):
+    repo = root / "app"
+    commit(repo, "attributes", {".gitattributes": "docs/ export-ignore\nversion.txt export-subst\n", "version.txt": "$Format:%H$\n"})
+    view = repo / api("/v1/read-views", {"path": "app", "branch": "main"}).json()["path"]
+    assert (view / "docs" / "guide.md").read_text() == "guide\n"  # export-ignore does not hide tracked files
+    assert (view / "version.txt").read_text() == "$Format:%H$\n"  # nor does export-subst rewrite them
+
+
+def test_read_view_of_an_empty_commit(api, tmp_path):
+    projects = tmp_path / "projects"
+    empty = projects / "empty"
+    empty.mkdir(parents=True)
+    sh(empty, "init", "-q", "-b", "main")
+    sh(empty, "commit", "-q", "--allow-empty", "-m", "start")
+    response = api("/v1/read-views", {"path": "empty", "branch": "main"})
+    assert response.status_code == 200, response.text
+    assert list((empty / response.json()["path"]).iterdir()) == []

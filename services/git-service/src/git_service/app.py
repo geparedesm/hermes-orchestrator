@@ -40,6 +40,15 @@ class PrepareBody(WorkspaceBody):
     pin_ref: str | None = Field(default=None, max_length=200)
 
 
+class ReadViewBody(ProjectPath):
+    branch: str = Field(min_length=1, max_length=200)
+
+
+class PruneReadViewsBody(ProjectPath):
+    keep: list[str] = Field(default_factory=list, max_length=1000)
+    min_age_seconds: int = Field(default=3600, ge=0)
+
+
 class CollectBody(WorkspaceBody):
     branch: str = Field(min_length=1, max_length=200)
     base_sha: str = Field(min_length=40, max_length=40)
@@ -212,6 +221,16 @@ def create_app(projects_root: Path, token: str, merge_key: bytes = b"") -> FastA
     def prepare(body: PrepareBody) -> dict[str, Any]:
         repo = git_repository(body.path)
         return locked(repo, lambda: repo_ops.prepare_workspace(repo, body.name, body.branch, body.base_ref, body.pin_ref))
+
+    @app.post("/v1/read-views", dependencies=[Depends(authorized)])
+    def read_view(body: ReadViewBody) -> dict[str, Any]:
+        repo = git_repository(body.path)
+        return locked(repo, lambda: repo_ops.read_view(repo, body.branch))
+
+    @app.post("/v1/read-views/prune", dependencies=[Depends(authorized)])
+    def prune_read_views(body: PruneReadViewsBody) -> dict[str, Any]:
+        repo = git_repository(body.path)
+        return locked(repo, lambda: repo_ops.prune_read_views(repo, set(body.keep), body.min_age_seconds))
 
     @app.post("/v1/workspaces/collect", dependencies=[Depends(authorized)])
     def collect(body: CollectBody) -> dict[str, Any]:

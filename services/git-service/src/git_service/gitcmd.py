@@ -50,6 +50,25 @@ def run(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...
     """Run git with the hardening above. `protocols` names the transports this call may use
     ("never" for local-only work); `trusted` adds other exact safe.directory paths (for example
     the untrusted clone a fetch reads from, which is never checked out or run here)."""
+    command = command_for(repo, *args, protocols=protocols, config=config, trusted=trusted)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=_environment(env),
+                                check=False, input=input_text)
+    except subprocess.TimeoutExpired as exc:
+        raise GitError(f"git {args[0]} timed out") from exc
+    if result.returncode not in ok_codes:
+        raise GitError(result.stderr.strip()[:500] or f"git {args[0]} failed")
+    return result
+
+
+def popen(repo: Path, *args: str) -> subprocess.Popen[bytes]:
+    """A hardened local git process with binary pipes (object streaming)."""
+    return subprocess.Popen(command_for(repo, *args), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, env=_environment(None))
+
+
+def command_for(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...] = (),
+                trusted: tuple[Path, ...] = ()) -> list[str]:
     command = ["git", "-c", f"safe.directory={repo}"]
     for path in trusted:
         command += ["-c", f"safe.directory={path}"]
@@ -65,14 +84,7 @@ def run(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...
     for item in config:
         command += ["-c", item]
     command += ["-C", str(repo), *args]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=_environment(env),
-                                check=False, input=input_text)
-    except subprocess.TimeoutExpired as exc:
-        raise GitError(f"git {args[0]} timed out") from exc
-    if result.returncode not in ok_codes:
-        raise GitError(result.stderr.strip()[:500] or f"git {args[0]} failed")
-    return result
+    return command
 
 
 def git(repo: Path, *args: str, **kwargs) -> str:

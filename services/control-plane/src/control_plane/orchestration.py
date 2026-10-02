@@ -400,8 +400,8 @@ class Orchestration:
                  "subtasks; use WAIT when nothing needs deciding. Every subtask kind, TEST_AUTHORING included, runs with role DEVELOPER. Record assumptions instead of guessing silently; HIGH or",
                  "irreversible ambiguity needs RECORD_ASSUMPTION with level HIGH (a human decides).", "",
                  "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], "",
-                 "## Project files", "", f"The project's current main branch is mounted read-only at /projects/{self._slug(uow, task)}. "
-                 "Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
+                 "## Project files", "", f"The tracked files of the project's main branch are mounted read-only at /projects/{self._slug(uow, task)} "
+                 "(no Git metadata; files the project ignores, such as local secrets, are not there). Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
                  "accurate `files`.", ""]
         if task["current_requirements_version"]:
             uow.cur.execute("SELECT a.path FROM requirement_versions r JOIN artifacts a ON a.id = r.artifact_id "

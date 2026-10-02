@@ -204,3 +204,31 @@ def test_reaper_stops_workers_whose_grant_expired(api, ops, credential):
     time.sleep(4)
     assert body["execution_id"] in ops.reap_expired()
     assert api.wait(body["execution_id"], timeout=20)["state"] == "exited"
+
+
+def test_orchestrator_sees_only_the_tracked_files_of_its_project(api, client):
+    from conftest import credential_volume  # type: ignore[import-not-found]
+    from git_service import repo_ops
+
+    credential_volume(client, "claude", "hotest", {"oauth_token": "not-a-real-token"})
+    import os
+    import subprocess
+
+    repo = api.projects_root / "proj-a"
+    (repo / "README.md").write_text("# proj-a\n")
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "u",
+           "GIT_AUTHOR_EMAIL": "u@example.com", "GIT_COMMITTER_NAME": "u", "GIT_COMMITTER_EMAIL": "u@example.com"}
+    for args in (["add", "README.md"], ["commit", "-q", "-m", "readme"]):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, env=env)
+    view = repo_ops.read_view(repo, "main")  # secret.txt and .hermes/worktrees are not tracked
+    body = api.request(Role.ORCHESTRATOR, "ls -A /projects/proj-a; cat /projects/proj-a/secret.txt 2>&1; "
+                       "touch /projects/proj-a/x 2>&1 || echo read-only", provider="claude", egress="PROVIDER_ONLY",
+                       workspace="NONE", workspace_path=None, project_read=["proj-a"])
+    body["project_read"] = [{"slug": "proj-a", "path": f"proj-a/{view['path']}"}]
+    logs = api.run(body)["logs"]
+    assert "No such file" in logs and "private data" not in logs and "read-only" in logs, logs
+    assert logs.split("cat:")[0].split() == ["README.md"], logs
+    body = api.request(Role.ORCHESTRATOR, "true", provider="claude", egress="PROVIDER_ONLY", workspace="NONE",
+                       workspace_path=None, project_read=["proj-a"])
+    body["project_read"] = [{"slug": "proj-a", "path": "proj-a"}]  # the live directory is never mounted
+    assert api.create(body).status_code == 403

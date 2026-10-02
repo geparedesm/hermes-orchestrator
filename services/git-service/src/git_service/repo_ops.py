@@ -12,17 +12,20 @@ Trust model (SECURITY_MODEL.md section 9):
 
 from __future__ import annotations
 
+import os
 import re
+import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ho_core.gitpolicy import ChangeLevel, FileChange, classify_divergence, parse_hunks, valid_branch, valid_sha, valid_workspace
 
-from .gitcmd import GitError, git, run, try_git
+from .gitcmd import GitError, git, popen, run, try_git
 
 WORKTREES = Path(".hermes") / "worktrees"
-EXCLUDES = (".hermes/worktrees/", ".hermes/generated/")
+READ_VIEWS = Path(".hermes") / "read"
+EXCLUDES = (".hermes/worktrees/", ".hermes/generated/", ".hermes/read/")
 AGENT_IDENTITY = ("Hermes Agent", "agent@hermes.local")
 MAX_COMMITS = 200
 MAX_FILES = 2000
@@ -73,8 +76,9 @@ def _full_ref(repo: Path, ref: str) -> str:
 
 def _ensure_excluded(repo: Path) -> bool:
     """Keep workspaces out of the user's `git status`: add them to .git/info/exclude if needed."""
-    ignored = run(repo, "check-ignore", "-q", "--no-index", ".hermes/worktrees/probe", ok_codes=(0, 1)).returncode == 0
-    if ignored:
+    missing = [e for e in EXCLUDES
+               if run(repo, "check-ignore", "-q", "--no-index", f"{e}probe", ok_codes=(0, 1)).returncode != 0]
+    if not missing:
         return False
     info = repo / ".git" / "info"
     if info.is_symlink() or (info / "exclude").is_symlink():
@@ -82,7 +86,7 @@ def _ensure_excluded(repo: Path) -> bool:
     info.mkdir(exist_ok=True)
     exclude = info / "exclude"
     existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-    lines = [e for e in EXCLUDES if e not in existing.splitlines()]
+    lines = [e for e in missing if e not in existing.splitlines()]
     with exclude.open("a", encoding="utf-8") as handle:
         handle.write(("" if existing.endswith("\n") or not existing else "\n") +
                      "# Hermes Orchestrator workspaces\n" + "".join(f"{e}\n" for e in lines))
@@ -173,6 +177,106 @@ def changes(repo: Path, base: str, head: str) -> dict[str, Any]:
             "insertions": int(m.group(1)) if (m := re.search(r"(\d+) insertion", stat)) else 0,
             "deletions": int(m.group(1)) if (m := re.search(r"(\d+) deletion", stat)) else 0,
             "files_changed": numbers[0] if numbers else 0}
+
+
+def _read_views_dir(repo: Path) -> Path:
+    for component in (repo / ".hermes", repo / READ_VIEWS):
+        if component.is_symlink():
+            raise Refused(f"{component.relative_to(repo)} must not be a symbolic link")
+    return repo / READ_VIEWS
+
+
+def read_view(repo: Path, branch: str) -> dict[str, Any]:
+    """An immutable copy of the branch's tracked files for agents that only read the project (the orchestrator).
+
+    Written straight from the commit's objects: no `.git`, nothing ignored or untracked (local secrets, `.env`,
+    backups, other tasks' workspaces), no submodules or nested repositories, and no attribute or filter
+    processing (`export-ignore`, `export-subst`, smudge filters): exactly what was committed. One directory per
+    commit, reused while the branch stays there; `prune_read_views` removes the ones no execution uses.
+    """
+    import shutil
+    import tempfile
+
+    if not valid_branch(branch):
+        raise Refused(f"invalid branch name {branch!r}")
+    sha = resolve_commit(repo, f"refs/heads/{branch}")
+    views = _read_views_dir(repo)
+    target = views / sha
+    if target.is_symlink():
+        raise Refused(f"{target.relative_to(repo)} must not be a symbolic link")
+    if not target.is_dir():
+        _ensure_excluded(repo)
+        views.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=f".tmp-{sha[:12]}-", dir=views))
+        try:
+            tree = staging / "tree"
+            tree.mkdir(mode=0o755)
+            _write_tree(repo, sha, tree)
+            tree.rename(target)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+    os.utime(target)  # last use, for pruning
+    return {"sha": sha, "path": str(target.relative_to(repo))}
+
+
+def _write_tree(repo: Path, sha: str, dest: Path) -> None:
+    entries = []
+    listing = run(repo, "ls-tree", "-r", "-z", "--full-tree", sha, timeout=_FETCH_TIMEOUT).stdout
+    for record in filter(None, listing.split("\0")):
+        meta, name = record.split("\t", 1)
+        mode, kind, obj = meta.split()
+        parts = PurePosixPath(name).parts
+        if kind != "blob" or not parts or name.startswith("/") or any(p in ("", ".", "..", ".git") for p in parts):
+            continue  # submodules (commits), and paths Git itself would refuse
+        entries.append((mode, obj, parts))
+    root = dest.resolve()
+    process = popen(repo, "cat-file", "--batch")
+    assert process.stdin is not None and process.stdout is not None
+    try:
+        for mode, obj, parts in entries:
+            process.stdin.write(f"{obj}\n".encode())
+            process.stdin.flush()
+            header = process.stdout.readline().split()
+            if len(header) != 3:
+                raise GitError(f"object {obj} unreadable")
+            data = process.stdout.read(int(header[2]))
+            process.stdout.read(1)  # the newline after each object
+            path = dest.joinpath(*parts)
+            if path.parent.resolve() != root.joinpath(*parts[:-1]):
+                continue  # never write through a link the view itself contains
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if mode == "120000":
+                link = data.decode("utf-8", "replace")
+                # Links stay inside the view: absolute or escaping targets are dropped.
+                if link.startswith("/") or not (path.parent / link).resolve().is_relative_to(root):
+                    continue
+                path.symlink_to(link)
+            else:
+                path.write_bytes(data)
+                path.chmod(0o755 if mode == "100755" else 0o644)
+    finally:
+        process.stdin.close()
+        process.wait(timeout=30)
+
+
+def prune_read_views(repo: Path, keep: set[str], min_age_seconds: int) -> dict[str, Any]:
+    """Remove read views no execution uses (`keep`) and not used for `min_age_seconds` (a view handed to an
+    execution that is not recorded yet stays)."""
+    import shutil
+
+    views = _read_views_dir(repo)
+    removed = []
+    if views.is_dir():
+        cutoff = time.time() - min_age_seconds
+        for entry in views.iterdir():
+            if entry.name in keep or entry.lstat().st_mtime > cutoff:
+                continue
+            if entry.is_symlink() or not entry.is_dir():
+                entry.unlink()
+            else:
+                shutil.rmtree(entry)
+            removed.append(entry.name)
+    return {"removed": sorted(removed)}
 
 
 def remove_workspace(repo: Path, name: str) -> dict[str, Any]:
