@@ -1,8 +1,8 @@
 """Render the orchestration tab of the real Hermes Dashboard in headless Chromium (scripts/smoke-phase10.sh).
 
 Runs in the Browser Runner image (Playwright) on the stack's network. Logs in through Hermes's own
-password-login endpoint, opens the tab, walks the views, opens a task, and approves a pending approval
-from the page. Prints one JSON object with what was seen; writes a screenshot of the overview.
+password-login endpoint, opens the tab, walks the views, opens a task, approves a pending approval
+from the page, and creates a task from the new-task form. Prints one JSON object with what was seen; writes a screenshot of the overview.
 
 Usage: python3 dashboard_check.py <base url> <password file> <task key> <screenshot path>
 """
@@ -51,5 +51,15 @@ with sync_playwright() as p:
     approve.first.click()
     page.get_by_text("No decisions waiting.").wait_for(timeout=15000)
     seen["pending_after_approve"] = page.get_by_role("button", name="Approve", exact=True).count()
+
+    # A new task from the form; a double click still creates one task (one idempotency key per form).
+    page.get_by_role("button", name="+ New task", exact=True).click()
+    page.get_by_text("What should be done").wait_for(timeout=15000)
+    page.locator("form select").first.select_option("app")
+    page.locator("form textarea").fill("Add a /version endpoint returning the package version")
+    page.locator("form input").first.fill("Version endpoint")
+    page.get_by_role("button", name="Create task", exact=True).dblclick()
+    page.get_by_text("Audit timeline").wait_for(timeout=15000)
+    seen["created_from_form"] = page.get_by_text("Version endpoint").count() > 0
     browser.close()
 print(json.dumps(seen))

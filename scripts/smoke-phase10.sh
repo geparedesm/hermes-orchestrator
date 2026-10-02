@@ -125,6 +125,9 @@ check "task detail sections" "10" "$(field 'len(d["task_sections"])' <<<"$SEEN")
 check "approval decided from the page" "1 0" "$(field 'str(d["pending_in_page"]) + " " + str(d.get("pending_after_approve"))' <<<"$SEEN")"
 check "decision recorded as the Dashboard operator" "dashboard:operator" \
   "$(sql "SELECT decided_by FROM approvals WHERE state IN ('APPROVED', 'CONSUMED') ORDER BY decided_at DESC LIMIT 1")"
+check "task created from the form" "True" "$(field 'd.get("created_from_form")' <<<"$SEEN")"
+check "one task per form, created by the Dashboard operator" "1 dashboard:operator" \
+  "$(sql "SELECT count(*) || ' ' || min(requested_by) FROM tasks WHERE title = 'Version endpoint'")"
 if [[ -n "${SCREENSHOT:-}" && -f "$WORK/out/overview.png" ]]; then cp "$WORK/out/overview.png" "$SCREENSHOT"; fi
 
 echo

@@ -44,13 +44,13 @@ class TaskApi:
         self.base_url = (base_url or os.environ.get("HO_API_URL") or DEFAULT_URL).rstrip("/")
 
     def call(self, method: str, path: str, body: dict[str, Any] | None = None,
-             params: dict[str, str] | None = None) -> Any:
+             params: dict[str, str] | None = None, idempotency_key: str | None = None) -> Any:
         url = self.base_url + path + (("?" + urllib.parse.urlencode(params)) if params else "")
         headers = {"Authorization": f"Bearer {_token()}", "X-HO-Principal": self.principal,
                    "Accept": "application/json"}
         data = None
         if method != "GET":
-            headers["Idempotency-Key"] = f"hermes-{uuid.uuid4()}"
+            headers["Idempotency-Key"] = idempotency_key or f"hermes-{uuid.uuid4()}"
         if body is not None:
             headers["Content-Type"] = "application/json"
             data = json.dumps(body).encode()
@@ -92,13 +92,18 @@ class TaskApi:
     def inspect(self, key: str) -> Any:
         return self.call("GET", f"/v1/tasks/{_key(key)}/orchestration")
 
-    def create(self, project: str, request: str, title: str | None = None, priority: str | None = None) -> Any:
+    def create(self, project: str, request: str, title: str | None = None, priority: str | None = None, *,
+               budget: str | None = None, depends_on: list[str] | None = None, idempotency_key: str | None = None) -> Any:
         body: dict[str, Any] = {"project": project, "request": request}
         if title:
             body["title"] = title
         if priority:
             body["priority"] = priority.upper()
-        return self.call("POST", "/v1/tasks", body)
+        if budget:
+            body["budget_profile"] = budget.upper()
+        if depends_on:
+            body["related_tasks"] = [{"task": key, "kind": "DEPENDENCY"} for key in depends_on]
+        return self.call("POST", "/v1/tasks", body, idempotency_key=idempotency_key)
 
     def action(self, key: str, verb: str) -> Any:
         if verb not in ("pause", "resume", "cancel", "retry"):

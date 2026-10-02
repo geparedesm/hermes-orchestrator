@@ -137,7 +137,7 @@ A `.hermes/project.yaml` in the repository is validated against [schemas/project
 
 ## 10. Creating the first task
 
-From chat (`/orch create my-app Add OAuth authentication`, or just ask Hermes), from the Dashboard, or from the CLI:
+From chat (`/orch create my-app Add OAuth authentication`, or just ask Hermes), from the Dashboard (**Orchestration → + New task**), or from the CLI:
 
 ```bash
 ho task create my-app "Add OAuth authentication" --priority HIGH
