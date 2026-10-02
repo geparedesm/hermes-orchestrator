@@ -57,9 +57,16 @@ with sync_playwright() as p:
     page.get_by_text("What should be done").wait_for(timeout=15000)
     page.locator("form select").first.select_option("app")
     page.locator("form textarea").fill("Add a /version endpoint returning the package version")
-    page.locator("form input").first.fill("Version endpoint")
+    page.locator("form input:not([type=file])").first.fill("Version endpoint")
+    spec = "# Version endpoint\nReturn {\"version\": \"1.0\"}\n".encode()
+    page.locator("form input[type=file]").set_input_files([{"name": "spec.md", "mimeType": "text/markdown", "buffer": spec}])
+    page.get_by_text("spec.md · 1 KiB").wait_for(timeout=5000)
     page.get_by_role("button", name="Create task", exact=True).dblclick()
     page.get_by_text("Audit timeline").wait_for(timeout=15000)
     seen["created_from_form"] = page.get_by_text("Version endpoint").count() > 0
+    # The attachment is listed on the task and downloads as the same bytes.
+    with page.expect_download(timeout=15000) as download:
+        page.get_by_role("button", name="Download", exact=True).click()
+    seen["downloaded_attachment"] = open(download.value.path(), "rb").read() == spec and download.value.suggested_filename == "spec.md"
     browser.close()
 print(json.dumps(seen))

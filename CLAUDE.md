@@ -44,7 +44,7 @@ Phases 0–11 merged (PRs #2–#12): the platform is complete per PHASES.md. Her
 | `hermes/` | `plugins/orchestration` (tools, `/orch`, CLI, Dashboard tab; thin Task API client), `init.sh` (hermes-init) |
 | `services/egress-proxy/` | CONNECT-only allowlisting proxy, one per agent execution |
 | `workers/` | `agent-base` (+`ho-verify`, `ho-wait-secrets`), `toolchains/*`, `providers/{claude,codex}` (`ho-agent-run`, `ho-auth-login`), `browser-runner` |
-| `migrations/versions/` | `0001`–`0008` (raw SQL) |
+| `migrations/versions/` | `0001`–`0009` (raw SQL) |
 | `schemas/` | JSON Schemas: project, capability, platform, manifest, task, agent-result, review-result, orchestrator-step |
 | `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `backup.sh`/`restore.sh`, `update.sh`/`rollback.sh`, `check.sh`, `check-multiarch.sh`, `smoke-phase{2..11}.sh` |
 

@@ -11,6 +11,8 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.responses import JSONResponse, Response
+from ho_core import attachments
+from ho_core.bodylimit import BodyLimit
 from ho_core.enums import Autonomy
 from ho_core.policy.engine import decide_command
 from pydantic import BaseModel, Field
@@ -203,6 +205,8 @@ def create_app(services: Services) -> FastAPI:
     app = FastAPI(title="Hermes Orchestrator Task API", version="0.1.0", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url="/v1/openapi.json")
     ctx = services.ctx
+    # Bodies are bounded while they arrive; only task creation (attachments) may be large, a few at a time.
+    app.add_middleware(BodyLimit, default=4 * 1024 * 1024, large={("POST", "/v1/tasks"): attachments.MAX_REQUEST_BYTES})
 
     @app.exception_handler(ApiError)
     async def api_error(_: Request, exc: ApiError) -> JSONResponse:
@@ -719,6 +723,27 @@ def create_app(services: Services) -> FastAPI:
             if services.orchestration is not None:
                 body["orchestration"] = services.orchestration.inspect(uow, key)
             return jsonable(body)
+
+    @app.get("/v1/tasks/{key}/attachments")
+    def list_attachments(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            rows = [{k: v for k, v in a.items() if k not in ("path", "task_id", "artifact_id")}
+                    for a in services.tasks.attachments(uow, task["id"])]
+            return {"task": key, "attachments": jsonable(rows)}
+
+    @app.get("/v1/tasks/{key}/attachments/{attachment_id}")
+    def download_attachment(key: str, attachment_id: UUID, _: Identity = Depends(identity)) -> Response:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            found = next((a for a in services.tasks.attachments(uow, task["id"]) if a["id"] == attachment_id), None)
+            if found is None:
+                raise NotFound(f"{key} has no attachment {attachment_id}")
+        content = ctx.artifacts.read(found["path"])
+        # Always a download, never rendered in a browser origin (an HTML or SVG file must not run there).
+        return Response(content, media_type="application/octet-stream", headers={
+            "Content-Disposition": f'attachment; filename="{found["name"]}"', "X-Content-Type-Options": "nosniff",
+            "X-Attachment-SHA256": found["sha256"], "Cache-Control": "no-store"})
 
     @app.get("/v1/tasks/{key}/manifests")
     def list_manifests(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:

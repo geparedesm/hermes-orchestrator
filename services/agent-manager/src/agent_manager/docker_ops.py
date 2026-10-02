@@ -53,13 +53,22 @@ class EnvironmentFailed(RuntimeError):
     """Test services did not start (image pull, health check, or Compose error)."""
 
 
-def _tar(files: dict[str, bytes]) -> bytes:
+def _tar(files: dict[str, bytes], attachments: dict[str, bytes] | None = None) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         for name, content in files.items():
             info = tarfile.TarInfo(name)
             info.size, info.mode, info.uid, info.gid = len(content), 0o644, WORKER_UID, WORKER_UID
             archive.addfile(info, io.BytesIO(content))
+        if attachments:
+            # The person's files, read-only for the agent: owned by root, no write bit anywhere.
+            folder = tarfile.TarInfo("attachments")
+            folder.type, folder.mode, folder.uid, folder.gid = tarfile.DIRTYPE, 0o555, 0, 0
+            archive.addfile(folder)
+            for name, content in attachments.items():
+                info = tarfile.TarInfo(f"attachments/{name}")
+                info.size, info.mode, info.uid, info.gid = len(content), 0o444, 0, 0
+                archive.addfile(info, io.BytesIO(content))
     return buffer.getvalue()
 
 
@@ -216,7 +225,7 @@ class DockerOps:
                     DockerMount(m.target, m.source, type=m.kind, read_only=m.read_only)
                     for m in plan.mounts
                 ]
-                if plan.inputs:
+                if plan.inputs or plan.attachments:
                     self.client.volumes.create(plan.input_volume, labels=self._labels(plan, "input"))
                     mounts.append(DockerMount(INPUT_MOUNT, plan.input_volume, type="volume"))
                 if plan.session_volume:
@@ -253,8 +262,8 @@ class DockerOps:
                 created.append(container)
                 for extra in networks[1:]:
                     self.client.networks.get(extra).connect(container)
-                if plan.inputs:
-                    container.put_archive(INPUT_MOUNT, _tar({k: v.encode() for k, v in plan.inputs.items()}))
+                if plan.inputs or plan.attachments:
+                    container.put_archive(INPUT_MOUNT, _tar({k: v.encode() for k, v in plan.inputs.items()}, plan.attachments))
                 container.start()
                 if file_secrets:
                     self._deliver_secrets(container, file_secrets)

@@ -232,3 +232,21 @@ def test_orchestrator_sees_only_the_tracked_files_of_its_project(api, client):
                        workspace_path=None, project_read=["proj-a"])
     body["project_read"] = [{"slug": "proj-a", "path": "proj-a"}]  # the live directory is never mounted
     assert api.create(body).status_code == 403
+
+
+def test_attachments_are_readable_but_not_writable_by_the_agent(api, credential):
+    import base64 as b64
+
+    from ho_core.hashing import sha256_hex
+
+    content = "# Diseño\nCabecera azul\n".encode()
+    body = api.request(D, "ls -l /run/ho-input/attachments; cat /run/ho-input/attachments/spec.md; "
+                          "echo x >> /run/ho-input/attachments/spec.md 2>/dev/null && echo WRITABLE || echo read-only; "
+                          "touch /run/ho-input/attachments/new 2>/dev/null && echo CREATED || echo no-create",
+                       egress="NONE", workspace="NONE", workspace_path=None)
+    body["attachments"] = [{"artifact_id": "a", "name": "spec.md", "sha256": sha256_hex(content), "size_bytes": len(content),
+                            "media_type": "text/markdown"}]
+    body["attachment_files"] = {"spec.md": b64.b64encode(content).decode()}
+    logs = api.run(body)["logs"]
+    assert "Cabecera azul" in logs and "read-only" in logs and "no-create" in logs, logs
+    assert "WRITABLE" not in logs and "CREATED" not in logs, logs

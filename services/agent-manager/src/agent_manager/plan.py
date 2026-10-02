@@ -11,6 +11,8 @@ This module is pure (no Docker calls) so every invariant is unit-tested.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from dataclasses import dataclass, field
 
@@ -19,7 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from ho_core import attachments as attachment_rules
 from ho_core import schemas
+from ho_core.hashing import sha256_hex
 from ho_core.paths import PathOutsideRoot, resolve_inside
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -92,6 +96,7 @@ class ContainerPlan:
     credential_volume: str | None = None
     provider: str | None = None
     inputs: dict[str, str] = field(default_factory=dict)
+    attachments: dict[str, bytes] = field(default_factory=dict)  # name -> content, verified against its SHA-256
     # Secret reference -> (NAME, delivery "file" or "env"); values are read only when the container starts.
     secrets: dict[str, tuple[str, str]] = field(default_factory=dict)
     session_volume: str | None = None
@@ -149,6 +154,34 @@ def _workspace_mount(request: dict[str, Any], projects_root: Path, projects_root
     relative, _ = resolve_workspace(request["project_path"], workspace, projects_root)
     host = f"{projects_root_host.rstrip('/')}/{relative}"
     return Mount("bind", host, "/workspace", read_only=(access == "READ"))
+
+
+def _attachments(request: dict[str, Any], role: str) -> dict[str, bytes]:
+    """Files a person attached to the task: only for agent roles, each matching the reference the control plane
+    recorded (name, size, SHA-256) and passing the same checks as on upload."""
+    refs, files = request.get("attachments") or [], request.get("attachment_files") or {}
+    if not refs and not files:
+        return {}
+    if role not in AGENT_ROLES:
+        raise Rejected(f"attachments are only for agent roles, not {role}")
+    if not isinstance(refs, list) or not isinstance(files, dict) or {r.get("name") for r in refs if isinstance(r, dict)} != set(files):
+        raise Rejected("attachment files do not match the execution's attachment references")
+    decoded = []
+    for ref in refs:
+        try:
+            content = base64.b64decode(files[ref["name"]], validate=True)
+        except (binascii.Error, ValueError, TypeError) as exc:
+            raise Rejected(f"attachment {ref['name']!r} is not valid base64") from exc
+        if sha256_hex(content) != ref.get("sha256") or len(content) != ref.get("size_bytes"):
+            raise Rejected(f"attachment {ref['name']!r} does not match its reference")
+        decoded.append((ref["name"], content))
+    try:
+        checked = attachment_rules.check_all(decoded)
+    except attachment_rules.InvalidAttachment as exc:
+        raise Rejected(f"attachment refused: {exc}") from exc
+    if [c.name for c in checked] != [name for name, _ in decoded]:
+        raise Rejected("attachment names must already be safe names")
+    return dict(decoded)
 
 
 def _project_read_mounts(request: dict[str, Any], projects_root: Path, projects_root_host: str, allowed: list[str]) -> list[Mount]:
@@ -275,6 +308,8 @@ def build_plan(
     if sum(len(c.encode()) for c in inputs.values()) > MAX_INPUT_BYTES:
         raise Rejected(f"input files exceed {MAX_INPUT_BYTES // 1024} KiB")
 
+    attached = _attachments(request, grant["role"])
+
     short = execution.replace("-", "")[-12:]
     mounts.append(Mount("volume", f"ho-out-{short}", "/output", read_only=False))
 
@@ -325,6 +360,7 @@ def build_plan(
         credential_volume=credential_volume,
         provider=provider,
         inputs=inputs,
+        attachments=attached,
         secrets=secrets,
         session_volume=session_volume,
         caches=caches,

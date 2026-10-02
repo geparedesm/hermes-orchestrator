@@ -44,7 +44,8 @@ class TaskApi:
         self.base_url = (base_url or os.environ.get("HO_API_URL") or DEFAULT_URL).rstrip("/")
 
     def call(self, method: str, path: str, body: dict[str, Any] | None = None,
-             params: dict[str, str] | None = None, idempotency_key: str | None = None) -> Any:
+             params: dict[str, str] | None = None, idempotency_key: str | None = None, *,
+             raw: bool = False, timeout: float = TIMEOUT_SECONDS) -> Any:
         url = self.base_url + path + (("?" + urllib.parse.urlencode(params)) if params else "")
         headers = {"Authorization": f"Bearer {_token()}", "X-HO-Principal": self.principal,
                    "Accept": "application/json"}
@@ -56,8 +57,9 @@ class TaskApi:
             data = json.dumps(body).encode()
         request = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed internal URL
-                raw = response.read()
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed internal URL
+                content = response.read()
+                headers = dict(response.headers.items())
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")
             try:
@@ -73,7 +75,9 @@ class TaskApi:
         except (TimeoutError, OSError) as exc:
             # Sent, but no answer: a mutation may have been applied.
             raise ApiError(UNKNOWN if method != "GET" else 0, f"no answer from the orchestrator: {exc}") from exc
-        return json.loads(raw) if raw else {}
+        if raw:
+            return content, headers
+        return json.loads(content) if content else {}
 
     # ------------------------------------------------------------ operations
 
@@ -93,7 +97,8 @@ class TaskApi:
         return self.call("GET", f"/v1/tasks/{_key(key)}/orchestration")
 
     def create(self, project: str, request: str, title: str | None = None, priority: str | None = None, *,
-               budget: str | None = None, depends_on: list[str] | None = None, idempotency_key: str | None = None) -> Any:
+               budget: str | None = None, depends_on: list[str] | None = None, idempotency_key: str | None = None,
+               attachments: list[dict[str, str]] | None = None) -> Any:
         body: dict[str, Any] = {"project": project, "request": request}
         if title:
             body["title"] = title
@@ -103,7 +108,12 @@ class TaskApi:
             body["budget_profile"] = budget.upper()
         if depends_on:
             body["related_tasks"] = [{"task": key, "kind": "DEPENDENCY"} for key in depends_on]
-        return self.call("POST", "/v1/tasks", body, idempotency_key=idempotency_key)
+        if attachments:
+            body["attachments"] = attachments  # [{name, content_base64}]
+        return self.call("POST", "/v1/tasks", body, idempotency_key=idempotency_key, timeout=120 if attachments else TIMEOUT_SECONDS)
+
+    def attachment(self, key: str, attachment_id: str) -> tuple[bytes, dict[str, str]]:
+        return self.call("GET", f"/v1/tasks/{key}/attachments/{attachment_id}", raw=True, timeout=60)
 
     def action(self, key: str, verb: str) -> Any:
         if verb not in ("pause", "resume", "cancel", "retry"):

@@ -10,6 +10,9 @@
   const h = React.createElement;
   const BOARD = ["BACKLOG", "READY", "PLANNING", "QUEUED", "RUNNING", "TESTING", "REVIEW", "FIX_REQUIRED", "QUALITY_GATE",
     "READY_FOR_MERGE", "MERGING", "VERIFYING", "APPROVAL_REQUIRED", "AUTH_REQUIRED", "PAUSED_BUDGET", "PAUSED", "BLOCKED"];
+  // Mirrors ho_core.attachments; the server checks everything again.
+  const ATTACH = { maxFiles: 10, maxFile: 10 * 1024 * 1024, maxTotal: 25 * 1024 * 1024,
+    accept: ".txt,.md,.csv,.tsv,.json,.yaml,.yml,.xml,.py,.js,.ts,.sql,.log,.png,.jpg,.jpeg,.gif,.webp,.pdf" };
   const VIEWS = [["overview", "Overview"], ["board", "Board"], ["approvals", "Approvals"], ["projects", "Projects"], ["workers", "Workers"]];
 
   function api(path, options) {
@@ -116,6 +119,43 @@
     }));
   }
 
+  function size(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + " MiB" : Math.max(1, Math.round(n / 1024)) + " KiB"; }
+  function readBase64(file) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result).split(",", 2)[1] || ""); };
+      reader.onerror = function () { reject(new Error("could not read " + file.name)); };
+      reader.readAsDataURL(file);
+    });
+  }
+  function attachmentProblem(files) {
+    const allowed = ATTACH.accept.split(",");
+    if (files.length > ATTACH.maxFiles) return "At most " + ATTACH.maxFiles + " files.";
+    for (const f of files) {
+      if (allowed.indexOf("." + (f.name.split(".").pop() || "").toLowerCase()) < 0) return f.name + ": type not allowed.";
+      if (f.size === 0) return f.name + " is empty.";
+      if (f.size > ATTACH.maxFile) return f.name + " is larger than 10 MiB.";
+    }
+    if (files.reduce(function (n, f) { return n + f.size; }, 0) > ATTACH.maxTotal) return "Attachments are limited to 25 MiB in total.";
+    return null;
+  }
+  function download(task, a) {
+    // Through the Dashboard's own authentication; saved as a file, never opened in this page.
+    return SDK.authedFetch("/api/plugins/orchestration/tasks/" + task + "/attachments/" + a.id).then(function (r) {
+      if (!r.ok) throw new Error("download failed (" + r.status + ")");
+      return r.blob();
+    }).then(function (blob) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = a.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    });
+  }
+
   function newKey() {
     const bytes = new Uint8Array(12);
     window.crypto.getRandomValues(bytes);
@@ -128,6 +168,7 @@
     const [projects, setProjects] = React.useState(null);
     const [form, setForm] = React.useState({ project: "", request: "", title: "", priority: "NORMAL", budget: "", depends_on: "" });
     const [key] = React.useState(newKey);
+    const [files, setFiles] = React.useState([]);
     const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState(null);
     React.useEffect(function () {
@@ -140,13 +181,26 @@
     function field(name) {
       return function (e) { const value = e.target.value; setForm(function (f) { const n = Object.assign({}, f); n[name] = value; return n; }); };
     }
+    function choose(e) {
+      const chosen = Array.from(e.target.files || []);
+      const all = files.concat(chosen.filter(function (f) { return !files.some(function (g) { return g.name === f.name; }); }));
+      e.target.value = "";
+      const problem = attachmentProblem(all);
+      setError(problem);
+      if (!problem) setFiles(all);
+    }
     function submit(e) {
       e.preventDefault();
+      const problem = attachmentProblem(files);
+      if (problem) { setError(problem); return; }
       setBusy(true);
       setError(null);
-      post("/tasks", { project: form.project, request: form.request, title: form.title || null, priority: form.priority,
-        budget: form.budget || null, idempotency_key: key,
-        depends_on: form.depends_on.split(/[\s,]+/).filter(function (k) { return k; }) })
+      Promise.all(files.map(function (f) { return readBase64(f).then(function (b64) { return { name: f.name, content_base64: b64 }; }); }))
+        .then(function (attachments) {
+          return post("/tasks", { project: form.project, request: form.request, title: form.title || null, priority: form.priority,
+            budget: form.budget || null, idempotency_key: key, attachments: attachments,
+            depends_on: form.depends_on.split(/[\s,]+/).filter(function (k) { return k; }) });
+        })
         .then(function (t) { props.created(t.key); })
         .catch(function (e) { setError(String(e.message || e)); setBusy(false); });
     }
@@ -167,6 +221,15 @@
           h("option", { value: "" }, "Project default"),
           ["SMALL", "NORMAL", "LARGE"].map(function (b) { return h("option", { key: b, value: b }, b); }))),
         h("label", null, "Depends on (optional)", h("input", { value: form.depends_on, onChange: field("depends_on"), placeholder: "T-12, T-13" }))),
+      h("label", null, "Attachments (optional)", h("input", { type: "file", multiple: true, accept: ATTACH.accept, onChange: choose })),
+      files.length ? h("ul", { className: "orch-files" }, files.map(function (f) {
+        return h("li", { key: f.name }, f.name + " · " + size(f.size) + " ",
+          h("a", { href: "#", className: "orch-link", onClick: function (e) {
+            e.preventDefault(); setFiles(files.filter(function (g) { return g !== f; })); setError(null); } }, "remove"));
+      })) : null,
+      h("p", { className: "orch-muted orch-note" }, "Up to 10 files, 10 MiB each, 25 MiB in total: text, code, CSV, JSON, XML, " +
+        "images, and PDF. The agents read them, so they are sent to the AI providers (Anthropic, OpenAI): do not attach " +
+        "passwords, keys, or personal data."),
       h("div", null,
         h("button", { className: "orch-button", type: "submit", disabled: busy || !form.project || !form.request.trim() }, busy ? "Creating…" : "Create task"),
         h("button", { className: "orch-button", type: "button", onClick: props.cancel }, "Cancel")),
@@ -217,6 +280,11 @@
       h("div", null, ["pause", "resume", "cancel", "retry"].map(function (verb) {
         return h("button", { key: verb, className: "orch-button", onClick: function () { act(post("/tasks/" + t.key + "/" + verb)); } }, verb);
       })),
+      (data.attachments || []).length ? h(Section, { title: "Attachments" }, h(Table, { rows: data.attachments, columns: [
+        ["File", function (a) { return a.name; }], ["Type", function (a) { return a.media_type; }],
+        ["Size", function (a) { return size(a.size_bytes); }], ["SHA-256", function (a) { return a.sha256.slice(0, 12); }],
+        ["", function (a) { return h("button", { className: "orch-button", onClick: function () {
+          download(t.key, a).catch(function (e) { setError(String(e.message || e)); }); } }, "Download"); }]] })) : null,
       h(Section, { title: "Plan" }, h(Dag, { dag: data.dag })),
       h(Section, { title: "Approvals" }, h(Table, { rows: data.approvals, empty: "No approvals.", columns: [
         ["Action", function (a) { return h(Badge, { value: a.action }); }], ["State", function (a) { return h(Badge, { value: a.state }); }],

@@ -7,12 +7,17 @@ take (approvals need it in `platform.approvers`) and records it as the creator o
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
+import re
 from pathlib import Path
 from typing import Any, Literal
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
+from pydantic import BaseModel, Field, ValidationError
 
 _spec = importlib.util.spec_from_file_location("orchestration_dashboard_client",
                                                Path(__file__).resolve().parent.parent / "orch_client.py")
@@ -29,6 +34,19 @@ class DecisionBody(BaseModel):
     note: str | None = None
 
 
+# Mirrors ho_core.attachments (this plugin runs inside Hermes, without the platform's packages); the control
+# plane checks names, types, content, and sizes again.
+MAX_ATTACHMENTS = 10
+MAX_ATTACHMENT_BASE64 = (10 * 1024 * 1024 + 2) // 3 * 4
+MAX_CREATE_BODY = (25 * 1024 * 1024 * 4) // 3 + 4 * 1024 * 1024
+_UPLOADS = asyncio.Semaphore(2)  # task creations with attachments read at a time
+
+
+class AttachmentBody(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    content_base64: str = Field(min_length=1, max_length=MAX_ATTACHMENT_BASE64)
+
+
 class NewTaskBody(BaseModel):
     project: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
     request: str = Field(min_length=1, max_length=20000)
@@ -39,6 +57,7 @@ class NewTaskBody(BaseModel):
     depends_on: list[str] = Field(default_factory=list, max_length=20)
     # Generated once per form by the page, so a repeated click or a retried request creates one task.
     idempotency_key: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
+    attachments: list[AttachmentBody] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
 
 
 def _api():
@@ -104,12 +123,40 @@ def manifest(key: str, manifest_id: str) -> Any:
 
 
 @router.post("/tasks")
-def create_task(body: NewTaskBody) -> Any:
-    keys = [k.strip().upper() for k in body.depends_on if k.strip()]
-    if any(not k.startswith("T-") or not k[2:].isdigit() for k in keys):
-        raise HTTPException(status_code=400, detail="dependencies are task keys such as T-12")
-    return _call(lambda: _api().create(body.project, body.request.strip(), (body.title or "").strip() or None, body.priority,
-                                       budget=body.budget, depends_on=keys, idempotency_key=body.idempotency_key))
+async def create_task(request: Request) -> Any:
+    # Read under a byte limit counted while the body arrives (attachments make it large), a few at a time.
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_CREATE_BODY:
+        raise HTTPException(status_code=413, detail="request too large: attachments are limited to 25 MiB in total")
+    async with _UPLOADS:
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw += chunk
+            if len(raw) > MAX_CREATE_BODY:
+                raise HTTPException(status_code=413, detail="request too large: attachments are limited to 25 MiB in total")
+        try:
+            body = NewTaskBody.model_validate_json(bytes(raw))
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=[{"loc": e["loc"], "msg": e["msg"]} for e in exc.errors()]) from exc
+        del raw
+        keys = [k.strip().upper() for k in body.depends_on if k.strip()]
+        if any(not k.startswith("T-") or not k[2:].isdigit() for k in keys):
+            raise HTTPException(status_code=400, detail="dependencies are task keys such as T-12")
+        files = [a.model_dump() for a in body.attachments]
+        return await run_in_threadpool(_call, lambda: _api().create(
+            body.project, body.request.strip(), (body.title or "").strip() or None, body.priority, budget=body.budget,
+            depends_on=keys, idempotency_key=body.idempotency_key, attachments=files))
+
+
+@router.get("/tasks/{key}/attachments/{attachment_id}")
+def attachment(key: str, attachment_id: UUID) -> Response:
+    if not re.match(r"^T-[0-9]+$", key):
+        raise HTTPException(status_code=404, detail="unknown task")
+    content, headers = _call(_api().attachment, key, str(attachment_id))
+    # A download, never content rendered in the Dashboard's origin.
+    return Response(content, media_type="application/octet-stream", headers={
+        "Content-Disposition": headers.get("content-disposition") or headers.get("Content-Disposition") or "attachment",
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
 
 @router.post("/tasks/{key}/manifest")

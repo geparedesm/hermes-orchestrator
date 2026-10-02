@@ -7,10 +7,13 @@ writes the event in the same transaction.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from ho_core import attachments as att
 from ho_core import schemas
 from ho_core.config import stricter_autonomy
 from ho_core.enums import ApprovalAction, BudgetProfile, ProjectStatus, Risk, TaskState
@@ -91,8 +94,10 @@ class Tasks:
 
     # ----------------------------------------------------------------- commands
 
-    def create(self, uow: UnitOfWork, *, principal: Principal, body: dict[str, Any]) -> Row:
+    def create(self, uow: UnitOfWork, *, principal: Principal, body: dict[str, Any],
+               inherit_attachments_from: UUID | None = None) -> Row:
         body = dict(body)
+        files = _decode_attachments(body.pop("attachments", None))
         claimed = body.get("requested_by")
         if claimed is not None and claimed != principal.as_json():
             raise Forbidden("requested_by must match the authenticated principal")
@@ -136,6 +141,11 @@ class Tasks:
         task = uow.cur.fetchone()
         assert task is not None
         self._create_budget(uow, task_id, budget_profile)
+        attached: list[Row] = []
+        if files:
+            attached = self._attach(uow, task, files, principal)
+        elif inherit_attachments_from:
+            attached = self._inherit(uow, task, inherit_attachments_from)
 
         for related in body.get("related_tasks", []):
             target = self.get(uow, related["task"])
@@ -147,7 +157,8 @@ class Tasks:
         record_event(
             uow.cur, "TASK_CREATED", actor=principal.value, project_id=project["id"], task_id=task_id,
             summary=f"{key} created: {title}",
-            data={"priority": task["priority"], "budget_profile": budget_profile, "project_status": project["status"]},
+            data={"priority": task["priority"], "budget_profile": budget_profile, "project_status": project["status"],
+                  **({"attachments": [a["name"] for a in attached]} if attached else {})},
             pending=uow.events,
         )
         if requested_budget == BudgetProfile.UNLIMITED:
@@ -236,12 +247,44 @@ class Tasks:
             uow, principal=principal,
             body={"project": found["slug"], "title": task["title"], "request": request_text, "priority": task["priority"],
                   "budget_profile": task["budget_profile"], "idempotency_key": idempotency_key},
+            inherit_attachments_from=task["id"],  # the same files, so the retry sees what the original saw
         )
         uow.cur.execute(
             "INSERT INTO task_relationships (id, from_task_id, to_task_id, kind, classified_by, evidence) VALUES (%s, %s, %s, 'RELATED', %s, %s)",
             (uuid7(), new_task["id"], task["id"], principal.value, f"retry of {key}"),
         )
         return new_task
+
+    # ------------------------------------------------------------------ attachments
+
+    def attachments(self, uow: UnitOfWork, task_id: UUID) -> list[Row]:
+        uow.cur.execute("SELECT ta.*, a.path FROM task_attachments ta JOIN artifacts a ON a.id = ta.artifact_id "
+                        "WHERE ta.task_id = %s ORDER BY ta.position", (task_id,))
+        return uow.cur.fetchall()
+
+    def _attach(self, uow: UnitOfWork, task: Row, files: list[tuple[att.Checked, bytes]], principal: Principal) -> list[Row]:
+        rows = []
+        for position, (checked, content) in enumerate(files):
+            stored = self.ctx.artifacts.write(uow.cur, project_id=task["project_id"], task_id=task["id"], kind="attachment",
+                                              name=checked.name, content=content, media_type=checked.media_type)
+            rows.append(self._attachment_row(uow, task["id"], stored.id, checked.name, checked.media_type, stored.size_bytes,
+                                             stored.sha256, position, principal.value))
+        return rows
+
+    def _inherit(self, uow: UnitOfWork, task: Row, original_id: UUID) -> list[Row]:
+        return [self._attachment_row(uow, task["id"], a["artifact_id"], a["name"], a["media_type"], a["size_bytes"], a["sha256"],
+                                     a["position"], a["added_by"]) for a in self.attachments(uow, original_id)]
+
+    @staticmethod
+    def _attachment_row(uow: UnitOfWork, task_id: UUID, artifact_id: UUID, name: str, media_type: str, size: int, sha: str,
+                        position: int, added_by: str) -> Row:
+        uow.cur.execute(
+            "INSERT INTO task_attachments (id, task_id, artifact_id, name, media_type, size_bytes, sha256, position, added_by) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+            (uuid7(), task_id, artifact_id, name, media_type, size, sha, position, added_by))
+        row = uow.cur.fetchone()
+        assert row is not None
+        return row
 
     # ------------------------------------------------------------------ helpers
 
@@ -291,3 +334,27 @@ class Tasks:
         assert task is not None
         self.transition(uow, task, S(task["resume_state"]), trigger=Trigger.APPROVAL, actor=principal.value, reason=reason)
 
+
+
+def _decode_attachments(raw: Any) -> list[tuple[att.Checked, bytes]]:
+    """`attachments: [{name, content_base64}]` from a creation request, decoded and validated (ho_core.attachments)."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or any(not isinstance(a, dict) or set(a) != {"name", "content_base64"} for a in raw):
+        raise ValidationFailed("attachments must be a list of {name, content_base64}")
+    if len(raw) > att.MAX_FILES:
+        raise ValidationFailed(f"at most {att.MAX_FILES} attachments per task")
+    limit = (att.MAX_FILE_BYTES + 2) // 3 * 4  # base64 length of the largest allowed file
+    files = []
+    for item in raw:
+        if not isinstance(item["name"], str) or not isinstance(item["content_base64"], str) or len(item["content_base64"]) > limit:
+            raise ValidationFailed(f"attachment {str(item['name'])[:100]!r} is too large or malformed")
+        try:
+            files.append((item["name"], base64.b64decode(item["content_base64"], validate=True)))
+        except (binascii.Error, ValueError) as exc:
+            raise ValidationFailed(f"attachment {item['name'][:100]!r} is not valid base64") from exc
+    try:
+        checked = att.check_all(files)
+    except att.InvalidAttachment as exc:
+        raise ValidationFailed(str(exc)) from exc
+    return [(c, content) for c, (_, content) in zip(checked, files, strict=True)]
