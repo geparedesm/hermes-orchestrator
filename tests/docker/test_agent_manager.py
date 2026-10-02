@@ -242,7 +242,10 @@ def test_attachments_are_readable_but_not_writable_by_the_agent(api, credential)
     content = "# Diseño\nCabecera azul\n".encode()
     body = api.request(D, "ls -l /run/ho-input/attachments; cat /run/ho-input/attachments/spec.md; "
                           "echo x >> /run/ho-input/attachments/spec.md 2>/dev/null && echo WRITABLE || echo read-only; "
-                          "touch /run/ho-input/attachments/new 2>/dev/null && echo CREATED || echo no-create",
+                          "touch /run/ho-input/attachments/new 2>/dev/null && echo CREATED || echo no-create; "
+                          "ls -ld /run/ho-input; "
+                          "mv /run/ho-input/attachments /run/ho-input/old 2>/dev/null && echo RENAMED || echo no-rename; "
+                          "mkdir -p /run/ho-input/attachments2 2>/dev/null && echo MKDIR || echo no-mkdir",
                        egress="NONE", workspace="NONE", workspace_path=None)
     body["attachments"] = [{"artifact_id": "a", "name": "spec.md", "sha256": sha256_hex(content), "size_bytes": len(content),
                             "media_type": "text/markdown"}]
@@ -250,3 +253,5 @@ def test_attachments_are_readable_but_not_writable_by_the_agent(api, credential)
     logs = api.run(body)["logs"]
     assert "Cabecera azul" in logs and "read-only" in logs and "no-create" in logs, logs
     assert "WRITABLE" not in logs and "CREATED" not in logs, logs
+    # Nor can the folder be swapped for another one: the input folder itself is not the agent's.
+    assert "no-rename" in logs and "RENAMED" not in logs and "MKDIR" not in logs, logs

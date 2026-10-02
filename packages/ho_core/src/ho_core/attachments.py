@@ -52,8 +52,9 @@ def safe_name(name: str) -> str:
     base = str(name).replace("\\", "/").rsplit("/", 1)[-1]
     stem, dot, extension = base.rpartition(".")
     stem, extension = (stem, extension) if dot else (base, "")
-    stem = _SAFE.sub("_", stem).strip("._-")[: 100 - len(extension) - 1] or "file"
-    extension = _SAFE.sub("", extension).lower()
+    extension = _SAFE.sub("", extension).lower()[:20]
+    # Trimmed after truncating too, so cleaning a clean name changes nothing (Agent Manager checks it again).
+    stem = _SAFE.sub("_", stem).strip("._-")[: 100 - len(extension) - 1].rstrip("._-") or "file"
     return f"{stem}.{extension}" if extension else stem
 
 

@@ -39,6 +39,13 @@ def test_names_are_reduced_to_a_safe_base_name(name, expected):
     assert att.safe_name(name) == expected
 
 
+@pytest.mark.parametrize("name", ["a" * 95 + "-b.pdf", "x" * 300 + ".md", "._-x-_.md", "...", "a" * 99 + ".verylongextension123456",
+                                  "名前.png", "a.b.c.md", "-.md"])
+def test_cleaning_is_stable(name):
+    once = att.safe_name(name)
+    assert att.safe_name(once) == once and att.NAME.match(once) and len(once) <= 100
+
+
 def test_types_are_recognized_by_extension_and_content():
     assert att.check("design.png", PNG).media_type == "image/png"
     assert att.check("spec.pdf", PDF).media_type == "application/pdf"

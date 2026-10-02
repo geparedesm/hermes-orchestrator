@@ -227,7 +227,10 @@ class DockerOps:
                 ]
                 if plan.inputs or plan.attachments:
                     self.client.volumes.create(plan.input_volume, labels=self._labels(plan, "input"))
-                    mounts.append(DockerMount(INPUT_MOUNT, plan.input_volume, type="volume"))
+                    self._fill_inputs(plan, image_id, created)
+                    # Read-only for the agent: it cannot change, rename, or replace its inputs (attachments
+                    # included, verified before they were written).
+                    mounts.append(DockerMount(INPUT_MOUNT, plan.input_volume, type="volume", read_only=True))
                 if plan.session_volume:
                     self._ensure_session_volume(plan)
                 for volume, ecosystem in plan.caches:
@@ -262,8 +265,6 @@ class DockerOps:
                 created.append(container)
                 for extra in networks[1:]:
                     self.client.networks.get(extra).connect(container)
-                if plan.inputs or plan.attachments:
-                    container.put_archive(INPUT_MOUNT, _tar({k: v.encode() for k, v in plan.inputs.items()}, plan.attachments))
                 container.start()
                 if file_secrets:
                     self._deliver_secrets(container, file_secrets)
@@ -272,6 +273,17 @@ class DockerOps:
                 raise
         log.info("execution started", extra={"execution": plan.execution, "task": plan.task, "event": "WORKER_CREATED"})
         return self.status(plan.execution)
+
+    def _fill_inputs(self, plan: ContainerPlan, image_id: str, created: list[Any]) -> None:
+        """Write the execution's inputs into its input volume through a container that never starts (Docker
+        copies into its mounts), so the worker can mount the volume read-only."""
+        writer = self.client.containers.create(
+            image_id, command=["true"], name=f"{plan.worker_name}-in", user="0:0", labels=self._labels(plan, "input"),
+            mounts=[DockerMount("/in", plan.input_volume, type="volume")], network_mode="none", **_SECURITY)
+        created.append(writer)
+        writer.put_archive("/in", _tar({k: v.encode() for k, v in plan.inputs.items()}, plan.attachments))
+        writer.remove(force=True)
+        created.remove(writer)
 
     # ------------------------------------------------------- dependency caches (MASTER_SPEC section 71)
 
