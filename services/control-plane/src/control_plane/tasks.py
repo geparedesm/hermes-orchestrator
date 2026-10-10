@@ -256,6 +256,9 @@ class Tasks:
     def retry(self, uow: UnitOfWork, key: str, *, principal: Principal, idempotency_key: str) -> Row:
         task = self.get(uow, key, lock=True)
         if task["state"] == S.BLOCKED:
+            # A fresh start for the orchestrator too: earlier idle steps do not count against the retry.
+            uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0 WHERE id = %s", (task["id"],))
+            task = self.get(uow, key, lock=True)
             return self.transition(uow, task, S.READY, trigger=Trigger.USER, actor=principal.value, reason="retried by user")
         if task["state"] not in (S.FAILED, S.CANCELLED):
             raise Conflict(f"{key} is {task['state']}; only BLOCKED, FAILED, or CANCELLED tasks can be retried")
