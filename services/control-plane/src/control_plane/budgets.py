@@ -183,11 +183,12 @@ def still_blocking(uow: UnitOfWork, task: Row) -> str | None:
         return None
     if counter == "runtime_minutes":
         return counter if runtime_minutes(task) >= float(limit) else None
+    # As at admission (_blocking): launches are charged immediately; other counters also count what running work reserved.
     used = int(budget["consumed"].get(counter, 0))
-    if counter == "provider_usage_units":  # only agent launches reserve usage, an estimate at a time
-        used += int((budget.get("reserved") or {}).get(counter, 0)) + DEFAULT_USAGE_RESERVATION
-        return counter if used > int(limit) else None
-    return counter if used + 1 > int(limit) else None
+    if counter != "agent_launches":
+        used += int((budget.get("reserved") or {}).get(counter, 0))
+    needed = DEFAULT_USAGE_RESERVATION if counter == "provider_usage_units" else 1  # only agent launches reserve usage
+    return counter if used + needed > int(limit) else None
 
 
 def state(uow: UnitOfWork, task: Row) -> dict[str, Any]:

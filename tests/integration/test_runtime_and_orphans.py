@@ -164,3 +164,14 @@ def test_resume_judges_the_counter_that_paused_the_task(api, services, agents, t
         q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{review_cycles}', '9') "
                     "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)
         assert api.post(f"/v1/tasks/{task}/resume").status_code == 200
+
+
+
+def test_resume_counts_what_running_work_reserved(api, services, agents, task):
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason=f"{task} would exceed its retries budget (6)")
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{retries}', '6'), consumed = jsonb_set(consumed, '{retries}', '5'), "
+                "reserved = jsonb_set(reserved, '{retries}', '1') WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)
+    refused = api.post(f"/v1/tasks/{task}/resume")  # 5 used + 1 reserved: the next retry does not fit
+    assert refused.status_code == 409 and "retries" in refused.text
