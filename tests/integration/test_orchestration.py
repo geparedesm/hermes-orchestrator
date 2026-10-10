@@ -596,3 +596,16 @@ def test_submitting_an_accepted_plan_while_planning_integrates_it(api, services,
     if state(api, task) == "PLANNING":
         step(services, agents, task, {"type": "SUBMIT_FOR_QUALITY_GATE"})
     assert state(api, task) in ("TESTING", "REVIEW")
+
+
+def test_a_preemptive_block_does_not_cancel_work_started_in_the_same_step(api, services, agents, repo, task):
+    plan_and_start(services, agents, task, plan_item("a"), plan_item("b"))
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "print('hello')\n"})
+    [rev] = active(services, task, "REVIEWER")
+    review_verdict(services, agents, rev)
+    services.scheduler.run_once()
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "b", "provider": "codex"},
+         {"type": "REPORT_BLOCKED", "text": "if b fails again we are out of budget"})
+    assert state(api, task) == "RUNNING" and active(services, task, "DEVELOPER")
+    assert actions(services, task)[-1][1] == "REJECTED"
