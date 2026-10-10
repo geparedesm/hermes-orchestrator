@@ -147,7 +147,8 @@ class TaskApi:
         return self.call("GET", "/v1/approvals", params={"state": "" if include_decided else "PENDING"})
 
     def renew(self, approval_id: str) -> Any:
-        return self.call("POST", f"/v1/approvals/{approval_id}/renew")
+        # The shown reference may be "#12": strip the mark and encode, so it stays a path segment.
+        return self.call("POST", f"/v1/approvals/{urllib.parse.quote(str(approval_id).lstrip('#'), safe='')}/renew")
 
     def expired_approvals(self) -> Any:
         return self.call("GET", "/v1/approvals", params={"state": "EXPIRED"})

@@ -205,3 +205,12 @@ def test_rejection_notes_are_kept_as_written():
     import shlex
     command = plugin.short_reply_command("No 12 keep API_KEY in Config.py, señor")
     assert shlex.split(command[len("/orch "):]) == ["reject", "12", "keep API_KEY in Config.py, señor"]
+
+
+def test_shown_references_work_in_every_approval_command(monkeypatch):
+    api = client.TaskApi("telegram:1", base_url="http://cp")
+    paths = []
+    monkeypatch.setattr(api, "call", lambda method, path, *a, **k: paths.append(path) or {"id": "x", "state": "PENDING"})
+    api.renew("#12")
+    api.decide("#12", True)
+    assert paths[0] == "/v1/approvals/12/renew" and "#" not in paths[1]
