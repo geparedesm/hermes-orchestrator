@@ -43,6 +43,8 @@ class FakeApi:
                 return {"id": "A1"} if len(args) > 1 and args[1] else {"state": "OK", "consumed": {}}
             if name == "create":
                 return {"key": "T-3", "state": "BACKLOG"}
+            if name == "renew":
+                return {"id": "A2", "action": "MERGE", "summary": "merge T-1 into main", "state": "PENDING"}
             return {}
         return record
 
@@ -153,3 +155,11 @@ def test_unreachable_before_sending_is_not_applied(monkeypatch):
     monkeypatch.setattr(plugin, "TaskApi", refused)
     monkeypatch.setattr(plugin, "session_principal", lambda: "telegram:1")
     assert "was not applied" in plugin.handle_slash("retry T-1")
+
+
+def test_expired_approvals_are_requested_again_by_a_person():
+    api = FakeApi()
+    text = plugin.run_verb(api, ["renew", "A1"], human=True)
+    assert api.calls[-1] == ("renew", ("A1",)) and "/orch approve A2" in text
+    with pytest.raises(client.ApiError):
+        plugin.run_verb(FakeApi(), ["renew", "A1"], human=False)  # not a model's action

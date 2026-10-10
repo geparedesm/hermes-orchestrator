@@ -146,6 +146,12 @@ class TaskApi:
     def approvals(self, include_decided: bool = False) -> Any:
         return self.call("GET", "/v1/approvals", params={"state": "" if include_decided else "PENDING"})
 
+    def renew(self, approval_id: str) -> Any:
+        return self.call("POST", f"/v1/approvals/{approval_id}/renew")
+
+    def expired_approvals(self) -> Any:
+        return self.call("GET", "/v1/approvals", params={"state": "EXPIRED"})
+
     def decide(self, approval_id: str, approve: bool, note: str | None = None) -> Any:
         body: dict[str, Any] = {"decision": "APPROVE" if approve else "REJECT"}
         if note:

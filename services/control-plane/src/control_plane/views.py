@@ -67,6 +67,7 @@ def approval_view(row: Row) -> dict[str, Any]:
         "decided_at": _iso(row["decided_at"]),
         "decision_note": row["decision_note"],
         "invalidated_reason": row["invalidated_reason"],
+        "renewed_from": _str(row.get("renewed_from")),
     }
 
 

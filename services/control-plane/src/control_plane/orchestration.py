@@ -121,6 +121,7 @@ class Orchestration:
         verifications.on_finished.append(self._on_verification)
         gate.on_evaluated.append(self._on_gate)
         approvals.register_handler(ApprovalAction.ASSUMPTION, self._on_waiting_approval)
+        approvals.register_renewer(ApprovalAction.ASSUMPTION, self._renew_assumption)
         approvals.register_handler(ApprovalAction.SCOPE_EXPANSION, self._on_waiting_approval)
         approvals.register_handler(ApprovalAction.BUDGET_INCREASE, self._on_budget_increase)
 
@@ -600,6 +601,18 @@ class Orchestration:
         uow.cur.execute("UPDATE tasks SET current_requirements_version = %s WHERE id = %s", (version, task["id"]))
         self._event(uow, task, "REQUIREMENTS_VERSIONED", f"requirements version {version} ({source.lower()})", {"version": version})
         return f"version {version}"
+
+    def _renew_assumption(self, uow: UnitOfWork, expired: Row, principal: Principal) -> Row:
+        uow.cur.execute("SELECT id, status FROM assumptions WHERE approval_id = %s FOR UPDATE", (expired["id"],))
+        assumption = uow.cur.fetchone()
+        if assumption is None or assumption["status"] != "PENDING_APPROVAL":
+            raise Conflict("this assumption is no longer open: it was resolved or the task was planned again")
+        renewed = self.approvals.request(uow, action=ApprovalAction.ASSUMPTION, project_id=expired["project_id"],
+                                         task_id=expired["task_id"], subject=expired["subject"], config_hash=expired["config_hash"],
+                                         summary=expired["summary"], requested_by=principal.value, risk=Risk(expired["risk"]),
+                                         from_task_state=expired["from_task_state"])
+        uow.cur.execute("UPDATE assumptions SET approval_id = %s WHERE id = %s", (renewed["id"], assumption["id"]))
+        return renewed
 
     def _record_assumption(self, uow: UnitOfWork, task: Row, action: dict[str, Any]) -> str | None:
         level, text = action.get("level") or "MEDIUM", (action.get("text") or "").strip()

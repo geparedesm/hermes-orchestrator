@@ -26,6 +26,7 @@ HELP = """/orch commands:
   create <project> <request...>  create a task
   approvals                      pending approvals
   approve <id> | reject <id> [note]
+  renew <id>                     request an expired approval again
   pause|resume|cancel|retry <T-n>
   revise <T-n> <new requirements...>
   budget <T-n> [counter=N ...]   show, or request an increase
@@ -82,6 +83,10 @@ def run_verb(api: TaskApi, words: list[str], *, human: bool) -> str:
         _need(args, 1, f"{verb} <approval id> [note]")
         approval = api.decide(args[0], verb == "approve", " ".join(args[1:]) or None)
         return f"{approval['action']} {approval['state'].lower()}: {approval.get('summary') or ''}".strip()
+    if verb == "renew":
+        _need(args, 1, "renew <approval id>")
+        approval = api.renew(args[0])
+        return f"Requested again: {approval.get('summary') or approval['action']}\nApprove: /orch approve {approval['id']}"
     if verb in ("pause", "resume", "cancel", "retry"):
         _need(args, 1, f"{verb} <T-n>")
         task = api.action(args[0], verb)

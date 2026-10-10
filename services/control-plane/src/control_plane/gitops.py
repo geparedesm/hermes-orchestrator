@@ -47,6 +47,7 @@ class GitChanges:
         self.approvals = approvals
         self.executions = executions
         approvals.register_handler(ApprovalAction.MERGE, self._on_merge_decision)
+        approvals.register_renewer(ApprovalAction.MERGE, self._renew_merge)
         approvals.register_handler(ApprovalAction.HIGH_RISK_OPERATION, self._on_conflict_decision)
         executions.workspace_check = self.check_workspace
         # Set by verification.Verifications and verification.QualityGate (Phase 6).
@@ -414,6 +415,12 @@ class GitChanges:
         uow.cur.execute("UPDATE git_changes SET merge_approval_id = %s, updated_at = now() WHERE task_id = %s",
                         (approval["id"], task["id"]))
         return approval
+
+    def _renew_merge(self, uow: UnitOfWork, expired: Row, principal: Principal) -> Row:
+        """An expired merge approval is requested again through the normal merge request: it is rebuilt from the
+        current integrated commit, target, and Quality Gate, and refused with the reason when they no longer allow it."""
+        uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (expired["task_id"],))
+        return self.request_merge(uow, uow.cur.fetchone()["key"], principal=principal)  # type: ignore[index]
 
     def _on_merge_decision(self, uow: UnitOfWork, approval: Row, approved: bool, principal: Principal) -> None:
         uow.cur.execute("SELECT * FROM tasks WHERE id = %s FOR UPDATE", (approval["task_id"],))
