@@ -552,3 +552,16 @@ def test_orchestrator_reads_a_view_of_tracked_files_that_maintenance_prunes(api,
     q(services, "UPDATE executions SET state = 'SUCCEEDED', ended_at = now() WHERE id = %s", orchestrator["id"])
     os.utime(view, (0, 0))  # unused for long
     assert services.maintenance.run()["read_views"]["removed"] == 1 and not view.exists()
+
+
+def test_a_plan_that_drops_its_last_open_subtask_is_integrated(api, services, agents, repo, task):
+    plan_and_start(services, agents, task, plan_item("a"), plan_item("b"))
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "print('hello')\n"})
+    [rev] = active(services, task, "REVIEWER")
+    review_verdict(services, agents, rev)
+    assert subtasks(services, task)["a"]["state"] == "ACCEPTED" and state(api, task) == "RUNNING"
+    services.scheduler.run_once()  # "a accepted; b ready": the orchestrator is asked
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("a")]})  # b is not needed after all
+    assert subtasks(services, task)["b"]["state"] == "CANCELLED"
+    assert state(api, task) == "TESTING"  # integrated without another step

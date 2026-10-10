@@ -706,7 +706,13 @@ class Orchestration:
         self._event(uow, task, "PLAN_VERSIONED", f"plan version {version}: {len(items)} subtask(s), {len(new_keys)} new",
                     {"version": version, "artifact": str(artifact.id)})
         if task["state"] == S.PLANNING:
-            self._move(uow, task, S.QUEUED, reason="plan accepted")
+            task = self._move(uow, task, S.QUEUED, reason="plan accepted")
+        subtasks = self._subtasks(uow, task)
+        if subtasks and all(x["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in subtasks) \
+                and task["state"] in (S.QUEUED, S.RUNNING):
+            # Nothing left to develop (for example a plan that dropped its last open subtask): integrate now.
+            task = self._move(uow, task, S.RUNNING, reason="every subtask accepted; integrating")
+            self._integrate_if_ready(uow, task)
         return f"version {version}"
 
     def _expansion_approved(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], added: int, limit: int) -> bool:
