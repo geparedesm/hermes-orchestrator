@@ -66,11 +66,11 @@ _TEXT: dict[str, dict[str, str]] = {
 _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
     "en": {
         "MERGE": ("The work passed tests, review, and the quality gate. Merge it into *{branch}*?",
-                  "yes, merge it into {branch}", "not now"),
+                  "yes, merge it into {branch}", "no, send it back for fixes"),
         "ASSUMPTION": ("To continue, Claude will take this as given:\n_{assumption}_\nIs that right?",
                        "that's right, continue", "no, stop the task"),
         "SCOPE_EXPANSION": ("The plan grew: it adds {added} subtasks and the limit is {limit}. Go on with the bigger plan?",
-                            "yes, go on", "no, keep the current plan"),
+                            "yes, go on", "no, stop the task (it stays blocked)"),
         "BUDGET_INCREASE": ("The task needs more budget: {budget}. Raise it?", "yes, raise it", "no, leave it paused"),
         "BUDGET_UNLIMITED": ("An *unlimited* budget was requested for this task. Allow it?", "yes, no limit",
                              "no, use the normal budget"),
@@ -89,11 +89,11 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
     },
     "es": {
         "MERGE": ("El trabajo pasó los tests, la revisión y el control de calidad. ¿Lo uno a *{branch}*?",
-                  "sí, unirlo a {branch}", "ahora no"),
+                  "sí, unirlo a {branch}", "no, que vuelva a corregirse"),
         "ASSUMPTION": ("Para seguir, Claude va a dar esto por hecho:\n_{assumption}_\n¿Es correcto?",
                        "es correcto, sigue", "no es así, para la tarea"),
         "SCOPE_EXPANSION": ("El plan creció: añade {added} subtareas y el límite es {limit}. ¿Sigo con el plan más grande?",
-                            "sí, seguir", "no, mantener el plan actual"),
+                            "sí, seguir", "no, parar la tarea (queda bloqueada)"),
         "BUDGET_INCREASE": ("La tarea necesita más presupuesto: {budget}. ¿Lo amplío?", "sí, ampliarlo", "no, dejarla pausada"),
         "BUDGET_UNLIMITED": ("Se pidió presupuesto *sin límite* para esta tarea. ¿Lo autorizo?", "sí, sin límite",
                              "no, usar el presupuesto normal"),
@@ -185,7 +185,8 @@ def render_digest(items: list[tuple[dict[str, Any], Context]], lang: str = "en",
     lines = [text["digest"].format(emoji=EMOJI["DIGEST"], count=len(items))]
     for payload, ctx in items[:limit]:
         label = labels.get(payload.get("type", ""), _strip_task(str(payload.get("summary") or ""), ctx.task))
-        lines.append(f"• {ctx.task}: {label}" if ctx.task else f"• {label}")
+        who = ctx.task or ctx.project  # project-level events (a project ready) name the project
+        lines.append(f"• {who}: {label}" if who else f"• {label}")
     if len(items) > limit:
         lines.append(text["more"].format(count=len(items) - limit))
     return "\n".join(lines)

@@ -70,3 +70,10 @@ def test_the_orchestrators_own_question_is_shown_as_asked():
 def test_failed_tests_do_not_promise_a_repair():
     text = render({"type": "TEST_FAILED", "summary": "post-merge verification failed"}, Context(task="T-15"), "es")
     assert "solo" not in text and "🔎 *ver T-15*" in text
+
+
+def test_options_say_what_really_happens_and_digests_name_projects():
+    assert "❌ *no 12*: no, que vuelva a corregirse" in ask("MERGE", {"target_branch": "main"})
+    assert "queda bloqueada" in ask("SCOPE_EXPANSION", {"kind": "plan_expansion", "added": 3, "limit": 1})
+    items = [({"type": "PROJECT_READY", "summary": "demo is ready"}, Context(project="demo"))]
+    assert render_digest(items, "es") == "📋 *Avances* (1)\n• demo: proyecto listo"
