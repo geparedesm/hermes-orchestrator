@@ -190,7 +190,8 @@ class ClaudeAdapter:
         # model (other models may run auxiliary steps). Only names and token counts are kept.
         init = next((e for e in raw if e.get("type") == "system" and e.get("subtype") == "init"), None)
         per_model = {}
-        for name, stats in ((final or {}).get("modelUsage") or {}).items():
+        reported = (final or {}).get("modelUsage")
+        for name, stats in (reported.items() if isinstance(reported, dict) else ()):
             if model_name(name) and isinstance(stats, dict):
                 per_model[name] = {k: stats[k] for k in _MODEL_USAGE_KEYS if isinstance(stats.get(k), int)}
         model = model_name((init or {}).get("model")) or max(per_model, key=lambda m: per_model[m].get("outputTokens", 0), default=None)

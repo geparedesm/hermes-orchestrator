@@ -181,12 +181,13 @@ class CodexAdapter:
                     totals[key] = totals.get(key, 0) + value
         units: dict[str, Any] = {**totals, "num_turns": turns}
         # `codex exec --json` does not name the model; ho-agent-run copies it from the session's own record
-        # (`turn_context.model`) into models.txt, one name per line.
-        models = [m for m in (bundle.text("models.txt") or "").split() if model_name(m)][:5]
-        if models:
-            units["model"] = models[-1]
-            if len(models) > 1:
-                units["models"] = {m: {} for m in models}
+        # (`turn_context.model`) into models.txt, one line per turn of this run.
+        turns_models = [m for m in (bundle.text("models.txt") or "").split() if model_name(m)][-100:]
+        if turns_models:
+            units["model"] = turns_models[-1]  # the model of the run's last turn
+            distinct = list(dict.fromkeys(turns_models))
+            if len(distinct) > 1:
+                units["models"] = {m: {"turns": turns_models.count(m)} for m in distinct}
         return UsageRecord(self.provider, units)
 
     def health_check(self, *, pinned_images: Iterable[str], credential_present: bool, credential_status: str) -> ProviderHealth:

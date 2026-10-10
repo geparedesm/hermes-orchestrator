@@ -249,3 +249,15 @@ def test_the_model_of_each_execution_is_recorded():
     usage = CodexAdapter().collect_usage(bundle("codex-success.jsonl", models_txt=b"gpt-6.1-sol\n<script>\n")).units
     assert usage["model"] == "gpt-6.1-sol"
     assert "model" not in CodexAdapter().collect_usage(bundle("codex-success.jsonl")).units  # not reported: not invented
+
+
+def test_model_records_survive_resumed_sessions_and_malformed_reports():
+    # Codex, one line per turn of this run: the last turn's model wins, even when it was used before.
+    usage = CodexAdapter().collect_usage(bundle("codex-success.jsonl", models_txt=b"model-a\nmodel-b\nmodel-a\n")).units
+    assert usage["model"] == "model-a" and usage["models"] == {"model-a": {"turns": 2}, "model-b": {"turns": 1}}
+    # Claude: a modelUsage that is not an object is ignored, never an error that blocks finalization.
+    events = [{"type": "system", "subtype": "init", "model": "claude-sonnet-5"},
+              {"type": "result", "subtype": "success", "usage": {"input_tokens": 1}, "modelUsage": ["unexpected"]}]
+    b = OutputBundle({"ho/events.jsonl": "\n".join(json.dumps(e) for e in events).encode()})
+    usage = ClaudeAdapter().collect_usage(b).units
+    assert usage["model"] == "claude-sonnet-5" and "models" not in usage

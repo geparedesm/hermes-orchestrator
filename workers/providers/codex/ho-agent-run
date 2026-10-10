@@ -23,6 +23,9 @@ fi
 
 prompt=/run/ho-input/prompt.md
 [[ -f $prompt ]] || finish 2 input_missing
+# Lines already in the session records (a resumed session appends to its record): only later turns are this run's.
+seen_lines="$(mktemp)"
+find -L "$CODEX_HOME/sessions" -name 'rollout-*.jsonl' -exec wc -l {} \; > "$seen_lines" 2>/dev/null || true
 codex "$@" < "$prompt" > "$OUT/events.jsonl"
 rc=$?
 
@@ -32,7 +35,10 @@ thread="$(grep -m1 -o '"thread_id":"[0-9a-f-]\{36\}"' "$OUT/events.jsonl" | cut 
 if [[ -n $thread ]]; then
   rollout="$(find -L "$CODEX_HOME/sessions" -name "rollout-*-$thread.jsonl" 2>/dev/null | head -1)"
   if [[ -n $rollout ]]; then
-    grep '"type":"turn_context"' "$rollout" | grep -o '"model":"[A-Za-z0-9._:/@-]\{1,100\}"' | cut -d'"' -f4 | awk '!seen[$0]++' > "$OUT/models.txt" || true
+    skip="$(awk -v f="$rollout" '$2 == f {print $1}' "$seen_lines")"
+    # One line per turn, in order: the last one is the model the run ended with.
+    tail -n "+$(( ${skip:-0} + 1 ))" "$rollout" | grep '"type":"turn_context"' \
+      | awk 'match($0, /"model":"[A-Za-z0-9._:\/@-]+"/) { print substr($0, RSTART + 9, RLENGTH - 10) }' > "$OUT/models.txt" || true
   fi
 fi
 
