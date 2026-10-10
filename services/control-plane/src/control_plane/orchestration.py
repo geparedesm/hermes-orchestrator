@@ -705,8 +705,15 @@ class Orchestration:
                                             media_type="application/json")
         self._event(uow, task, "PLAN_VERSIONED", f"plan version {version}: {len(items)} subtask(s), {len(new_keys)} new",
                     {"version": version, "artifact": str(artifact.id)})
+        task = self._task(uow, task["id"])  # the new plan version
         if task["state"] == S.PLANNING:
-            self._move(uow, task, S.QUEUED, reason="plan accepted")
+            task = self._move(uow, task, S.QUEUED, reason="plan accepted")
+        subtasks = self._subtasks(uow, task)
+        if subtasks and all(x["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in subtasks) \
+                and task["state"] in (S.QUEUED, S.RUNNING):
+            # Nothing left to develop (for example a plan that dropped its last open subtask): integrate now.
+            task = self._move(uow, task, S.RUNNING, reason="every subtask accepted; integrating")
+            self._integrate_if_ready(uow, task)
         return f"version {version}"
 
     def _expansion_approved(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], added: int, limit: int) -> bool:
@@ -1098,6 +1105,8 @@ class Orchestration:
                 task = self.tasks.get(uow, task_key, lock=True)
                 if task["state"] != S.RUNNING:
                     return
+                if any(x["state"] not in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in self._subtasks(uow, task)):
+                    return  # the plan changed since: unfinished work is not integrated
                 result = self.git.integrate(uow, task_key)
                 if not result["ok"]:
                     self._resolve_conflict(uow, self.tasks.get(uow, task_key, lock=True), result)
