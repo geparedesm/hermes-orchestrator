@@ -497,3 +497,21 @@ def test_an_existing_base_pin_is_reused(api, root):
                                            "pin_ref": "refs/hermes/tasks/T-9/base"})
     assert again.status_code == 200, again.text
     assert again.json()["base_sha"] == first["base_sha"]  # the task's base stays where it was fixed
+
+
+def test_a_pull_request_that_conflicts_is_refused_not_retried(api, root, origin, tmp_path):
+    head = integrated(api, root)  # adds feature.py
+    api("/v1/github/push", branch_policy(ref="refs/hermes/tasks/T-1/integration", branch="hermes/t-1"))
+    api("/v1/github/pr", branch_policy(branch="hermes/t-1", base="main", title="T-1", body=""))
+    # Meanwhile main moved on GitHub with a conflicting feature.py (another task merged there).
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True, env=ENV)
+    commit(other, "another task", {"feature.py": "print('other')\n"})
+    subprocess.run(["git", "-C", str(other), "push", "-q", "origin", "main"], check=True, env=ENV)
+    remote_main = subprocess.run(["git", "-C", str(origin), "rev-parse", "main"], capture_output=True, text=True).stdout.strip()
+    token = sign_merge(KEY, approval_id="gh-3", expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                       subject={"project": "app", "target_branch": "main", "target_sha": remote_main, "head_sha": head,
+                                "method": "merge", "pr_number": 1})
+    response = api("/v1/merge", {"path": "app", "task": "T-1", "authorization": token})
+    assert response.status_code == 409, response.text  # a refusal (the task is blocked), not a 502 retried forever
+    assert "conflicts with main on GitHub" in response.json()["message"]
