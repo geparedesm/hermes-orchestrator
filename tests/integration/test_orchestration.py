@@ -626,3 +626,18 @@ def test_a_retried_task_with_its_plan_accepted_is_integrated_without_asking(api,
     services.scheduler.run_once()
     assert state(api, task) in ("TESTING", "REVIEW")
     assert len(executions(services, task, "ORCHESTRATOR")) == steps_before  # no step was needed
+
+
+def test_a_revision_is_planned_before_an_accepted_plan_is_integrated(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "print('hello')\n"})
+    [rev] = active(services, task, "REVIEWER")
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.BLOCKED, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason="stalled")
+    review_verdict(services, agents, rev)
+    assert api.post(f"/v1/tasks/{task}/revise", {"text": "Also greet in Spanish."}).status_code in (200, 201)
+    api.post(f"/v1/tasks/{task}/retry")
+    services.scheduler.run_once()
+    assert state(api, task) == "PLANNING" and active(services, task, "ORCHESTRATOR")  # the revision is planned first

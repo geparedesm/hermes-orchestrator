@@ -380,7 +380,11 @@ class Orchestration:
         uow.cur.execute("SELECT 1 FROM pending_launches WHERE task_id = %s AND kind = 'STEP'", (task["id"],))
         if uow.cur.fetchone() is not None:
             return None
-        if task["state"] == S.PLANNING and task["current_plan_version"]:
+        uow.cur.execute("SELECT coalesce(max(seq) FILTER (WHERE type = 'PLAN_VERSIONED'), 0) > "
+                        "coalesce(max(seq) FILTER (WHERE type = 'REQUIREMENTS_REVISED'), 0) AS current "
+                        "FROM events WHERE task_id = %s", (task["id"],))
+        plan_current = bool(uow.cur.fetchone()["current"])  # type: ignore[index]  # no revision waits to be planned
+        if task["state"] == S.PLANNING and task["current_plan_version"] and plan_current:
             subtasks = self._subtasks(uow, task)
             if subtasks and all(x["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in subtasks):
                 # Back from a retry or resume with the whole plan accepted: nothing to decide, integrate it.
