@@ -112,7 +112,19 @@ class GitChanges:
                 base_ref = f"refs/hermes/tasks/{task_key}/base"
             else:
                 base_ref, pin = target, f"refs/hermes/tasks/{task_key}/base"
-        prepared = self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
+        try:
+            prepared = self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
+        except Conflict as exc:
+            # A clone with this name but no record is what a rolled-back launch leaves behind (Git Service prepared it,
+            # the transaction that would have recorded it did not commit). The task row is locked, so no concurrent
+            # creation can own it: remove it and prepare again. A recorded workspace is never touched.
+            uow.cur.execute("SELECT 1 FROM workspaces WHERE project_id = %s AND name = %s", (project["id"], name))
+            if "already exists" not in str(exc) or uow.cur.fetchone() is not None:
+                raise
+            self.ctx.git.remove_workspace(project["relative_path"], name)
+            self._event(uow, task, "WORKSPACE_RECLAIMED", f"removed {name}, left by an earlier attempt that was rolled back",
+                        {"workspace": name})
+            prepared = self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
         if not task["base_commit"]:
             uow.cur.execute("UPDATE tasks SET base_commit = %s, target_branch = %s WHERE id = %s",
                             (prepared["base_sha"], target, task["id"]))

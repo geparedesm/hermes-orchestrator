@@ -486,3 +486,14 @@ def test_read_view_of_an_empty_commit(api, tmp_path):
     response = api("/v1/read-views", {"path": "empty", "branch": "main"})
     assert response.status_code == 200, response.text
     assert list((empty / response.json()["path"]).iterdir()) == []
+
+
+def test_an_existing_base_pin_is_reused(api, root):
+    repo = root / "app"
+    first = api("/v1/workspaces/prepare", {"path": "app", "name": "t-9-w1", "branch": "hermes/t-9/w1", "base_ref": "main",
+                                           "pin_ref": "refs/hermes/tasks/T-9/base"}).json()
+    commit(repo, "main moves on", {"later.py": "x = 1\\n"})
+    again = api("/v1/workspaces/prepare", {"path": "app", "name": "t-9-w2", "branch": "hermes/t-9/w2", "base_ref": "main",
+                                           "pin_ref": "refs/hermes/tasks/T-9/base"})
+    assert again.status_code == 200, again.text
+    assert again.json()["base_sha"] == first["base_sha"]  # the task's base stays where it was fixed
