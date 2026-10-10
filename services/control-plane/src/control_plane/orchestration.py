@@ -705,6 +705,7 @@ class Orchestration:
                                             media_type="application/json")
         self._event(uow, task, "PLAN_VERSIONED", f"plan version {version}: {len(items)} subtask(s), {len(new_keys)} new",
                     {"version": version, "artifact": str(artifact.id)})
+        task = self._task(uow, task["id"])  # the new plan version
         if task["state"] == S.PLANNING:
             task = self._move(uow, task, S.QUEUED, reason="plan accepted")
         subtasks = self._subtasks(uow, task)
@@ -1104,6 +1105,8 @@ class Orchestration:
                 task = self.tasks.get(uow, task_key, lock=True)
                 if task["state"] != S.RUNNING:
                     return
+                if any(x["state"] not in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in self._subtasks(uow, task)):
+                    return  # the plan changed since: unfinished work is not integrated
                 result = self.git.integrate(uow, task_key)
                 if not result["ok"]:
                     self._resolve_conflict(uow, self.tasks.get(uow, task_key, lock=True), result)
