@@ -64,7 +64,9 @@ def short_reply_command(text: str) -> str | None:
             groups = [g or "" for g in match.groups()] + [""]
             groups = [g.upper() if g.startswith("t-") else g for g in groups]
             if template.startswith("/orch reject") and groups[1]:
-                groups[1] = shlex.quote(groups[1])  # a note is literal text (apostrophes and all) for /orch's parser
+                # The note as written (case, accents, punctuation), quoted so /orch's parser takes it literally.
+                parts = str(text).strip().strip("*_~` ").split(None, 2)
+                groups[1] = shlex.quote(parts[2].strip("*_~` ") if len(parts) == 3 else groups[1])
             return template.format(*groups).strip()
     return None
 

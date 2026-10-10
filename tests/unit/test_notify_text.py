@@ -65,3 +65,8 @@ def test_the_orchestrators_own_question_is_shown_as_asked():
     text = ask("SCOPE_EXPANSION", {"kind": "orchestrator_request", "text": "¿Puedo borrar el módulo antiguo?"})
     assert "Claude pregunta:\n_¿Puedo borrar el módulo antiguo?_" in text
     assert "subtareas" not in text and "✅ *si 12*: sí, adelante" in text
+
+
+def test_failed_tests_do_not_promise_a_repair():
+    text = render({"type": "TEST_FAILED", "summary": "post-merge verification failed"}, Context(task="T-15"), "es")
+    assert "solo" not in text and "🔎 *ver T-15*" in text

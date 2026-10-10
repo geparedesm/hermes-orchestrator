@@ -199,3 +199,9 @@ def test_rejection_notes_survive_chat_punctuation():
     assert command == "/orch reject 12 'don'\"'\"'t merge yet'"
     import shlex
     assert shlex.split(command[len("/orch "):]) == ["reject", "12", "don't merge yet"]
+
+
+def test_rejection_notes_are_kept_as_written():
+    import shlex
+    command = plugin.short_reply_command("No 12 keep API_KEY in Config.py, señor")
+    assert shlex.split(command[len("/orch "):]) == ["reject", "12", "keep API_KEY in Config.py, señor"]
