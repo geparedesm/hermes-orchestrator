@@ -82,3 +82,12 @@ def test_the_expired_list_holds_only_approvals_that_can_be_requested_again(api, 
     assert listed == [renewed["id"]]  # the renewed one dropped out; the newest expired is reachable
     api.post(f"/v1/tasks/{task}/cancel")
     assert api.get("/v1/approvals?state=EXPIRED", **DASHBOARD).json()["approvals"] == []
+
+
+def test_an_applied_budget_raise_that_later_expired_is_not_asked_again(api, services, agents, task):
+    raised = api.post(f"/v1/tasks/{task}/budget", {"add": {"agent_launches": 5}}).json()
+    api.post(f"/v1/approvals/{raised['id']}/decision", {"decision": "APPROVE"})  # applied, left APPROVED
+    expire(services, raised["id"])
+    response = api.post(f"/v1/approvals/{raised['id']}/renew", **DASHBOARD)
+    assert response.status_code == 409 and "already decided" in response.text
+    assert api.get("/v1/approvals?state=EXPIRED", **DASHBOARD).json()["approvals"] == []

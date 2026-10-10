@@ -36,6 +36,8 @@ class Renewer(Protocol):
 
 
 _TERMINAL_TASK_STATES = ("DONE", "CANCELLED", "FAILED")
+# Renewed by rebuilding them from the current state, so even one decided before can be asked again safely.
+_REBUILT_FROM_STATE = (ApprovalAction.MERGE.value,)
 
 
 class Approvals:
@@ -68,9 +70,10 @@ class Approvals:
             # the same project and task, and the task (if any) has not ended. Renewed and outdated ones drop out.
             uow.cur.execute(
                 "SELECT a.* FROM approvals a LEFT JOIN tasks t ON t.id = a.task_id WHERE a.state = 'EXPIRED' "
-                "AND (t.id IS NULL OR t.state <> ALL(%s)) AND NOT EXISTS (SELECT 1 FROM approvals n WHERE n.action = a.action "
+                "AND (a.decided_at IS NULL OR a.action = ANY(%s)) AND (t.id IS NULL OR t.state <> ALL(%s)) AND NOT EXISTS (SELECT 1 FROM approvals n WHERE n.action = a.action "
                 "AND n.project_id IS NOT DISTINCT FROM a.project_id AND n.task_id IS NOT DISTINCT FROM a.task_id "
-                "AND n.requested_at > a.requested_at) ORDER BY a.requested_at DESC LIMIT %s", (list(_TERMINAL_TASK_STATES), limit))
+                "AND n.requested_at > a.requested_at) ORDER BY a.requested_at DESC LIMIT %s",
+                (list(_REBUILT_FROM_STATE), list(_TERMINAL_TASK_STATES), limit))
             return uow.cur.fetchall()
         if state:
             uow.cur.execute("SELECT * FROM approvals WHERE state = %s ORDER BY requested_at LIMIT %s", (state, limit))
@@ -156,6 +159,9 @@ class Approvals:
         row = self.get(uow, approval_id, lock=True)
         if row["state"] != ApprovalState.EXPIRED:
             raise Conflict(f"only expired approvals can be requested again; this one is {row['state']}")
+        if row["decided_at"] is not None and row["action"] not in _REBUILT_FROM_STATE:
+            # Approved, possibly already applied (a budget raise), and expired unused: asking again could apply it twice.
+            raise Conflict(f"this approval was already decided by {row['decided_by']}: there is nothing to ask again")
         uow.cur.execute("SELECT id, state FROM approvals WHERE action = %s AND project_id IS NOT DISTINCT FROM %s "
                         "AND task_id IS NOT DISTINCT FROM %s AND requested_at > %s ORDER BY requested_at DESC LIMIT 1",
                         (row["action"], row["project_id"], row["task_id"], row["requested_at"]))

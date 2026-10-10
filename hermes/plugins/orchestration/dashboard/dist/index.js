@@ -387,7 +387,9 @@
       workers: "/workers" };
     const load = React.useCallback(function () {
       if (task || creating) return;
-      api(sources[view]).then(function (d) { setData({ view: view, body: d }); setError(null); })
+      const requested = sources[view];
+      // Answers are tagged with what was asked: one for a list no longer shown is dropped.
+      api(requested).then(function (d) { setData({ view: view, source: requested, body: d }); setError(null); })
         .catch(function (e) { setError(String(e.message || e)); });
     }, [view, task, creating, approvalState]);
     React.useEffect(function () { setData(null); load(); const t = setInterval(load, 10000); return function () { clearInterval(t); }; }, [load]);
@@ -400,7 +402,7 @@
     let body;
     if (creating) body = h(NewTask, { created: open, cancel: function () { setCreating(false); } });
     else if (task) body = h(TaskView, { task: task, back: function () { setTask(null); } });
-    else if (!data || data.view !== view) body = h("p", null, error || "Loading…");
+    else if (!data || data.view !== view || data.source !== sources[view]) body = h("p", null, error || "Loading…");
     else if (view === "overview") body = h(Overview, { data: data.body, open: open, reload: load });
     else if (view === "board") body = h(Board, { tasks: data.body.tasks, open: open });
     else if (view === "approvals") body = h("div", null,
