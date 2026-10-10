@@ -816,6 +816,12 @@ def create_app(services: Services) -> FastAPI:
             return (409 if row["state"] == "EXPIRED" else 200), approval_view(row)
         return idempotent(idempotency_key, who, {"op": "decide", "id": approval_id, **body.model_dump()}, command)
 
+    @app.post("/v1/approvals/{approval_id}/renew", status_code=201)
+    def renew(approval_id: str, who: Principal = Depends(principal), idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            return 201, approval_view(services.approvals.renew(uow, approval_id, principal=who))
+        return idempotent(idempotency_key, who, {"op": "renew", "id": approval_id}, command)
+
     # ---------------------------------------------------------------- events
 
     @app.get("/v1/events")

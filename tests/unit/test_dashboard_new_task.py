@@ -107,3 +107,27 @@ def test_downloads_are_never_rendered(dashboard, monkeypatch):
     assert response.status_code == 200 and response.headers["content-type"] == "application/octet-stream"
     assert response.headers["content-disposition"].startswith("attachment") and response.headers["x-content-type-options"] == "nosniff"
     assert client.get("/tasks/..%2Fx/attachments/0190a3e8-0000-7000-8000-000000000001").status_code == 404
+
+
+def test_renew_and_expired_listing_routes(dashboard, monkeypatch):
+    client, _ = dashboard
+    module = sys.modules["orchestration_dashboard_api_test"]
+    seen = []
+
+    class Api:
+        def __init__(self, principal):
+            self.principal = principal
+
+        def renew(self, approval_id):
+            seen.append(("renew", self.principal, approval_id))
+            return {"id": "new", "state": "PENDING"}
+
+        def expired_approvals(self):
+            seen.append(("expired", self.principal))
+            return {"approvals": []}
+
+    monkeypatch.setattr(module._client, "TaskApi", Api)
+    assert client.post("/approvals/0190a3e8-0000-7000-8000-000000000001/renew").json()["state"] == "PENDING"
+    assert client.get("/approvals", params={"state": "EXPIRED"}).json() == {"approvals": []}
+    assert client.post("/approvals/not-a-uuid/renew").status_code == 422
+    assert seen == [("renew", "dashboard:operator", "0190a3e8-0000-7000-8000-000000000001"), ("expired", "dashboard:operator")]

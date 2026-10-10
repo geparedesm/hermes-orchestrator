@@ -31,14 +31,27 @@ def state_hash(action: str, subject: dict[str, Any], config_hash: str, policy_ve
     return hash_value({"action": action, "subject": subject, "config_hash": config_hash, "policy_version": policy_version})
 
 
+class Renewer(Protocol):
+    def __call__(self, uow: UnitOfWork, expired: Row, principal: Principal) -> Row: ...
+
+
+_TERMINAL_TASK_STATES = ("DONE", "CANCELLED", "FAILED")
+
+
 class Approvals:
     def __init__(self, ctx: Context) -> None:
         self.ctx = ctx
         self._handlers: dict[str, list[DecisionHandler]] = {}
+        self._renewers: dict[str, Renewer] = {}
 
     def register_handler(self, action: ApprovalAction, handler: Callable[..., None]) -> None:
         """Handlers run in order on every decision of the action; each ignores subjects it does not own."""
         self._handlers.setdefault(action.value, []).append(handler)
+
+    def register_renewer(self, action: ApprovalAction, renewer: Callable[..., Row]) -> None:
+        """How an expired approval of `action` is requested again: the owner rebuilds it from the current state
+        (and refuses with Conflict when it no longer applies). Actions without one are requested again as they were."""
+        self._renewers[action.value] = renewer
 
     # ------------------------------------------------------------------ queries
 
@@ -124,6 +137,41 @@ class Approvals:
         for handler in self._handlers.get(row["action"], []):
             handler(uow, decided, approve, principal)
         return self.get(uow, row["id"])
+
+    def renew(self, uow: UnitOfWork, approval_id: UUID | str, *, principal: Principal) -> Row:
+        """Request an expired approval again (a person's action, never an agent's). The expired one stays EXPIRED for
+        the record and the new one points to it. Still bound the same way: whoever acts on it checks the current state
+        at use time, so a renewed approval for something that changed is invalidated, never applied."""
+        if principal.value not in self.ctx.platform["platform"]["approvers"]:
+            raise Forbidden(f"{principal.value} is not an allowed approver")
+        row = self.get(uow, approval_id, lock=True)
+        if row["state"] != ApprovalState.EXPIRED:
+            raise Conflict(f"only expired approvals can be requested again; this one is {row['state']}")
+        uow.cur.execute("SELECT id, state FROM approvals WHERE action = %s AND project_id IS NOT DISTINCT FROM %s "
+                        "AND task_id IS NOT DISTINCT FROM %s AND requested_at > %s ORDER BY requested_at DESC LIMIT 1",
+                        (row["action"], row["project_id"], row["task_id"], row["requested_at"]))
+        newer = uow.cur.fetchone()
+        if newer is not None:
+            raise Conflict(f"a newer {row['action']} approval exists ({newer['state']}): use that one")
+        if row["task_id"] is not None:
+            uow.cur.execute("SELECT key, state FROM tasks WHERE id = %s", (row["task_id"],))
+            task = uow.cur.fetchone()
+            if task is not None and task["state"] in _TERMINAL_TASK_STATES:
+                raise Conflict(f"{task['key']} is {task['state']}: there is nothing left to approve")
+        renewer = self._renewers.get(row["action"])
+        if renewer is not None:
+            renewed = renewer(uow, row, principal)
+        else:
+            renewed = self.request(uow, action=ApprovalAction(row["action"]), project_id=row["project_id"], subject=row["subject"],
+                                   config_hash=row["config_hash"], summary=row["summary"], requested_by=principal.value,
+                                   task_id=row["task_id"], risk=Risk(row["risk"]), from_task_state=row["from_task_state"])
+        uow.cur.execute("UPDATE approvals SET renewed_from = %s WHERE id = %s RETURNING *", (row["id"], renewed["id"]))
+        renewed = uow.cur.fetchone()
+        assert renewed is not None
+        record_event(uow.cur, "APPROVAL_RENEWED", actor=principal.value, project_id=row["project_id"], task_id=row["task_id"],
+                     summary=f"{row['action']} approval requested again", pending=uow.events,
+                     data={"approval_id": str(renewed["id"]), "renewed_from": str(row["id"])})
+        return renewed
 
     def consume(self, uow: UnitOfWork, approval: Row, *, subject: dict[str, Any], config_hash: str) -> bool:
         """Validate an APPROVED approval against the current state and mark it CONSUMED.

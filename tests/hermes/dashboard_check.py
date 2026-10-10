@@ -52,6 +52,13 @@ with sync_playwright() as p:
     page.get_by_text("No decisions waiting.").wait_for(timeout=15000)
     seen["pending_after_approve"] = page.get_by_role("button", name="Approve", exact=True).count()
 
+    # An expired approval is requested again from the Expired list and shows up as pending.
+    page.get_by_role("button", name="Expired", exact=True).click()
+    page.get_by_role("button", name="Request again", exact=True).first.click()
+    page.get_by_role("button", name="Pending", exact=True).click()
+    page.get_by_role("button", name="Approve", exact=True).first.wait_for(timeout=15000)
+    seen["renewed_from_page"] = page.get_by_role("button", name="Approve", exact=True).count() == 1
+
     # A new task from the form; a double click still creates one task (one idempotency key per form).
     page.get_by_role("button", name="+ New task", exact=True).click()
     page.get_by_text("What should be done").wait_for(timeout=15000)

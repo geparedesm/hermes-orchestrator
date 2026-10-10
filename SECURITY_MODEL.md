@@ -141,6 +141,8 @@ The component performing the action (Git Service for merges, the control plane f
 
 A mismatch invalidates the approval, records an event, and returns the task to the appropriate state with a new request if still needed. Examples of mismatch: new commits, changed base, changed configuration, or a policy version change.
 
+An **expired** approval can be requested again by an allowed approver (Dashboard **Request again**, `/orch renew <id>`; never by an agent). The new approval points to the expired one (`renewed_from`), which stays EXPIRED. It is refused when a newer approval of the same action exists, when the task has ended, or when its owner finds it no longer applies: a merge is rebuilt through the normal merge request (current integrated commit, target, and Quality Gate), an assumption only while it is still open, a project configuration only while it is still the current proposal, an update only from the version still running. Every other approval keeps its exact binding, so whatever acts on it still recomputes the state at use time and invalidates it if anything changed.
+
 ### 6.4 Hard approval boundaries
 
 No autonomy profile, project configuration, or task override can remove these (§26):

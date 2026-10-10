@@ -39,6 +39,7 @@ class Projects:
         self.ctx = ctx
         self.approvals = approvals
         approvals.register_handler(ApprovalAction.PROJECT_READY, self._on_project_ready_decision)
+        approvals.register_renewer(ApprovalAction.PROJECT_READY, self._renew_project_ready)
 
     # ------------------------------------------------------------------ queries
 
@@ -233,6 +234,16 @@ class Projects:
             "source": config["source"],
             "head_commit": head,
         }
+
+    def _renew_project_ready(self, uow: UnitOfWork, expired: Row, principal: Principal) -> Row:
+        uow.cur.execute("SELECT id, status FROM project_configs WHERE project_id = %s ORDER BY created_at DESC LIMIT 1",
+                        (expired["project_id"],))
+        latest = uow.cur.fetchone()
+        if latest is None or str(latest["id"]) != str(expired["subject"].get("config_id")) or latest["status"] != "PROPOSED":
+            raise Conflict("the project's configuration changed since: scan the project again for a current proposal")
+        return self.approvals.request(uow, action=ApprovalAction.PROJECT_READY, project_id=expired["project_id"],
+                                      subject=expired["subject"], config_hash=expired["config_hash"], summary=expired["summary"],
+                                      requested_by=principal.value, risk=Risk(expired["risk"]))
 
     def _on_project_ready_decision(self, uow: UnitOfWork, approval: Row, approved: bool, principal: Principal) -> None:
         config_id = approval["subject"]["config_id"]

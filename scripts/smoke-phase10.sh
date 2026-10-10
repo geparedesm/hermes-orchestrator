@@ -111,6 +111,14 @@ except urllib.error.HTTPError as e:
     print(e.code)")"
 check "metrics are operator-only" "403" "$PLUGIN_METRICS"
 
+echo "== an expired approval to request again from the page"
+new_project app3
+EXPIRED="$(ho project scan app3 | field 'd["approval"]["id"]')"
+# Documented stand-in for 72 hours passing: the approval window is moved into the past and the platform expires it.
+sql "UPDATE approvals SET expires_at = now() - interval '1 minute' WHERE id = '$EXPIRED'" >/dev/null
+for _ in $(seq 1 30); do [[ "$(sql "SELECT state FROM approvals WHERE id = '$EXPIRED'")" == EXPIRED ]] && break; sleep 2; done
+check "approval expired by the platform" "EXPIRED" "$(sql "SELECT state FROM approvals WHERE id = '$EXPIRED'")"
+
 echo "== the tab rendered in headless Chromium"
 mkdir -p "$WORK/out"
 cp secrets/ho_hermes_dashboard_password "$WORK/out/password" && chmod 644 "$WORK/out/password"
@@ -125,6 +133,9 @@ check "task detail sections" "10" "$(field 'len(d["task_sections"])' <<<"$SEEN")
 check "approval decided from the page" "1 0" "$(field 'str(d["pending_in_page"]) + " " + str(d.get("pending_after_approve"))' <<<"$SEEN")"
 check "decision recorded as the Dashboard operator" "dashboard:operator" \
   "$(sql "SELECT decided_by FROM approvals WHERE state IN ('APPROVED', 'CONSUMED') ORDER BY decided_at DESC LIMIT 1")"
+check "expired approval requested again from the page" "True" "$(field 'd.get("renewed_from_page")' <<<"$SEEN")"
+check "the new approval points to the expired one" "PENDING dashboard:operator" \
+  "$(sql "SELECT state || ' ' || requested_by FROM approvals WHERE renewed_from = '$EXPIRED'")"
 check "task created from the form" "True" "$(field 'd.get("created_from_form")' <<<"$SEEN")"
 check "attachment uploaded with the form and downloaded from the task" "True" "$(field 'd.get("downloaded_attachment")' <<<"$SEEN")"
 check "attachment stored once, bound to the task" "1 spec.md" \

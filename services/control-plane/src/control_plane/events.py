@@ -55,6 +55,7 @@ ROUTINE_EVENTS = frozenset(
 AUDIT_EVENTS = frozenset(
     {
         "NOTIFICATIONS_SUPPRESSED",
+        "APPROVAL_RENEWED",
         "PROJECT_REGISTERED",
         "PROJECT_UNREGISTERED",
         "PROJECT_READY",

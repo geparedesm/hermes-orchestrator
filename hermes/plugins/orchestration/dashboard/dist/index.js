@@ -95,6 +95,21 @@
         " · notifications waiting for Hermes: " + s.pending_notifications)));
   }
 
+  // An expired approval requested again: the platform checks it still applies and says why when it does not.
+  function Renew(props) {
+    const [busy, setBusy] = React.useState(false);
+    const [error, setError] = React.useState(null);
+    function renew() {
+      setBusy(true);
+      setError(null);
+      post("/approvals/" + props.id + "/renew").then(props.done)
+        .catch(function (e) { setError(String(e.message || e)); }).finally(function () { setBusy(false); });
+    }
+    return h("span", null,
+      h("button", { className: "orch-button", disabled: busy, onClick: renew }, busy ? "Requesting…" : "Request again"),
+      error ? h("div", { className: "orch-error" }, error) : null);
+  }
+
   function Decide(props) {
     const [busy, setBusy] = React.useState(false);
     const [error, setError] = React.useState(null);
@@ -291,7 +306,8 @@
       h(Section, { title: "Approvals" }, h(Table, { rows: data.approvals, empty: "No approvals.", columns: [
         ["Action", function (a) { return h(Badge, { value: a.action }); }], ["State", function (a) { return h(Badge, { value: a.state }); }],
         ["Summary", function (a) { return a.summary; }], ["Decided by", function (a) { return a.decided_by || "—"; }],
-        ["", function (a) { return a.state === "PENDING" ? h(Decide, { id: a.id, done: load }) : null; }]] })),
+        ["", function (a) { return a.state === "PENDING" ? h(Decide, { id: a.id, done: load })
+          : a.state === "EXPIRED" ? h(Renew, { id: a.id, done: load }) : null; }]] })),
       budget ? h(Section, { title: "Budget (" + budget.profile + ", " + budget.state + ")" }, h(Table, {
         rows: Object.keys(budget.limits).map(function (k) { return { id: k, counter: k, limit: budget.limits[k], used: budget.consumed[k], reserved: (budget.reserved || {})[k] }; }),
         columns: [["Counter", function (b) { return b.counter; }], ["Used", function (b) { return count(b.used); }],
@@ -366,12 +382,14 @@
     const [data, setData] = React.useState(null);
     const [error, setError] = React.useState(null);
     const [creating, setCreating] = React.useState(false);
-    const sources = { overview: "/summary", board: "/board", approvals: "/approvals", projects: "/projects", workers: "/workers" };
+    const [approvalState, setApprovalState] = React.useState("PENDING");
+    const sources = { overview: "/summary", board: "/board", approvals: "/approvals?state=" + approvalState, projects: "/projects",
+      workers: "/workers" };
     const load = React.useCallback(function () {
       if (task || creating) return;
       api(sources[view]).then(function (d) { setData({ view: view, body: d }); setError(null); })
         .catch(function (e) { setError(String(e.message || e)); });
-    }, [view, task, creating]);
+    }, [view, task, creating, approvalState]);
     React.useEffect(function () { setData(null); load(); const t = setInterval(load, 10000); return function () { clearInterval(t); }; }, [load]);
     function open(key) { setCreating(false); setTask(key); }
     const nav = h("nav", { className: "orch-nav" }, VIEWS.map(function (v) {
@@ -385,10 +403,19 @@
     else if (!data || data.view !== view) body = h("p", null, error || "Loading…");
     else if (view === "overview") body = h(Overview, { data: data.body, open: open, reload: load });
     else if (view === "board") body = h(Board, { tasks: data.body.tasks, open: open });
-    else if (view === "approvals") body = h(Table, { rows: data.body.approvals, empty: "No decisions waiting.", columns: [
-      ["Approval", function (a) { return h(Badge, { value: a.action }); }], ["Summary", function (a) { return a.summary; }],
-      ["Requested by", function (a) { return a.requested_by; }], ["Expires", function (a) { return when(a.expires_at); }],
-      ["", function (a) { return h(Decide, { id: a.id, done: load }); }]] });
+    else if (view === "approvals") body = h("div", null,
+      h("nav", { className: "orch-nav" }, [["PENDING", "Pending"], ["EXPIRED", "Expired"]].map(function (s) {
+        return h("button", { key: s[0], className: "orch-tab" + (approvalState === s[0] ? " orch-active" : ""),
+          onClick: function () { setApprovalState(s[0]); } }, s[1]);
+      })),
+      approvalState === "PENDING" ? h(Table, { rows: data.body.approvals, empty: "No decisions waiting.", columns: [
+        ["Approval", function (a) { return h(Badge, { value: a.action }); }], ["Summary", function (a) { return a.summary; }],
+        ["Requested by", function (a) { return a.requested_by; }], ["Expires", function (a) { return when(a.expires_at); }],
+        ["", function (a) { return h(Decide, { id: a.id, done: load }); }]] })
+      : h(Table, { rows: data.body.approvals, empty: "No expired approvals.", columns: [
+        ["Approval", function (a) { return h(Badge, { value: a.action }); }], ["Summary", function (a) { return a.summary; }],
+        ["Expired", function (a) { return when(a.expires_at); }],
+        ["", function (a) { return h(Renew, { id: a.id, done: load }); }]] }));
     else if (view === "projects") body = h(Projects, { projects: data.body.projects });
     else body = h(Workers, { data: data.body, open: open });
     return h("div", { className: "orch-page" }, nav,

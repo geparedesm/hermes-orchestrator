@@ -29,6 +29,12 @@ class Updates:
     def __init__(self, ctx: Context, approvals: Approvals) -> None:
         self.ctx = ctx
         self.approvals = approvals
+        approvals.register_renewer(ApprovalAction.UPDATE, self._renew)
+
+    def _renew(self, uow: UnitOfWork, expired: Row, principal: Principal) -> Row:
+        if expired["subject"].get("from_version") != self.current:
+            raise Conflict(f"the platform runs {self.current} now: request the update again")
+        return self.request(uow, expired["subject"]["to_version"], principal=principal)
 
     @property
     def current(self) -> str:

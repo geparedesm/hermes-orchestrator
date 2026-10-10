@@ -105,8 +105,8 @@ def workers() -> Any:
 
 
 @router.get("/approvals")
-def approvals() -> Any:
-    return _call(_api().approvals)
+def approvals(state: Literal["PENDING", "EXPIRED"] = "PENDING") -> Any:
+    return _call(_api().approvals if state == "PENDING" else _api().expired_approvals)
 
 
 @router.get("/tasks/{key}")
@@ -169,6 +169,11 @@ def task_action(key: str, verb: str) -> Any:
     if verb not in TASK_ACTIONS:
         raise HTTPException(status_code=404, detail="unknown action")
     return _call(_api().action, key, verb)
+
+
+@router.post("/approvals/{approval_id}/renew")
+def renew(approval_id: UUID) -> Any:
+    return _call(_api().renew, str(approval_id))
 
 
 @router.post("/approvals/{approval_id}")
