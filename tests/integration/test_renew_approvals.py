@@ -118,10 +118,16 @@ def test_rows_applied_before_the_fix_are_corrected(api, services, agents, task):
     import types
     from pathlib import Path
 
-    raised = api.post(f"/v1/tasks/{task}/budget", {"add": {"retries": 1}}).json()
-    api.post(f"/v1/approvals/{raised['id']}/decision", {"decision": "APPROVE"})
+    decided = []
+    for add in ({"retries": 1}, {"subtasks": 1}):  # one open request at a time
+        approval = api.post(f"/v1/tasks/{task}/budget", {"add": add}).json()
+        api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+        decided.append(approval)
+    expired, approved = decided
+    # How such rows looked before the fix: one already relabelled by the expiry job, one still APPROVED.
     orch.q(services, "UPDATE approvals SET state = 'EXPIRED', consumed_at = NULL, invalidated_reason = 'approval window elapsed' "
-           "WHERE id = %s", raised["id"])  # how such a row looked before the fix
+           "WHERE id = %s", expired["id"])
+    orch.q(services, "UPDATE approvals SET state = 'APPROVED', consumed_at = NULL WHERE id = %s", approved["id"])
     path = Path(__file__).resolve().parents[2] / "migrations" / "versions" / "0011_applied_approvals.py"
     spec = importlib.util.spec_from_file_location("m0011", path)
     module = importlib.util.module_from_spec(spec)
@@ -133,5 +139,6 @@ def test_rows_applied_before_the_fix_are_corrected(api, services, agents, task):
     finally:
         del sys.modules["alembic"]
     orch.q(services, statements[0])
-    [row] = orch.q(services, "SELECT state, consumed_at IS NOT NULL AS used FROM approvals WHERE id = %s", raised["id"])
-    assert row["state"] == "CONSUMED" and row["used"]
+    for approval in (expired, approved):
+        [row] = orch.q(services, "SELECT state, consumed_at IS NOT NULL AS used FROM approvals WHERE id = %s", approval["id"])
+        assert row["state"] == "CONSUMED" and row["used"]

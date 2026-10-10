@@ -17,8 +17,9 @@ depends_on = None
 def upgrade() -> None:
     op.execute("""
     UPDATE approvals SET state = 'CONSUMED', consumed_at = decided_at, invalidated_reason = NULL
-    -- Only approved ones reach EXPIRED after a decision (rejected ones stay REJECTED); these two kinds were applied then.
-    WHERE state = 'EXPIRED' AND decided_at IS NOT NULL AND action IN ('ASSUMPTION', 'BUDGET_INCREASE');
+    -- Decided and approved (rejected ones stay REJECTED): these two kinds were applied at the decision. Both the ones
+    -- already relabelled EXPIRED and the ones still APPROVED, which the expiry job would relabel later.
+    WHERE state IN ('EXPIRED', 'APPROVED') AND decided_at IS NOT NULL AND action IN ('ASSUMPTION', 'BUDGET_INCREASE');
     """)
 
 
