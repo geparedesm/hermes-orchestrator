@@ -60,7 +60,7 @@ def test_human_actions_need_an_identity():
         plugin.run_verb(FakeApi(), ["approve", "A1"], human=False)
     assert exc.value.status == 403
     api = FakeApi()
-    assert plugin.run_verb(api, ["approve", "A1", "looks", "good"], human=True) == "MERGE approved: s"
+    assert plugin.run_verb(api, ["approve", "A1", "looks", "good"], human=True) == "✅ Approved: s"
     assert api.calls == [("decide", ("A1", True, "looks good"))]
 
 
@@ -130,8 +130,12 @@ def test_registration_uses_the_verified_contract():
         def register_cli_command(self, name, help, setup_fn, handler_fn, **kw):
             calls.append(("cli", name))
 
+        def register_hook(self, hook_name, callback):  # PluginContext.register_hook at the pinned release
+            calls.append(("hook", hook_name, callback))
+
     plugin.register(Ctx())
     assert ("command", "orch") in calls and ("cli", "orchestration") in calls
+    assert ("hook", "pre_gateway_dispatch", plugin.rewrite_short_reply) in calls
     assert sum(1 for c in calls if c[0] == "tool") == 6
     assert all(set(c[2]) >= {"name", "toolset", "schema", "handler"} for c in calls if c[0] == "tool")
 
@@ -160,6 +164,31 @@ def test_unreachable_before_sending_is_not_applied(monkeypatch):
 def test_expired_approvals_are_requested_again_by_a_person():
     api = FakeApi()
     text = plugin.run_verb(api, ["renew", "A1"], human=True)
-    assert api.calls[-1] == ("renew", ("A1",)) and "/orch approve A2" in text
+    assert api.calls[-1] == ("renew", ("A1",)) and "*yes A2*" in text
     with pytest.raises(client.ApiError):
         plugin.run_verb(FakeApi(), ["renew", "A1"], human=False)  # not a model's action
+
+
+def test_short_replies_become_orch_commands():
+    cases = {"si 12": "/orch approve 12", "Sí 12": "/orch approve 12", "*si 12*": "/orch approve 12", "yes #7": "/orch approve 7",
+             "no 12": "/orch reject 12", "no 12 falta el test": "/orch reject 12 falta el test", "ver t-15": "/orch status T-15",
+             "reintentar T-15": "/orch retry T-15", "cancelar t-15": "/orch cancel T-15", "renovar 3": "/orch renew 3"}
+    for text, command in cases.items():
+        assert plugin.short_reply_command(text) == command, text
+    for text in ("hola", "si", "si doce", "/orch approve 12", "si 12 y algo más", "ver 15"):
+        assert plugin.short_reply_command(text) is None, text
+
+
+def test_the_dispatch_hook_rewrites_only_short_replies():
+    class Event:
+        def __init__(self, text):
+            self.text = text
+
+    assert plugin.rewrite_short_reply(event=Event("si 12"), gateway=None) == {"action": "rewrite", "text": "/orch approve 12"}
+    assert plugin.rewrite_short_reply(event=Event("buenos días"), gateway=None) is None
+
+
+def test_decisions_read_plainly_whatever_the_approval_became():
+    assert plugin._decided({"state": "CONSUMED", "summary": "Approve configuration", "action": "PROJECT_READY"}) == \
+        "✅ Approved: Approve configuration"
+    assert plugin._decided({"state": "REJECTED", "summary": "merge", "action": "MERGE"}).startswith("❌ Rejected")

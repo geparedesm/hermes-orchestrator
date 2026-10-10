@@ -182,4 +182,5 @@ def task_summary(task: dict[str, Any]) -> str:
 
 
 def approval_line(approval: dict[str, Any]) -> str:
-    return f"{approval['id']} {approval['action']} — {approval.get('summary') or ''}".strip()
+    ref = f"#{approval['number']}" if approval.get("number") is not None else approval["id"]
+    return f"{ref} {approval['action']} — {approval.get('summary') or ''}".strip()

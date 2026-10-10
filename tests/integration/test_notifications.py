@@ -71,18 +71,24 @@ def test_internal_events_are_not_notified(api, services, agents, task):
 
 
 def test_attention_events_are_delivered_immediately_with_the_action(api, services, agents, task, hermes):
-    from control_plane.events import record_event
+    from ho_core.enums import ApprovalAction
 
     [row] = q(services, "SELECT id, project_id FROM tasks WHERE key = %s", task)
     with services.ctx.unit_of_work() as uow:
-        record_event(uow.cur, "APPROVAL_REQUIRED", actor="control-plane", project_id=row["project_id"], task_id=row["id"],
-                     summary="MERGE: merge the change", data={"approval_id": "01a0f000-aaaa", "action": "MERGE"})
+        approval = services.approvals.request(uow, action=ApprovalAction.ENVIRONMENT_ACCESS, project_id=row["project_id"],
+                                              task_id=row["id"], subject={"environment": "staging"}, config_hash="0" * 64,
+                                              summary=f"{task}: use the staging environment", requested_by="test")
     sent = services.outbox.deliver()
     assert sent["sent"] >= 1 and sent["digests"] == 0  # routine waits for the digest
-    [message] = [m for m in hermes.received if "01a0f000-aaaa" in m["text"]]
+    [message] = [m for m in hermes.received if m["event"] == "APPROVAL_REQUIRED" and "staging" in m["text"]]
     assert message["task"] == task and message["project"] == "demo"
-    assert message["text"].startswith(f"[{task}] MERGE: merge the change")
-    assert "/orch approve 01a0f000-aaaa" in message["text"]
+    number = approval["number"]
+    assert message["text"].startswith(f"🟡 *I need your decision* · {task}")
+    assert "use the staging environment. Allow it?" in message["text"]
+    assert f"✅ *yes {number}*: yes, allow it" in message["text"] and f"❌ *no {number}*" in message["text"]
+    # The reply carries the short number; the control plane accepts it like the ID.
+    response = api.post(f"/v1/approvals/{number}/decision", {"decision": "APPROVE"})
+    assert response.status_code == 200 and response.json()["id"] == str(approval["id"])
 
 
 def test_routine_events_are_aggregated_into_a_digest(api, services, agents, task, hermes):
@@ -91,7 +97,7 @@ def test_routine_events_are_aggregated_into_a_digest(api, services, agents, task
     q(services, "UPDATE notifications SET created_at = now() - %s WHERE priority = 'ROUTINE'", ROUTINE_DIGEST * 2)
     services.outbox.deliver()
     [digest] = hermes.received[before:]
-    assert digest["event"] == "DIGEST" and digest["text"].startswith("Progress (")
+    assert digest["event"] == "DIGEST" and digest["text"].startswith("📋 *Progress* (")
     assert task in digest["text"]
     assert q(services, "SELECT count(*) AS n FROM notifications WHERE state = 'PENDING'")[0]["n"] == 0
 
@@ -110,8 +116,9 @@ def test_outage_keeps_order_and_backs_off(api, services, agents, task, hermes):
 
 def test_ready_for_merge_and_completion_messages():
     text = render({"type": "READY_FOR_MERGE", "summary": "T-3: all required checks passed", "data": {}}, "T-3")
-    assert text.startswith("[T-3] ") and "/orch status T-3" in text
-    assert render({"type": "TASK_COMPLETED", "summary": "T-3: merged and verified"}, "T-3") == "[T-3] T-3: merged and verified"
+    assert text.startswith("🚀 *T-3 is ready to merge*")
+    assert render({"type": "TASK_COMPLETED", "summary": "T-3: merged and verified"}, "T-3").startswith("✅ *T-3 completed*")
+    assert render({"type": "TASK_COMPLETED", "summary": "T-3: merged"}, "T-3", "es").startswith("✅ *T-3 completada*")
 
 
 def test_digests_are_rate_limited_however_large_the_backlog(api, services, agents, task, hermes):
@@ -156,7 +163,7 @@ def test_a_backlog_is_suppressed_before_a_channel_is_connected(api, services, ta
     assert api.post("/v1/notifications/test").status_code == 200
     services.outbox.deliver()
     assert [r["event"] for r in hermes.received] == ["NOTIFICATION_TEST"]
-    assert "approvals and completed tasks will be reported here" in hermes.received[0]["text"]
+    assert "notifications reach this chat" in hermes.received[0]["text"]
 
 
 def test_suppression_can_be_limited_to_older_notifications(api, services, task):

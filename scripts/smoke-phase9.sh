@@ -78,6 +78,9 @@ check "plugin enabled in Hermes" "True" \
   "$(contains enabled "$(dc exec -T -e HERMES_HOME=/opt/data hermes hermes plugins list 2>/dev/null | grep -i ' orchestration ')")"
 check "native Kanban dispatch off (AD-02)" "false" \
   "$(dc exec -T -e HERMES_HOME=/opt/data hermes hermes config get kanban.dispatch_in_gateway 2>/dev/null | tr -d '[:space:]')"
+check "short chat replies become /orch commands (pre_gateway_dispatch)" "[{'action': 'rewrite', 'text': '/orch approve 12'}]" \
+  "$(probe reply - si 12)"
+check "other chat messages pass through" "[]" "$(probe reply - buenos dias)"
 ho project register "$ROOT/app" >/dev/null
 ho project scan app >/dev/null
 
@@ -114,7 +117,7 @@ ho project register "$ROOT/app2" >/dev/null
 SECOND="$(ho project scan app2 | field 'd["approval"]["id"]')"
 check "a sender who is not an approver cannot approve" "True" \
   "$(contains "not an allowed approver" "$(probe telegram 999 "approve $SECOND")")"
-check "the approver approves from chat" "True" "$(contains "PROJECT_READY" "$(probe telegram "$APPROVER" "approve $SECOND")")"
+check "the approver approves from chat" "True" "$(contains "✅ Approved" "$(probe telegram "$APPROVER" "approve $SECOND")")"
 check "decision recorded with the chat principal" "telegram:$APPROVER" "$(sql "SELECT decided_by FROM approvals WHERE id = '$SECOND'")"
 
 echo "== Hermes CLI"

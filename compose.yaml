@@ -86,6 +86,7 @@ services:
       HO_HERMES_WEBHOOK_URL: ${HO_HERMES_WEBHOOK_URL:-}
       HO_HERMES_WEBHOOK_SECRET_FILE: /run/secrets/ho_hermes_webhook_secret
       HO_APPROVERS: ${HO_APPROVERS:-}
+      HO_NOTIFY_LANGUAGE: ${HO_NOTIFY_LANGUAGE:-en}
       HO_VERSION: ${HO_VERSION:-dev}
       HO_LOG_LEVEL: ${HO_LOG_LEVEL:-INFO}
     secrets: [ho_app_db_password, ho_redis_password, ho_plugin_token, ho_operator_token, ho_git_service_token, ho_agent_manager_token, ho_merge_key, ho_hermes_webhook_secret]
@@ -169,6 +170,7 @@ services:
       HERMES_DASHBOARD_HOST: 0.0.0.0
       HO_API_URL: http://control-plane:8080
       HO_PLUGIN_TOKEN_FILE: /run/secrets/ho_plugin_token
+      HO_NOTIFY_LANGUAGE: ${HO_NOTIFY_LANGUAGE:-en}
       # Chat channel (optional; docs/hermes.md). Only users listed here may talk to Hermes.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
