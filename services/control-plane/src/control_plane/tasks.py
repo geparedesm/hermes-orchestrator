@@ -231,7 +231,9 @@ class Tasks:
         task = self.get(uow, key, lock=True)
         if task["state"] == S.PAUSED_BUDGET:
             # Resumable once the budget suffices again (a raise elsewhere, or runtime recalculated); otherwise say what to raise.
-            counter = budgets.exhausted_counter(uow, task)
+            counter = budgets.still_blocking(uow, task)
+            if counter == "unknown":
+                raise Conflict(f"{key} is paused for budget; raise the budget (/orch budget {key} <counter>=N) and approve")
             if counter is not None:
                 raise Conflict(f"{key} is still out of its {counter} budget: raise it (/orch budget {key} {counter}=N) and approve")
             task = self.transition(uow, task, S(task["resume_state"]), trigger=Trigger.USER, actor=principal.value,

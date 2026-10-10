@@ -159,19 +159,35 @@ def _blocking(task: Row, limits: dict[str, Any], consumed: dict[str, Any], reser
     return None
 
 
-def exhausted_counter(uow: UnitOfWork, task: Row) -> str | None:
-    """The counter that would still stop the task's next agent launch (the same check reserve() makes), or None."""
+def paused_counter(reason: str | None) -> str | None:
+    """The counter a budget pause names ("would exceed its <counter> budget", "used its N minutes of runtime")."""
+    text = reason or ""
+    if "minutes of runtime" in text:
+        return "runtime_minutes"
+    return next((c for c in COUNTERS if f"its {c} budget" in text), None)
+
+
+def still_blocking(uow: UnitOfWork, task: Row) -> str | None:
+    """For a task paused for budget: the counter that caused the pause if it still leaves no room for what was being
+    started (the same rule that paused it), "unknown" when the pause names no counter, or None when it can resume.
+    Other counters are not judged here: if the resumed work hits one, it pauses again naming it."""
+    counter = paused_counter(task.get("state_reason"))
+    if counter is None:
+        return "unknown"
     uow.cur.execute("SELECT * FROM budgets WHERE task_id = %s", (task["id"],))
     budget = uow.cur.fetchone()
     if budget is None:
         return None
-    # A queued retry also needs the retries budget (what reserve(retry=True) will check when it launches).
-    uow.cur.execute("SELECT EXISTS (SELECT 1 FROM pending_launches WHERE task_id = %s "
-                    "AND (request->'purpose'->>'retry')::boolean) AS retry", (task["id"],))
-    retry = bool(uow.cur.fetchone()["retry"])  # type: ignore[index]
-    blocked = _blocking(task, budget["limits"], budget["consumed"], budget.get("reserved") or {},
-                        {"agent_launches": 1, **({"retries": 1} if retry else {}), "provider_usage_units": DEFAULT_USAGE_RESERVATION})
-    return blocked[0] if blocked else None
+    limit = budget["limits"].get(counter)
+    if limit is None:
+        return None
+    if counter == "runtime_minutes":
+        return counter if runtime_minutes(task) >= float(limit) else None
+    used = int(budget["consumed"].get(counter, 0))
+    if counter == "provider_usage_units":  # only agent launches reserve usage, an estimate at a time
+        used += int((budget.get("reserved") or {}).get(counter, 0)) + DEFAULT_USAGE_RESERVATION
+        return counter if used > int(limit) else None
+    return counter if used + 1 > int(limit) else None
 
 
 def state(uow: UnitOfWork, task: Row) -> dict[str, Any]:
