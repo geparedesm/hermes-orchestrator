@@ -484,12 +484,17 @@ class Orchestration:
         self._event(uow, task, "ORCHESTRATOR_STEP", (result.structured or {}).get("summary", "")[:300] or "step completed",
                     {"execution_id": str(execution["id"]), "actions": [a.get("type") for a in actions[:MAX_ACTIONS]]})
         rejected = False
+        started = False  # work this step set in motion (integration, executions)
         for seq, action in enumerate(actions[:MAX_ACTIONS]):
             task = self._task(uow, task["id"])
             try:
+                if action.get("type") == "REPORT_BLOCKED" and started:
+                    # A block "in case it fails" would cancel the work just started; report it if that work fails.
+                    raise ValueError("this step already started work; report blocked only if that work fails")
                 with uow.cur.connection.transaction():
                     reason = self._apply(uow, task, int(purpose["epoch"]), action)
                 outcome = "ACCEPTED"
+                started = started or (action.get("type") in ("SUBMIT_FOR_QUALITY_GATE", "REQUEST_EXECUTION") and reason is not None)
             except (ApiError, ValueError) as exc:
                 outcome, reason = "REJECTED", str(getattr(exc, "message", exc))[:300]
             self._record_action(uow, task, execution, purpose["epoch"], seq, action, outcome, reason)
