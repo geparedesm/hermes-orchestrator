@@ -113,3 +113,17 @@ def test_a_task_paused_for_budget_resumes_once_the_budget_suffices(api, services
                 "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # stand-in: the budget was raised
     resumed = api.post(f"/v1/tasks/{task}/resume")
     assert resumed.status_code == 200 and resumed.json()["state"] == "READY"
+
+
+def test_resume_is_refused_while_the_next_launch_would_not_fit(api, services, agents, task):
+    from control_plane.budgets import DEFAULT_USAGE_RESERVATION
+
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason="usage")
+    limit = DEFAULT_USAGE_RESERVATION * 5
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{provider_usage_units}', to_jsonb(%s::int)), "
+                "consumed = jsonb_set(consumed, '{provider_usage_units}', to_jsonb(%s::int)) "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", limit, limit - DEFAULT_USAGE_RESERVATION // 2, task)
+    refused = api.post(f"/v1/tasks/{task}/resume")  # under 100 % used, but a launch's reservation does not fit
+    assert refused.status_code == 409 and "provider_usage_units" in refused.text
