@@ -11,6 +11,8 @@ import pytest
 
 import test_git  # type: ignore[import-not-found]
 from control_plane import budgets
+from ho_core.enums import TaskState as S
+from ho_core.statemachine import Trigger
 
 pytestmark = pytest.mark.integration
 agents = pytest.fixture(test_git.agents.__wrapped__)
@@ -97,3 +99,79 @@ def test_a_first_workspace_left_with_its_base_pin_is_reclaimed(api, services, re
     workspace = test_git.workspace(api, task)
     assert workspace["name"] == name and workspace["base_sha"] == left["base_sha"]
     assert str(row(services, task)["base_commit"]) == left["base_sha"]
+
+
+def test_a_task_paused_for_budget_resumes_once_the_budget_suffices(api, services, agents, task):
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason=f"{task} would exceed its agent_launches budget (10)")
+    q(services, "UPDATE budgets SET consumed = jsonb_set(consumed, '{agent_launches}', limits->'agent_launches') "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # stand-in: every launch used
+    refused = api.post(f"/v1/tasks/{task}/resume")
+    assert refused.status_code == 409 and "agent_launches" in refused.text and f"/orch budget {task}" in refused.text
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{agent_launches}', '100') "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # stand-in: the budget was raised
+    resumed = api.post(f"/v1/tasks/{task}/resume")
+    assert resumed.status_code == 200 and resumed.json()["state"] == "READY"
+
+
+def test_resume_is_refused_while_the_next_launch_would_not_fit(api, services, agents, task):
+    from control_plane.budgets import DEFAULT_USAGE_RESERVATION
+
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason=f"{task} would exceed its provider_usage_units budget (1)")
+    limit = DEFAULT_USAGE_RESERVATION * 5
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{provider_usage_units}', to_jsonb(%s::int)), "
+                "consumed = jsonb_set(consumed, '{provider_usage_units}', to_jsonb(%s::int)) "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", limit, limit - DEFAULT_USAGE_RESERVATION // 2, task)
+    refused = api.post(f"/v1/tasks/{task}/resume")  # under 100 % used, but a launch's reservation does not fit
+    assert refused.status_code == 409 and "provider_usage_units" in refused.text
+
+
+def test_resume_checks_a_queued_retry_and_relaunches_waiting_verifications(api, services, agents, task, monkeypatch):
+    import json as _json
+    import uuid as _uuid
+
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason=f"{task} would exceed its retries budget (6)")
+    q(services, "INSERT INTO pending_launches (id, task_id, kind, request, reason) SELECT %s, id, 'DEVELOP', %s, 'budget' "
+                "FROM tasks WHERE key = %s", _uuid.uuid4(), _json.dumps({"purpose": {"retry": True}}), task)
+    q(services, "UPDATE budgets SET consumed = jsonb_set(consumed, '{retries}', limits->'retries') "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # every retry used
+    refused = api.post(f"/v1/tasks/{task}/resume")
+    assert refused.status_code == 409 and "retries" in refused.text
+    relaunched = []
+    monkeypatch.setattr(services.verifications, "relaunch_waiting", lambda uow, t: relaunched.append(t["key"]))
+    services.tasks.on_budget_resume[:] = [services.verifications.relaunch_waiting]
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{retries}', '50') WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)
+    assert api.post(f"/v1/tasks/{task}/resume").status_code == 200 and relaunched == [task]
+
+
+
+@pytest.mark.parametrize("reason,counter", [("would exceed its review_cycles budget (4)", "review_cycles"),
+                                            ("something else", None)])
+def test_resume_judges_the_counter_that_paused_the_task(api, services, agents, task, reason, counter):
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason=f"{task} {reason}")
+    q(services, "UPDATE budgets SET consumed = jsonb_set(consumed, '{review_cycles}', limits->'review_cycles') "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)
+    refused = api.post(f"/v1/tasks/{task}/resume")
+    assert refused.status_code == 409 and (counter or "raise the budget") in refused.text
+    if counter:
+        q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{review_cycles}', '9') "
+                    "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)
+        assert api.post(f"/v1/tasks/{task}/resume").status_code == 200
+
+
+
+def test_resume_counts_what_running_work_reserved(api, services, agents, task):
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason=f"{task} would exceed its retries budget (6)")
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{retries}', '6'), consumed = jsonb_set(consumed, '{retries}', '5'), "
+                "reserved = jsonb_set(reserved, '{retries}', '1') WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)
+    refused = api.post(f"/v1/tasks/{task}/resume")  # 5 used + 1 reserved: the next retry does not fit
+    assert refused.status_code == 409 and "retries" in refused.text

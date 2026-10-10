@@ -84,19 +84,12 @@ def reserve(uow: UnitOfWork, task: Row, *, agent: bool, retry: bool = False, tim
     limits, consumed, reserved = budget["limits"], dict(budget["consumed"]), dict(budget.get("reserved") or {})
     reservation = {"agent_launches": 1, **({"retries": 1} if retry else {}),
                    **({"provider_usage_units": usage_estimate} if agent else {})}
-    for counter, amount in reservation.items():
-        limit = limits.get(counter)
-        if counter == "agent_launches":
-            used = int(consumed.get(counter, 0)) + amount  # launches are charged immediately
-        else:
-            used = int(consumed.get(counter, 0)) + int(reserved.get(counter, 0)) + amount
-        if limit is not None and used > int(limit):
-            raise BudgetExhausted(f"{task['key']} would exceed its {counter} budget ({limit})")
+    blocked = _blocking(task, limits, consumed, reserved, reservation)
+    if blocked is not None:
+        raise BudgetExhausted(blocked[1])
     remaining = timeout_minutes
     if limits.get("runtime_minutes"):
         left = float(limits["runtime_minutes"]) - runtime_minutes(task)
-        if left <= 0:
-            raise BudgetExhausted(f"{task['key']} used its {limits['runtime_minutes']} minutes of runtime")
         remaining = max(1, min(timeout_minutes, int(left)))
     consumed["agent_launches"] = int(consumed.get("agent_launches", 0)) + 1
     for counter, amount in reservation.items():
@@ -148,6 +141,54 @@ def charge(uow: UnitOfWork, task: Row, counter: str, amount: int = 1) -> None:
 def usage_units(units: dict[str, Any]) -> int:
     """Provider usage in tokens as reported by the CLI (cached reads excluded)."""
     return int(sum(int(units.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens")))
+
+
+def _blocking(task: Row, limits: dict[str, Any], consumed: dict[str, Any], reserved: dict[str, Any],
+              reservation: dict[str, int]) -> tuple[str, str] | None:
+    """(counter, message) for the first limit a launch with `reservation` would exceed, or None."""
+    for counter, amount in reservation.items():
+        limit = limits.get(counter)
+        if counter == "agent_launches":
+            used = int(consumed.get(counter, 0)) + amount  # launches are charged immediately
+        else:
+            used = int(consumed.get(counter, 0)) + int(reserved.get(counter, 0)) + amount
+        if limit is not None and used > int(limit):
+            return counter, f"{task['key']} would exceed its {counter} budget ({limit})"
+    if limits.get("runtime_minutes") and float(limits["runtime_minutes"]) - runtime_minutes(task) <= 0:
+        return "runtime_minutes", f"{task['key']} used its {limits['runtime_minutes']} minutes of runtime"
+    return None
+
+
+def paused_counter(reason: str | None) -> str | None:
+    """The counter a budget pause names ("would exceed its <counter> budget", "used its N minutes of runtime")."""
+    text = reason or ""
+    if "minutes of runtime" in text:
+        return "runtime_minutes"
+    return next((c for c in COUNTERS if f"its {c} budget" in text), None)
+
+
+def still_blocking(uow: UnitOfWork, task: Row) -> str | None:
+    """For a task paused for budget: the counter that caused the pause if it still leaves no room for what was being
+    started (the same rule that paused it), "unknown" when the pause names no counter, or None when it can resume.
+    Other counters are not judged here: if the resumed work hits one, it pauses again naming it."""
+    counter = paused_counter(task.get("state_reason"))
+    if counter is None:
+        return "unknown"
+    uow.cur.execute("SELECT * FROM budgets WHERE task_id = %s", (task["id"],))
+    budget = uow.cur.fetchone()
+    if budget is None:
+        return None
+    limit = budget["limits"].get(counter)
+    if limit is None:
+        return None
+    if counter == "runtime_minutes":
+        return counter if runtime_minutes(task) >= float(limit) else None
+    # As at admission (_blocking): launches are charged immediately; other counters also count what running work reserved.
+    used = int(budget["consumed"].get(counter, 0))
+    if counter != "agent_launches":
+        used += int((budget.get("reserved") or {}).get(counter, 0))
+    needed = DEFAULT_USAGE_RESERVATION if counter == "provider_usage_units" else 1  # only agent launches reserve usage
+    return counter if used + needed > int(limit) else None
 
 
 def state(uow: UnitOfWork, task: Row) -> dict[str, Any]:

@@ -21,6 +21,7 @@ from ho_core.hashing import hash_value
 from ho_core.ids import uuid7
 from ho_core.statemachine import WAITING_STATES, InvalidTransition, Trigger, transition
 
+from . import budgets
 from .approvals import Approvals
 from .auth import Principal
 from .context import Context, UnitOfWork
@@ -51,6 +52,7 @@ class Tasks:
         self.approvals = approvals
         # Called with (uow, task, reason) before a task is cancelled (for example to stop its executions).
         self.on_cancel: list[Any] = []
+        self.on_budget_resume: list[Any] = []  # (uow, task) after a budget pause resumes: relaunch what waited
         # Called with (uow, updated task, previous state) after every state change (checkpoints, wind-down).
         self.on_transition: list[Any] = []
         approvals.register_handler(ApprovalAction.BUDGET_UNLIMITED, self._on_budget_unlimited_decision)
@@ -227,8 +229,21 @@ class Tasks:
 
     def resume(self, uow: UnitOfWork, key: str, *, principal: Principal) -> Row:
         task = self.get(uow, key, lock=True)
+        if task["state"] == S.PAUSED_BUDGET:
+            # Resumable once the budget suffices again (a raise elsewhere, or runtime recalculated); otherwise say what to raise.
+            counter = budgets.still_blocking(uow, task)
+            if counter == "unknown":
+                raise Conflict(f"{key} is paused for budget; raise the budget (/orch budget {key} <counter>=N) and approve")
+            if counter is not None:
+                raise Conflict(f"{key} is still out of its {counter} budget: raise it (/orch budget {key} {counter}=N) and approve")
+            task = self.transition(uow, task, S(task["resume_state"]), trigger=Trigger.USER, actor=principal.value,
+                                   reason="resumed by user: the budget suffices")
+            for hook in self.on_budget_resume:
+                hook(uow, task)
+            return task
         if task["state"] != S.PAUSED:
-            raise Conflict(f"{key} is {task['state']}; only PAUSED tasks can be resumed (budget and approval waits resolve through approvals)")
+            raise Conflict(f"{key} is {task['state']}; only PAUSED tasks, or tasks paused for a budget that suffices again, "
+                           "can be resumed (approval waits resolve through approvals)")
         return self.transition(uow, task, S(task["resume_state"]), trigger=Trigger.USER, actor=principal.value, reason="resumed by user")
 
     def cancel(self, uow: UnitOfWork, key: str, *, principal: Principal) -> Row:
