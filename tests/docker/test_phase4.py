@@ -185,6 +185,8 @@ def test_real_codex_reaches_its_provider_only_through_the_proxy(api, client):
     parsed = CodexAdapter().collect_result(bundle(result))
     assert parsed.failure_class == FailureClass.AUTH, parsed
     assert parsed.session_id  # the session started before the provider rejected the login
+    # The model is recorded from the session's own record even when the provider refuses the login.
+    assert CodexAdapter().collect_usage(bundle(result)).units.get("model"), result["files"].keys()
     allowed = {e.get("host") for e in result["egress"] if e.get("event") == "EGRESS_ALLOWED"}
     print("codex egress:", sorted(allowed), sorted({e.get("host") for e in result["egress"] if e.get("event") == "EGRESS_DENIED"}))
     assert allowed & {"chatgpt.com", "api.openai.com", "auth.openai.com"}, result["egress"]
@@ -199,6 +201,7 @@ def test_real_claude_reaches_its_provider_only_through_the_proxy(api, client):
     parsed = ClaudeAdapter().collect_result(bundle(result))
     assert parsed.failure_class == FailureClass.AUTH, parsed
     assert "sk-ant-oat01-invalid" not in result["logs"]
+    assert ClaudeAdapter().collect_usage(bundle(result)).units.get("model")  # named by system/init
     allowed = {e.get("host") for e in result["egress"] if e.get("event") == "EGRESS_ALLOWED"}
     print("claude egress:", sorted(allowed), sorted({e.get("host") for e in result["egress"] if e.get("event") == "EGRESS_DENIED"}))
     assert "api.anthropic.com" in allowed, result["egress"]

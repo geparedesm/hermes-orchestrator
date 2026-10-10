@@ -52,10 +52,18 @@ def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]
             f"COALESCE(avg(extract(epoch FROM e.ended_at - e.started_at) / 60), 0) AS mean_minutes "
             f"FROM executions e LEFT JOIN usage_records u ON u.execution_id = e.id "
             f"WHERE e.agent_run AND e.created_at > now() - interval '{window}' GROUP BY e.provider")
-        usage[window.replace(" ", "_")] = {r["provider"]: {"executions": int(r["executions"]), "succeeded": int(r["succeeded"]),
-                                                           "failed": int(r["failed"]), "tokens": int(r["tokens"]),
-                                                           "mean_minutes": round(float(r["mean_minutes"]), 1)}
-                                           for r in cur.fetchall()}
+        by_provider = {r["provider"]: {"executions": int(r["executions"]), "succeeded": int(r["succeeded"]),
+                                       "failed": int(r["failed"]), "tokens": int(r["tokens"]),
+                                       "mean_minutes": round(float(r["mean_minutes"]), 1), "models": {}}
+                       for r in cur.fetchall()}
+        # The model each execution reported (none for executions before models were recorded).
+        cur.execute(f"SELECT e.provider, COALESCE(u.units->>'model', 'unknown') AS model, count(*) AS n, "
+                    f"COALESCE(sum({_TOKENS}), 0) AS tokens FROM executions e LEFT JOIN usage_records u ON u.execution_id = e.id "
+                    f"WHERE e.agent_run AND e.created_at > now() - interval '{window}' GROUP BY 1, 2 ORDER BY 1, 3 DESC")
+        for r in cur.fetchall():
+            if r["provider"] in by_provider:
+                by_provider[r["provider"]]["models"][r["model"]] = {"executions": int(r["n"]), "tokens": int(r["tokens"])}
+        usage[window.replace(" ", "_")] = by_provider
     cur.execute("SELECT count(*) FILTER (WHERE type = 'RETRY_SCHEDULED') AS retries, "
                 "count(*) FILTER (WHERE type IN ('PROVIDER_FALLBACK', 'ALTERNATE_DEVELOPER', 'FAILOVER_COMPLETED')) AS fallbacks "
                 "FROM events WHERE occurred_at > now() - interval '7 days'")
@@ -124,8 +132,8 @@ def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
         verification["runs"] = cur.fetchall()
         verification["minutes"] = _minutes(verification["created_at"], verification["finished_at"])
 
-    cur.execute(f"SELECT e.id, e.role, e.provider, e.state, e.failure_class, e.failure_reason, e.started_at, e.ended_at, "
-                f"s.key AS subtask, {_TOKENS} AS tokens FROM executions e LEFT JOIN usage_records u ON u.execution_id = e.id "
+    cur.execute(f"SELECT e.id, e.role, e.provider, u.units->>'model' AS model, e.state, e.failure_class, e.failure_reason, "
+                f"e.started_at, e.ended_at, s.key AS subtask, {_TOKENS} AS tokens FROM executions e LEFT JOIN usage_records u ON u.execution_id = e.id "
                 f"LEFT JOIN subtasks s ON s.id = e.subtask_id WHERE e.task_id = %s ORDER BY e.created_at", (tid,))
     executions = [{**r, "minutes": _minutes(r["started_at"], r["ended_at"]) if r["started_at"] else None}
                   for r in cur.fetchall()]
@@ -178,6 +186,10 @@ def metrics_text(uow: UnitOfWork, queue_length: int) -> str:
     cur.execute(f"SELECT u.provider, COALESCE(sum({_TOKENS}), 0) AS tokens FROM usage_records u GROUP BY 1 ORDER BY 1")
     metric("ho_provider_tokens_total", "counter", "Provider tokens reported by the CLIs (input + output + cache creation).",
            [({"provider": r["provider"]}, int(r["tokens"])) for r in cur.fetchall()])
+    cur.execute(f"SELECT u.provider, u.units->>'model' AS model, COALESCE(sum({_TOKENS}), 0) AS tokens FROM usage_records u "
+                f"WHERE u.units ? 'model' GROUP BY 1, 2 ORDER BY 1, 2")
+    metric("ho_model_tokens_total", "counter", "Provider tokens by the model each execution reported.",
+           [({"provider": r["provider"], "model": r["model"]}, int(r["tokens"])) for r in cur.fetchall()])
     cur.execute("SELECT state, count(*) AS n FROM approvals GROUP BY state ORDER BY state")
     metric("ho_approvals", "gauge", "Approvals by state.", [({"state": r["state"]}, int(r["n"])) for r in cur.fetchall()])
     cur.execute("SELECT state, count(*) AS n FROM notifications GROUP BY state ORDER BY state")

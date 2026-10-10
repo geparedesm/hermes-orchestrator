@@ -23,8 +23,24 @@ fi
 
 prompt=/run/ho-input/prompt.md
 [[ -f $prompt ]] || finish 2 input_missing
+# Lines already in the session records (a resumed session appends to its record): only later turns are this run's.
+seen_lines="$(mktemp)"
+find -L "$CODEX_HOME/sessions" -name 'rollout-*.jsonl' -exec wc -l {} \; > "$seen_lines" 2>/dev/null || true
 codex "$@" < "$prompt" > "$OUT/events.jsonl"
 rc=$?
+
+# The model Codex used: its --json output does not name it, its session record does (turn_context.model).
+# Only the names are copied; prompts and responses in that record stay in this container's memory.
+thread="$(grep -m1 -o '"thread_id":"[0-9a-f-]\{36\}"' "$OUT/events.jsonl" | cut -d'"' -f4)"
+if [[ -n $thread ]]; then
+  rollout="$(find -L "$CODEX_HOME/sessions" -name "rollout-*-$thread.jsonl" 2>/dev/null | head -1)"
+  if [[ -n $rollout ]]; then
+    skip="$(awk -v f="$rollout" '$2 == f {print $1}' "$seen_lines")"
+    # One line per turn, in order: the last one is the model the run ended with.
+    tail -n "+$(( ${skip:-0} + 1 ))" "$rollout" | grep '"type":"turn_context"' \
+      | awk 'match($0, /"model":"[A-Za-z0-9._:\/@-]+"/) { print substr($0, RSTART + 9, RLENGTH - 10) }' > "$OUT/models.txt" || true
+  fi
+fi
 
 if [[ -s $CODEX_HOME/auth.json && "$(sha256sum < "$CODEX_HOME/auth.json")" != "$before" ]]; then
   (

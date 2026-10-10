@@ -227,3 +227,37 @@ def test_orchestrator_reads_its_project_through_add_dir():
     assert plan.command[index + 1] == "/projects/shop"
     plain = ClaudeAdapter().build_execution(AgentAssignment(role=Role.DEVELOPER, prompt="do it"))
     assert "--add-dir" not in plain.command
+
+
+def test_the_model_of_each_execution_is_recorded():
+    # Claude: system/init names the session's model (as in the real 2.1.280 capture); modelUsage splits usage.
+    usage = ClaudeAdapter().collect_usage(bundle("claude-success.jsonl")).units
+    assert usage["model"] == "claude-sonnet-5"
+    events = [{"type": "system", "subtype": "init", "model": "claude-opus-5-5[1m]"},
+              {"type": "result", "subtype": "success", "usage": {"input_tokens": 10, "output_tokens": 5},
+               "modelUsage": {"claude-opus-5-5[1m]": {"inputTokens": 10, "outputTokens": 5, "costUSD": 0.1, "extra": "x"},
+                              "claude-haiku-4-5-20251001": {"inputTokens": 3, "outputTokens": 1},
+                              "bad name; rm -rf /": {"inputTokens": 1}}}]
+    b = OutputBundle({"ho/events.jsonl": "\n".join(json.dumps(e) for e in events).encode()})
+    usage = ClaudeAdapter().collect_usage(b).units
+    assert usage["model"] == "claude-opus-5-5[1m]"
+    assert usage["models"] == {"claude-opus-5-5[1m]": {"inputTokens": 10, "outputTokens": 5},
+                               "claude-haiku-4-5-20251001": {"inputTokens": 3, "outputTokens": 1}}
+    # Codex: ho-agent-run copies the names from the session record (turn_context.model) into models.txt.
+    usage = CodexAdapter().collect_usage(bundle("codex-success.jsonl", models_txt=b"gpt-6.1-sol\n")).units
+    assert usage["model"] == "gpt-6.1-sol" and "models" not in usage
+    usage = CodexAdapter().collect_usage(bundle("codex-success.jsonl", models_txt=b"gpt-6.1-sol\n<script>\n")).units
+    assert usage["model"] == "gpt-6.1-sol"
+    assert "model" not in CodexAdapter().collect_usage(bundle("codex-success.jsonl")).units  # not reported: not invented
+
+
+def test_model_records_survive_resumed_sessions_and_malformed_reports():
+    # Codex, one line per turn of this run: the last turn's model wins, even when it was used before.
+    usage = CodexAdapter().collect_usage(bundle("codex-success.jsonl", models_txt=b"model-a\nmodel-b\nmodel-a\n")).units
+    assert usage["model"] == "model-a" and usage["models"] == {"model-a": {"turns": 2}, "model-b": {"turns": 1}}
+    # Claude: a modelUsage that is not an object is ignored, never an error that blocks finalization.
+    events = [{"type": "system", "subtype": "init", "model": "claude-sonnet-5"},
+              {"type": "result", "subtype": "success", "usage": {"input_tokens": 1}, "modelUsage": ["unexpected"]}]
+    b = OutputBundle({"ho/events.jsonl": "\n".join(json.dumps(e) for e in events).encode()})
+    usage = ClaudeAdapter().collect_usage(b).units
+    assert usage["model"] == "claude-sonnet-5" and "models" not in usage
