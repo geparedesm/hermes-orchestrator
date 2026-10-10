@@ -23,7 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from ho_core.gitpolicy import check_task_branch, valid_sha
+from ho_core.gitpolicy import check_task_branch, valid_branch, valid_sha
 
 from .gitcmd import GitError, git, run, sanitize_remote, try_git
 from .repo_ops import Refused
@@ -48,6 +48,18 @@ def remote_info(repo: Path) -> dict[str, Any]:
     if _allow_file_remotes() and (url.startswith("/") or url.startswith("file://")):
         return {"kind": "github", "remote": url, "repo": os.environ.get("HO_TEST_GH_REPO", "test/test")}
     return {"kind": "other", "remote": sanitize_remote(url)}
+
+
+def fresh_target(repo: Path, target_branch: str) -> str | None:
+    """For a GitHub project, the target as its pull requests will see it: origin's branch, fetched now. Integrating
+    onto it (not the local branch, which may lag behind GitHub) keeps the pull request mergeable. None otherwise:
+    local projects integrate onto their local branch. A failed fetch is an error, never a silent fallback."""
+    if remote_info(repo)["kind"] != "github":
+        return None
+    if not valid_branch(target_branch):
+        raise Refused(f"invalid branch name {target_branch!r}")
+    _git_remote(repo, "fetch", "-q", "--no-tags", "origin", f"+refs/heads/{target_branch}:refs/remotes/origin/{target_branch}")
+    return f"refs/remotes/origin/{target_branch}"
 
 
 def _github(repo: Path) -> dict[str, Any]:

@@ -400,7 +400,11 @@ class GitChanges:
                 "target_sha": remote["refs"][changes["target_branch"]], "head_sha": changes["integration_sha"],
                 "method": method, "pr_number": None, "quality_gate": gate}
 
-    def request_merge(self, uow: UnitOfWork, task_key: str, *, principal: Principal) -> Row:
+    def request_merge(self, uow: UnitOfWork, task_key: str, *, principal: Principal,
+                      reintegrate_if_moved: bool = False) -> Row | None:
+        """The action-bound MERGE approval. With `reintegrate_if_moved` (the automatic request after a passing gate), a
+        target that moved since integration — on GitHub, the pull request's base — sends the task back to RUNNING to be
+        integrated again instead (returns None): approving a pull request that may not merge cleanly helps no one."""
         task, project, config = self._context(uow, task_key, lock=True)
         if task["state"] != S.READY_FOR_MERGE:
             raise Conflict(f"{task_key} is {task['state']}; merges are requested from READY_FOR_MERGE")
@@ -412,7 +416,15 @@ class GitChanges:
         subject = self._merge_subject(uow, task, project, config, changes)
         if self.quality_gate is not None and not subject["quality_gate"]:
             raise Conflict(f"{task_key} has no passing Quality Gate evaluation for its integrated change")
-        if subject["pr_number"] is None and subject["target_sha"] != changes["integration_target_sha"]:
+        moved = subject["target_sha"] != changes["integration_target_sha"]
+        if moved and reintegrate_if_moved:
+            where = " on GitHub" if subject["pr_number"] else ""
+            self.tasks.transition(uow, task, S.RUNNING, trigger=Trigger.SYSTEM, actor="control-plane",
+                                  reason=f"{changes['target_branch']}{where} moved since integration; integrating again")
+            return None
+        if moved and subject["pr_number"] is not None:
+            raise Conflict(f"{changes['target_branch']} moved on GitHub since integration; integrate the task again")
+        if moved:
             raise Conflict(f"{changes['target_branch']} moved since integration; run `ho git integrate {task_key}` again")
         if subject["pr_number"] is not None and subject["head_sha"] != changes["integration_sha"]:
             raise Conflict("the pull request head is not the integrated change; push it again")

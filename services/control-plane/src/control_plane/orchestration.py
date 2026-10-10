@@ -397,7 +397,10 @@ class Orchestration:
                  "You lead this task. Return actions; the platform validates and executes them and enforces policy, budgets,",
                  "and approvals. The platform automatically runs cross-review by the other provider after each developer",
                  "execution, fix cycles, integration, verification, integration reviews, and the Quality Gate: do not ask for",
-                 "those. Plan small, independent subtasks with accurate `files`; request DEVELOPER executions only for READY",
+                 "those. Never plan subtasks to rebase, merge, or resolve conflicts with the target branch: integrating onto the",
+                 "current target (GitHub's, for GitHub projects) and conflict resolution in a prepared clone are the platform's",
+                 "job — when every subtask is accepted, use SUBMIT_FOR_QUALITY_GATE, also after a merge was refused for a moved",
+                 "target. Plan small, independent subtasks with accurate `files`; request DEVELOPER executions only for READY",
                  "subtasks; use WAIT when nothing needs deciding. Every subtask kind, TEST_AUTHORING included, runs with role DEVELOPER. Record assumptions instead of guessing silently; HIGH or",
                  "irreversible ambiguity needs RECORD_ASSUMPTION with level HIGH (a human decides).", "",
                  "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], "",
@@ -1084,6 +1087,10 @@ class Orchestration:
             return None
         uow.after_commit.append(lambda key=task["key"]: self._integrate_later(key))
         return "integration started"
+
+    def integrate_again(self, uow: UnitOfWork, task_key: str) -> None:
+        """Integrate an accepted plan again (its target moved): the same path as when its last subtask was accepted."""
+        self._integrate_if_ready(uow, self.tasks.get(uow, task_key, lock=True))
 
     def _integrate_later(self, task_key: str) -> None:
         try:

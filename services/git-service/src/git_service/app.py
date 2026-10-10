@@ -241,7 +241,8 @@ def create_app(projects_root: Path, token: str, merge_key: bytes = b"") -> FastA
     def conflict_workspace(body: ConflictBody) -> dict[str, Any]:
         repo = git_repository(body.path)
         return locked(repo, lambda: repo_ops.prepare_conflict_workspace(
-            repo, name=body.name, branch=body.branch, target_branch=body.target_branch, incoming_ref=body.incoming_ref))
+            repo, name=body.name, branch=body.branch, target_branch=body.target_branch, incoming_ref=body.incoming_ref,
+            target_ref=github.fresh_target(repo, body.target_branch)))
 
     @app.post("/v1/workspaces/remove", dependencies=[Depends(authorized)])
     def remove(body: WorkspaceBody) -> dict[str, Any]:
@@ -259,7 +260,8 @@ def create_app(projects_root: Path, token: str, merge_key: bytes = b"") -> FastA
     @app.post("/v1/integrate", dependencies=[Depends(authorized)])
     def integrate(body: IntegrateBody) -> dict[str, Any]:
         repo = git_repository(body.path)
-        return locked(repo, lambda: repo_ops.integrate(repo, task=body.task, target_branch=body.target_branch, heads=body.heads))
+        return locked(repo, lambda: repo_ops.integrate(repo, task=body.task, target_branch=body.target_branch, heads=body.heads,
+                                                       target_ref=github.fresh_target(repo, body.target_branch)))
 
     @app.post("/v1/changes", dependencies=[Depends(authorized)])
     def changes(body: ChangesBody) -> dict[str, Any]:
