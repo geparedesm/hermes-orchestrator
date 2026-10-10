@@ -93,12 +93,12 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     scheduler.startup_hooks.append(recovery.startup)
     maintenance = Maintenance(ctx)
     scheduler.hooks += [recovery.periodic, outbox.deliver, maintenance.tick]
-    gate.on_evaluated.append(_request_merge_when_ready(git))
+    gate.on_evaluated.append(_request_merge_when_ready(git, orchestrator))
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
                     verifications, reviews, gate, orchestrator, recovery, outbox, maintenance, Updates(ctx, approvals))
 
 
-def _request_merge_when_ready(git: GitChanges) -> Any:
+def _request_merge_when_ready(git: GitChanges, orchestrator: Any = None) -> Any:
     """A passing gate leaves the merge one decision away (MASTER_SPEC section 90): the control plane requests the
     action-bound MERGE approval itself, so the person approves it from Hermes (/orch approve) or the Dashboard."""
     def hook(uow: UnitOfWork, task: Row, evaluation: Row) -> None:
@@ -106,7 +106,10 @@ def _request_merge_when_ready(git: GitChanges) -> Any:
             return
         try:
             with uow.cur.connection.transaction():
-                git.request_merge(uow, task["key"], principal=Principal("control-plane", "quality-gate"))
+                approval = git.request_merge(uow, task["key"], principal=Principal("control-plane", "quality-gate"),
+                                             reintegrate_if_moved=True)
+                if approval is None and orchestrator is not None:
+                    orchestrator.integrate_again(uow, task["key"])  # onto the target as it is now
         except ApiError as exc:
             log.info("merge approval for %s not requested automatically: %s", task["key"], exc)
     return hook

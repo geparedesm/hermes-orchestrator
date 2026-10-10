@@ -515,3 +515,24 @@ def test_a_pull_request_that_conflicts_is_refused_not_retried(api, root, origin,
     response = api("/v1/merge", {"path": "app", "task": "T-1", "authorization": token})
     assert response.status_code == 409, response.text  # a refusal (the task is blocked), not a 502 retried forever
     assert "conflicts with main on GitHub" in response.json()["message"]
+
+
+def test_github_projects_integrate_onto_the_target_as_github_has_it(api, root, origin, tmp_path):
+    repo = root / "app"
+    # Another task was merged on GitHub; the local main has not caught up.
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", str(origin), str(other)], check=True, env=ENV)
+    commit(other, "another task", {"other.py": "x = 1\n"})
+    subprocess.run(["git", "-C", str(other), "push", "-q", "origin", "main"], check=True, env=ENV)
+    remote_main = subprocess.run(["git", "-C", str(origin), "rev-parse", "main"], capture_output=True, text=True).stdout.strip()
+    assert sh(repo, "rev-parse", "main") != remote_main
+    head = integrated(api, root)
+    assert sh(repo, "merge-base", "--is-ancestor", remote_main, head) == ""  # built on GitHub's main
+    api("/v1/github/push", branch_policy(ref="refs/hermes/tasks/T-1/integration", branch="hermes/t-1"))
+    api("/v1/github/pr", branch_policy(branch="hermes/t-1", base="main", title="T-1", body=""))
+    token = sign_merge(KEY, approval_id="gh-4", expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                       subject={"project": "app", "target_branch": "main", "target_sha": remote_main, "head_sha": head,
+                                "method": "merge", "pr_number": 1})
+    merged = api("/v1/merge", {"path": "app", "task": "T-1", "authorization": token})
+    assert merged.status_code == 200, merged.text
+    assert sh(repo, "rev-parse", "main") != remote_main  # the user's local branch was not touched by integration

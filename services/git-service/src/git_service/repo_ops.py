@@ -30,7 +30,7 @@ AGENT_IDENTITY = ("Hermes Agent", "agent@hermes.local")
 MAX_COMMITS = 200
 MAX_FILES = 2000
 _FETCH_TIMEOUT = 300
-_REF = re.compile(r"^refs/(heads|hermes)/[A-Za-z0-9._/-]{1,200}$")
+_REF = re.compile(r"^refs/(heads|hermes|remotes/origin)/[A-Za-z0-9._/-]{1,200}$")
 
 
 class Refused(RuntimeError):
@@ -367,7 +367,7 @@ def _is_ancestor(repo: Path, a: str, b: str) -> bool:
     return run(repo, "merge-base", "--is-ancestor", a, b, ok_codes=(0, 1)).returncode == 0
 
 
-def integrate(repo: Path, *, task: str, target_branch: str, heads: list[str]) -> dict[str, Any]:
+def integrate(repo: Path, *, task: str, target_branch: str, heads: list[str], target_ref: str | None = None) -> dict[str, Any]:
     """Merge the task's collected workspace heads onto the current target in the object database.
 
     Nothing is checked out and no repository content runs. On success the result is
@@ -376,7 +376,8 @@ def integrate(repo: Path, *, task: str, target_branch: str, heads: list[str]) ->
     """
     if not re.match(r"^T-[0-9]+$", task):
         raise Refused("invalid task key")
-    target_sha = resolve_commit(repo, f"refs/heads/{target_branch}")
+    # `target_ref`: the target as the pull request will see it (origin's, just fetched) for GitHub projects.
+    target_sha = resolve_commit(repo, target_ref or f"refs/heads/{target_branch}")
     current = target_sha
     merged = []
     for ref in heads:
@@ -399,11 +400,12 @@ def integrate(repo: Path, *, task: str, target_branch: str, heads: list[str]) ->
             **changes(repo, target_sha, current)}
 
 
-def prepare_conflict_workspace(repo: Path, *, name: str, branch: str, target_branch: str, incoming_ref: str) -> dict[str, Any]:
+def prepare_conflict_workspace(repo: Path, *, name: str, branch: str, target_branch: str, incoming_ref: str,
+                               target_ref: str | None = None) -> dict[str, Any]:
     """A fresh clone at the target with `incoming_ref` merged and its conflicts left for an agent
     to resolve (agent-assisted reconciliation, section 38). Runs `git merge` only in the clone it
     has just created, before any execution can touch it."""
-    prepared = prepare_workspace(repo, name, branch, f"refs/heads/{target_branch}")
+    prepared = prepare_workspace(repo, name, branch, target_ref or f"refs/heads/{target_branch}")
     ws = workspace(repo, name)
     incoming = _full_ref(repo, incoming_ref)
     run(ws.path, "fetch", "-q", "--no-tags", str(repo), f"+{incoming}:refs/heads/incoming", protocols="file",
