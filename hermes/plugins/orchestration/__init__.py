@@ -62,7 +62,10 @@ def short_reply_command(text: str) -> str | None:
         match = pattern.match(plain)
         if match:
             groups = [g or "" for g in match.groups()] + [""]
-            return template.format(*[g.upper() if g.startswith("t-") else g for g in groups]).strip()
+            groups = [g.upper() if g.startswith("t-") else g for g in groups]
+            if template.startswith("/orch reject") and groups[1]:
+                groups[1] = shlex.quote(groups[1])  # a note is literal text (apostrophes and all) for /orch's parser
+            return template.format(*groups).strip()
     return None
 
 

@@ -84,6 +84,7 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
                                   "no, keep the current one"),
         "ENVIRONMENT_ACCESS": ("{summary}. Allow it?", "yes, allow it", "no"),
         "UPDATE": ("Update the platform from *{from_version}* to *{to_version}*?", "yes, update", "no, not now"),
+        "REQUEST": ("Claude asks:\n_{text}_", "yes, go ahead", "no, stop the task"),
         "OTHER": ("{summary}", "yes", "no"),
     },
     "es": {
@@ -106,6 +107,7 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
                                   "no, mantener la actual"),
         "ENVIRONMENT_ACCESS": ("{summary}. ¿Lo permito?", "sí, permitirlo", "no"),
         "UPDATE": ("¿Actualizo la plataforma de *{from_version}* a *{to_version}*?", "sí, actualizar", "ahora no"),
+        "REQUEST": ("Claude pregunta:\n_{text}_", "sí, adelante", "no, para la tarea"),
         "OTHER": ("{summary}", "sí", "no"),
     },
 }
@@ -196,6 +198,8 @@ def _approval(ctx: Context, lang: str, now: datetime) -> str:
     kind = action
     if action == "HIGH_RISK_OPERATION":
         kind = "CONFLICT" if subject.get("kind") == "human_change_conflict" else "GATE"
+    elif action == "SCOPE_EXPANSION" and subject.get("kind") != "plan_expansion":
+        kind = "REQUEST"  # the orchestrator's own question (REQUEST_APPROVAL), shown as asked
     question, yes, no = _APPROVAL[lang].get(kind, _APPROVAL[lang]["OTHER"])
     summary = _strip_task(str(approval.get("summary") or action), ctx.task)
     fields = {
@@ -204,7 +208,7 @@ def _approval(ctx: Context, lang: str, now: datetime) -> str:
         "added": subject.get("added", "?"), "limit": subject.get("limit", "?"),
         "budget": ", ".join(f"+{v} {_COUNTERS[lang].get(k, k)}" for k, v in (subject.get("add") or {}).items()) or summary,
         "reasons": "\n".join(f"• {r}" for r in _reasons(summary, lang)),
-        "project": ctx.project or "", "summary": summary,
+        "project": ctx.project or "", "summary": summary, "text": str(subject.get("text") or summary)[:600],
         "from_version": subject.get("from_version", "?"), "to_version": subject.get("to_version", "?"),
     }
     text, words, number = _TEXT[lang], _WORDS[lang], approval.get("number")

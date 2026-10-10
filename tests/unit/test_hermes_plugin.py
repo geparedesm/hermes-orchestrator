@@ -171,7 +171,7 @@ def test_expired_approvals_are_requested_again_by_a_person():
 
 def test_short_replies_become_orch_commands():
     cases = {"si 12": "/orch approve 12", "Sí 12": "/orch approve 12", "*si 12*": "/orch approve 12", "yes #7": "/orch approve 7",
-             "no 12": "/orch reject 12", "no 12 falta el test": "/orch reject 12 falta el test", "ver t-15": "/orch status T-15",
+             "no 12": "/orch reject 12", "no 12 falta el test": "/orch reject 12 'falta el test'", "ver t-15": "/orch status T-15",
              "reintentar T-15": "/orch retry T-15", "cancelar t-15": "/orch cancel T-15", "renovar 3": "/orch renew 3"}
     for text, command in cases.items():
         assert plugin.short_reply_command(text) == command, text
@@ -192,3 +192,10 @@ def test_decisions_read_plainly_whatever_the_approval_became():
     assert plugin._decided({"state": "CONSUMED", "summary": "Approve configuration", "action": "PROJECT_READY"}) == \
         "✅ Approved: Approve configuration"
     assert plugin._decided({"state": "REJECTED", "summary": "merge", "action": "MERGE"}).startswith("❌ Rejected")
+
+
+def test_rejection_notes_survive_chat_punctuation():
+    command = plugin.short_reply_command("no 12 don't merge yet")
+    assert command == "/orch reject 12 'don'\"'\"'t merge yet'"
+    import shlex
+    assert shlex.split(command[len("/orch "):]) == ["reject", "12", "don't merge yet"]

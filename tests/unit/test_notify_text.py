@@ -32,7 +32,7 @@ def test_an_assumption_is_explained_with_options_to_pick():
 def test_each_kind_of_approval_says_what_is_decided():
     assert "¿Lo uno a *main*?" in ask("MERGE", {"target_branch": "main"}) and "sí, unirlo a main" in ask("MERGE", {"target_branch": "main"})
     assert "+10 lanzamientos de agentes, +120 minutos" in ask("BUDGET_INCREASE", {"add": {"agent_launches": 10, "runtime_minutes": 120}})
-    assert "añade 4 subtareas y el límite es 2" in ask("SCOPE_EXPANSION", {"added": 4, "limit": 2})
+    assert "añade 4 subtareas y el límite es 2" in ask("SCOPE_EXPANSION", {"kind": "plan_expansion", "added": 4, "limit": 2})
     gate = ask("HIGH_RISK_OPERATION", {"verification": "v"}, requested_by="quality-gate",
                summary="T-15: Quality Gate exception needed: code change verified without running any test (section 56); "
                        "policy violations were observed (section 58)")
@@ -59,3 +59,9 @@ def test_the_digest_lists_progress_in_plain_words():
     items = [({"type": "PLAN_VERSIONED", "summary": "plan v2"}, Context(task="T-15")),
              ({"type": "TEST_PASSED", "summary": "ok"}, Context(task="T-16"))]
     assert render_digest(items, "es") == "📋 *Avances* (2)\n• T-15: plan nuevo\n• T-16: tests en verde"
+
+
+def test_the_orchestrators_own_question_is_shown_as_asked():
+    text = ask("SCOPE_EXPANSION", {"kind": "orchestrator_request", "text": "¿Puedo borrar el módulo antiguo?"})
+    assert "Claude pregunta:\n_¿Puedo borrar el módulo antiguo?_" in text
+    assert "subtareas" not in text and "✅ *si 12*: sí, adelante" in text
