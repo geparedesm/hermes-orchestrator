@@ -69,3 +69,16 @@ def test_an_assumption_resolved_since_is_not_asked_again(api, services, agents, 
     orch.q(services, "UPDATE assumptions SET status = 'REJECTED'")  # stand-in: replanned without it
     response = api.post(f"/v1/approvals/{first['id']}/renew", **DASHBOARD)
     assert response.status_code == 409 and "no longer open" in response.text
+
+
+def test_the_expired_list_holds_only_approvals_that_can_be_requested_again(api, services, agents, task):
+    first = api.post(f"/v1/tasks/{task}/budget", {"add": {"retries": 1}}).json()
+    expire(services, first["id"])
+    listed = [a["id"] for a in api.get("/v1/approvals?state=EXPIRED", **DASHBOARD).json()["approvals"]]
+    assert listed == [first["id"]]
+    renewed = api.post(f"/v1/approvals/{first['id']}/renew", **DASHBOARD).json()
+    expire(services, renewed["id"])
+    listed = [a["id"] for a in api.get("/v1/approvals?state=EXPIRED", **DASHBOARD).json()["approvals"]]
+    assert listed == [renewed["id"]]  # the renewed one dropped out; the newest expired is reachable
+    api.post(f"/v1/tasks/{task}/cancel")
+    assert api.get("/v1/approvals?state=EXPIRED", **DASHBOARD).json()["approvals"] == []

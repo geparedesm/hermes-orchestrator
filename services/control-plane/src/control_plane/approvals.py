@@ -63,6 +63,15 @@ class Approvals:
         return row
 
     def list(self, uow: UnitOfWork, *, state: str | None = None, limit: int = 100) -> list[Row]:
+        if state == ApprovalState.EXPIRED:
+            # Only the ones that can still be requested again, newest first: no newer approval of the same action for
+            # the same project and task, and the task (if any) has not ended. Renewed and outdated ones drop out.
+            uow.cur.execute(
+                "SELECT a.* FROM approvals a LEFT JOIN tasks t ON t.id = a.task_id WHERE a.state = 'EXPIRED' "
+                "AND (t.id IS NULL OR t.state <> ALL(%s)) AND NOT EXISTS (SELECT 1 FROM approvals n WHERE n.action = a.action "
+                "AND n.project_id IS NOT DISTINCT FROM a.project_id AND n.task_id IS NOT DISTINCT FROM a.task_id "
+                "AND n.requested_at > a.requested_at) ORDER BY a.requested_at DESC LIMIT %s", (list(_TERMINAL_TASK_STATES), limit))
+            return uow.cur.fetchall()
         if state:
             uow.cur.execute("SELECT * FROM approvals WHERE state = %s ORDER BY requested_at LIMIT %s", (state, limit))
         else:
