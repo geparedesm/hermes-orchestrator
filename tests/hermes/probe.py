@@ -9,9 +9,10 @@ Usage (inside the hermes container): python3 probe.py <platform> <user id> <comm
 
 import json
 import sys
+from types import SimpleNamespace
 
 from gateway.session_context import clear_session_vars, set_session_vars
-from hermes_cli.plugins import discover_plugins, get_plugin_command_handler
+from hermes_cli.plugins import discover_plugins, get_plugin_command_handler, invoke_hook
 from tools.registry import registry
 
 discover_plugins(force=True)
@@ -20,7 +21,11 @@ platform, user, command = sys.argv[1], sys.argv[2], " ".join(sys.argv[3:])
 result = {"registered": handler is not None,
           "tools": sorted(n for n in ("orch_task_create", "orch_task_status", "orch_task_list", "orch_task_inspect",
                                       "orch_project_list", "orch_approvals_list") if registry.get_entry(n))}
-if platform == "tool":
+if platform == "reply":
+    # A chat message as the gateway sees it before dispatch: the plugin's pre_gateway_dispatch hook rewrites short
+    # replies ("si 12") into /orch commands, through Hermes's own hook runner.
+    result["output"] = invoke_hook("pre_gateway_dispatch", event=SimpleNamespace(text=command), gateway=None, session_store=None)
+elif platform == "tool":
     result["output"] = registry.dispatch(user, json.loads(command))
 elif platform == "none":
     result["output"] = handler(command)

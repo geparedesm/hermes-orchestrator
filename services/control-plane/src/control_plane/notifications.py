@@ -27,6 +27,7 @@ import httpx
 
 from .context import Context
 from .db import Row
+from . import notify_text
 from .events import record_event
 
 log = logging.getLogger(__name__)
@@ -34,16 +35,6 @@ BATCH = 50
 MAX_DELAY = 900  # seconds
 ROUTINE_DIGEST = timedelta(minutes=5)
 DIGEST_MAX = 20
-
-# What the person should do next, by event (the commands are the plugin's /orch verbs).
-_HINTS = {
-    "APPROVAL_REQUIRED": "Approve: /orch approve {approval_id}\nReject: /orch reject {approval_id}",
-    "READY_FOR_MERGE": "Review it (/orch status {task}); approving the merge request is a separate approval.",
-    "AUTH_REQUIRED": "Log in again on the host (make auth-claude or make auth-codex), then confirm with `ho auth ready`.",
-    "PAUSED_BUDGET": "Raise the budget: /orch budget {task} agent_launches=10",
-    "BLOCKED": "Inspect it: /orch status {task}; retry with /orch retry {task} or cancel with /orch cancel {task}.",
-}
-
 
 def backoff_seconds(attempts: int) -> int:
     """10 s, 20 s, 40 s, ... capped at 15 minutes: notifications are retried until Hermes returns."""
@@ -56,27 +47,9 @@ def sign(secret: str, body: bytes, timestamp: int) -> dict[str, str]:
     return {"X-Webhook-Signature-V2": signature, "X-Webhook-Timestamp": str(timestamp)}
 
 
-def render(payload: dict[str, Any], task: str | None) -> str:
-    """One notification as chat text."""
-    event = payload.get("type", "")
-    data = payload.get("data") or {}
-    head = f"[{task}] " if task else ""
-    text = f"{head}{payload.get('summary', event)}"
-    hint = _HINTS.get(event)
-    if hint:
-        try:
-            text += "\n" + hint.format(task=task or "", **{k: v for k, v in data.items() if isinstance(v, str)})
-        except (KeyError, IndexError):
-            pass
-    return text
-
-
-def render_digest(items: list[tuple[dict[str, Any], str | None]]) -> str:
-    lines = [f"Progress ({len(items)} update{'s' if len(items) != 1 else ''}):"]
-    lines += [f"- {render(payload, task).splitlines()[0]}" for payload, task in items[:DIGEST_MAX]]
-    if len(items) > DIGEST_MAX:
-        lines.append(f"- … and {len(items) - DIGEST_MAX} more (/orch tasks)")
-    return "\n".join(lines)
+def render(payload: dict[str, Any], task: str | None, lang: str = "en") -> str:
+    """One notification as chat text (notify_text has the wording; this keeps a task-only entry point)."""
+    return notify_text.render(payload, notify_text.Context(task=task), lang)
 
 
 def suppress(uow: Any, *, before: datetime, actor: str) -> int:
@@ -119,14 +92,29 @@ class Outbox:
             return (str(exc) or type(exc).__name__)[:300]
         return None
 
-    def _keys(self, rows: list[Row]) -> dict[str, tuple[str, str]]:
-        ids = sorted({r["payload"].get("task_id") for r in rows if r["payload"].get("task_id")})
-        if not ids:
-            return {}
+    def _keys(self, rows: list[Row]) -> dict[str, notify_text.Context]:
+        """Per notification: its task (key, title), project, and for approval requests the approval itself."""
+        task_ids = sorted({r["payload"].get("task_id") for r in rows if r["payload"].get("task_id")})
+        project_ids = sorted({r["payload"].get("project_id") for r in rows if r["payload"].get("project_id")})
+        approval_ids = sorted({(r["payload"].get("data") or {}).get("approval_id") for r in rows
+                               if r["payload"].get("type") == "APPROVAL_REQUIRED" and (r["payload"].get("data") or {}).get("approval_id")})
         with self.ctx.unit_of_work() as uow:
-            uow.cur.execute("SELECT t.id::text AS id, t.key, p.slug FROM tasks t JOIN projects p ON p.id = t.project_id "
-                            "WHERE t.id::text = ANY(%s)", (ids,))
-            return {r["id"]: (r["key"], r["slug"]) for r in uow.cur.fetchall()}
+            uow.cur.execute("SELECT t.id::text AS id, t.key, t.title, p.slug FROM tasks t JOIN projects p ON p.id = t.project_id "
+                            "WHERE t.id::text = ANY(%s)", (task_ids,))
+            tasks = {r["id"]: r for r in uow.cur.fetchall()}
+            uow.cur.execute("SELECT id::text AS id, slug FROM projects WHERE id::text = ANY(%s)", (project_ids,))
+            projects = {r["id"]: r["slug"] for r in uow.cur.fetchall()}
+            uow.cur.execute("SELECT * FROM approvals WHERE id::text = ANY(%s)", (approval_ids,))
+            approvals = {str(r["id"]): r for r in uow.cur.fetchall()}
+        out = {}
+        for row in rows:
+            payload = row["payload"]
+            task = tasks.get(payload.get("task_id") or "")
+            out[str(row["id"])] = notify_text.Context(
+                task=task["key"] if task else None, title=task["title"] if task else None,
+                project=task["slug"] if task else projects.get(payload.get("project_id") or ""),
+                approval=approvals.get((payload.get("data") or {}).get("approval_id") or ""))
+        return out
 
     def _send(self, rows: list[Row], request_id: str, body: Any) -> tuple[str | None, list[Row]]:
         """Post rows that are still PENDING, holding them while posting: a concurrent suppression waits, and
@@ -162,16 +150,18 @@ class Outbox:
             rows = uow.cur.fetchall()
         if not rows or not rows[0]["due"]:
             return stats
-        keys = self._keys(rows)
+        contexts = self._keys(rows)
+        lang = notify_text.language(self.ctx.platform["platform"].get("notification_language"))
 
-        def task_of(row: Row) -> tuple[str | None, str | None]:
-            return keys.get(row["payload"].get("task_id") or "", (None, None))
+        def context_of(row: Row) -> notify_text.Context:
+            return contexts.get(str(row["id"])) or notify_text.Context()
 
         for row in [r for r in rows if r["priority"] == "ATTENTION"]:
-            task, project = task_of(row)
+            note = context_of(row)
             payload = row["payload"]
-            error, sent = self._send([row], f"{row['id']}:{int(row['attempts']) + 1}", lambda _, p=payload, t=task, pr=project, i=row["id"]: {
-                "text": render(p, t), "event": p.get("type"), "task": t, "project": pr, "priority": "ATTENTION", "id": str(i)})
+            error, sent = self._send([row], f"{row['id']}:{int(row['attempts']) + 1}", lambda _, p=payload, c=note, i=row["id"]: {
+                "text": notify_text.render(p, c, lang), "event": p.get("type"), "task": c.task, "project": c.project,
+                "priority": "ATTENTION", "id": str(i)})
             if error:
                 stats["failed"] += 1
                 return stats
@@ -189,7 +179,8 @@ class Outbox:
                 return stats
             batch = routine
             error, sent = self._send(batch, f"digest-{batch[0]['id']}:{int(batch[0]['attempts']) + 1}", lambda live: {
-                "text": render_digest([(r["payload"], task_of(r)[0]) for r in live]), "event": "DIGEST", "task": None,
+                "text": notify_text.render_digest([(r["payload"], context_of(r)) for r in live], lang, DIGEST_MAX),
+                "event": "DIGEST", "task": None,
                 "project": None, "priority": "ROUTINE", "id": f"digest-{batch[0]['id']}"})
             if error:
                 stats["failed"] += 1

@@ -58,7 +58,15 @@ class Approvals:
     # ------------------------------------------------------------------ queries
 
     def get(self, uow: UnitOfWork, approval_id: UUID | str, *, lock: bool = False) -> Row:
-        uow.cur.execute(f"SELECT * FROM approvals WHERE id = %s{' FOR UPDATE' if lock else ''}", (str(approval_id),))
+        """By ID, or by its short number (what chat replies such as "si 12" carry)."""
+        key = str(approval_id).strip().lstrip("#")
+        column = "number" if key.isdigit() and len(key) <= 18 else "id"
+        if column == "id":
+            try:
+                key = str(UUID(key))
+            except ValueError as exc:
+                raise NotFound(f"approval {approval_id} not found") from exc
+        uow.cur.execute(f"SELECT * FROM approvals WHERE {column} = %s{' FOR UPDATE' if lock else ''}", (key,))
         row = uow.cur.fetchone()
         if row is None:
             raise NotFound(f"approval {approval_id} not found")

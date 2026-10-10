@@ -37,6 +37,8 @@ HO_HERMES_WEBHOOK_URL=http://hermes:8644/webhooks/orchestration
 
 Other Hermes channels (Discord, Slack, Signal, WhatsApp, …) work the same way with their own Hermes settings and `HO_HERMES_DELIVER=<platform>`. Without `HO_HERMES_DELIVER_CHAT_ID`, Hermes delivers to the platform's home channel: send `/sethome` from the chat that should receive notifications. WhatsApp, for example: pair it in Hermes (`hermes whatsapp`), send `/sethome` from your chat, then set `HO_HERMES_DELIVER=whatsapp`, `HO_HERMES_WEBHOOK_URL=http://hermes:8644/webhooks/orchestration`, and `HO_APPROVERS=whatsapp:<your WhatsApp user ID as Hermes reports it>`.
 
+Notifications use plain words and one emoji per kind (🟡 decision needed, 🚀 ready to merge, ✅ completed, ⛔ blocked, ❌ failed, 🔑 login expired, 💰 out of budget, ⚠️ platform problem, 📋 progress digest), in English or Spanish (`HO_NOTIFY_LANGUAGE=en|es`). An approval request explains what is being decided and offers short replies with the approval's number: `yes 12` / `no 12` (`si 12` / `no 12` in Spanish), plus `see T-15`, `retry T-15`, `cancel T-15`, `renew 12` (`ver`, `reintentar`, `cancelar`, `renovar`). The plugin's `pre_gateway_dispatch` hook rewrites those replies into the matching `/orch` command before Hermes dispatches the message; Hermes still authorizes the sender, and the control plane still checks `HO_APPROVERS`. Approvals can be named by number anywhere an approval ID is accepted.
+
 When a channel is connected after the platform has been running, the outbox may hold a backlog (it was kept on purpose, see above). Withdraw it before connecting, so only new events are delivered, and check the channel with a test message:
 
 ```bash

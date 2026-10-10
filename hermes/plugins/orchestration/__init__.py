@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import getpass
 import json
+import os
+import re
 import shlex
+import unicodedata
 from typing import Any
 
 from .orch_client import UNKNOWN, ApiError, TaskApi, approval_line, task_line, task_summary
@@ -25,12 +28,62 @@ HELP = """/orch commands:
   status <T-n>                   task status from the orchestrator
   create <project> <request...>  create a task
   approvals                      pending approvals
-  approve <id> | reject <id> [note]
+  approve <id|number> | reject <id|number> [note]   (or reply "yes 12" / "no 12")
   renew <id>                     request an expired approval again
   pause|resume|cancel|retry <T-n>
   revise <T-n> <new requirements...>
   budget <T-n> [counter=N ...]   show, or request an increase
   projects                       registered projects"""
+
+
+# ---------------------------------------------------------------- short replies
+# Notifications offer replies such as "si 12" (approval number 12) or "ver T-15". Before Hermes dispatches a message,
+# they are rewritten into the matching /orch command; the gateway then authorizes the sender as for any message, and
+# the control plane checks that the sender may approve. Anything else passes through untouched.
+
+_LANG = (os.environ.get("HO_NOTIFY_LANGUAGE") or "en").strip().lower()[:2]
+_NUMBER = r"#?(\d{1,18})"
+_TASK = r"(t-\d{1,9})"
+SHORT_REPLIES = [
+    (re.compile(rf"^(?:si|yes|ok|aprobar|aprobado|approve)\s+{_NUMBER}$"), "/orch approve {0}"),
+    (re.compile(rf"^(?:no|reject|rechazar|rechazado)\s+{_NUMBER}(?:\s+(.{{1,300}}))?$"), "/orch reject {0} {1}"),
+    (re.compile(rf"^(?:renovar|renew)\s+{_NUMBER}$"), "/orch renew {0}"),
+    (re.compile(rf"^(?:ver|see|estado|status)\s+{_TASK}$"), "/orch status {0}"),
+    (re.compile(rf"^(?:reintentar|retry)\s+{_TASK}$"), "/orch retry {0}"),
+    (re.compile(rf"^(?:cancelar|cancel)\s+{_TASK}$"), "/orch cancel {0}"),
+]
+
+
+def short_reply_command(text: str) -> str | None:
+    """The /orch command a short reply stands for, or None."""
+    plain = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode().strip().lower()
+    plain = re.sub(r"[*_~`]", "", plain).strip(" .!¡?¿")
+    for pattern, template in SHORT_REPLIES:
+        match = pattern.match(plain)
+        if match:
+            groups = [g or "" for g in match.groups()] + [""]
+            groups = [g.upper() if g.startswith("t-") else g for g in groups]
+            if template.startswith("/orch reject") and groups[1]:
+                # The note as written (case, accents, punctuation), quoted so /orch's parser takes it literally.
+                parts = str(text).strip().strip("*_~` ").split(None, 2)
+                groups[1] = shlex.quote(parts[2].strip("*_~` ") if len(parts) == 3 else groups[1])
+            return template.format(*groups).strip()
+    return None
+
+
+def rewrite_short_reply(event: Any = None, **_: Any) -> dict[str, str] | None:
+    """`pre_gateway_dispatch` hook (gateway/run_inbound.py at the pinned release)."""
+    command = short_reply_command(getattr(event, "text", "") or "")
+    return {"action": "rewrite", "text": command} if command else None
+
+
+def _decided(approval: dict[str, Any]) -> str:
+    state, summary = approval["state"], approval.get("summary") or approval["action"]
+    # CONSUMED: approved and already applied (for example a project configuration or a budget raise).
+    words = {"es": {"APPROVED": "✅ Aprobado", "CONSUMED": "✅ Aprobado", "REJECTED": "❌ Rechazado", "EXPIRED": "⏳ Había caducado"},
+             "en": {"APPROVED": "✅ Approved", "CONSUMED": "✅ Approved", "REJECTED": "❌ Rejected", "EXPIRED": "⏳ It had expired"}}
+    head = words.get(_LANG, words["en"]).get(state, state.lower())
+    return f"{head}: {summary}"
 
 
 # ---------------------------------------------------------------- principals
@@ -80,13 +133,16 @@ def run_verb(api: TaskApi, words: list[str], *, human: bool) -> str:
     if not human:
         raise ApiError(403, f"'{verb}' is a human action; it needs the identity of the person asking")
     if verb in ("approve", "reject"):
-        _need(args, 1, f"{verb} <approval id> [note]")
+        _need(args, 1, f"{verb} <approval id or number> [note]")
         approval = api.decide(args[0], verb == "approve", " ".join(args[1:]) or None)
-        return f"{approval['action']} {approval['state'].lower()}: {approval.get('summary') or ''}".strip()
+        return _decided(approval)
     if verb == "renew":
         _need(args, 1, "renew <approval id>")
         approval = api.renew(args[0])
-        return f"Requested again: {approval.get('summary') or approval['action']}\nApprove: /orch approve {approval['id']}"
+        ref = approval.get("number") or approval["id"]
+        if _LANG == "es":
+            return f"🔁 Pedida de nuevo: {approval.get('summary') or approval['action']}\nResponde *si {ref}* para aprobarla o *no {ref}* para rechazarla."
+        return f"🔁 Requested again: {approval.get('summary') or approval['action']}\nReply *yes {ref}* to approve or *no {ref}* to reject."
     if verb in ("pause", "resume", "cancel", "retry"):
         _need(args, 1, f"{verb} <T-n>")
         task = api.action(args[0], verb)
@@ -210,5 +266,6 @@ def register(ctx) -> None:
                           description=schema["description"])
     ctx.register_command("orch", handler=handle_slash, description="hermes-orchestrator tasks and approvals",
                          args_hint="<command>")
+    ctx.register_hook("pre_gateway_dispatch", rewrite_short_reply)
     ctx.register_cli_command("orchestration", help="hermes-orchestrator tasks and approvals",
                              setup_fn=_cli_setup, handler_fn=_cli_run)

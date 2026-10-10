@@ -52,6 +52,7 @@ def config_view(row: Row | None) -> dict[str, Any] | None:
 def approval_view(row: Row) -> dict[str, Any]:
     return {
         "id": str(row["id"]),
+        "number": row.get("number"),
         "action": row["action"],
         "state": row["state"],
         "risk": row["risk"],
