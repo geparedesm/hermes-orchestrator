@@ -387,9 +387,12 @@ class Orchestration:
         if task["state"] == S.PLANNING and task["current_plan_version"] and plan_current:
             subtasks = self._subtasks(uow, task)
             if subtasks and all(x["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in subtasks):
-                # Back from a retry or resume with the whole plan accepted: nothing to decide, integrate it.
-                self._event(uow, task, "ORCHESTRATOR_INPUT", "every subtask of the plan is accepted; integrating without a step")
-                self._integrate_if_ready(uow, task)
+                # Back from a retry or resume with the whole plan accepted: nothing to decide, integrate it. The step
+                # request is consumed here; a failed integration asks for a step itself (_input).
+                self._event(uow, task, "INTEGRATION_REQUESTED", "every subtask of the plan is accepted; integrating without a step")
+                uow.cur.execute("UPDATE tasks SET step_requested = false, orchestrator_cursor_seq = "
+                                "(SELECT coalesce(max(seq), 0) FROM events WHERE task_id = %s) WHERE id = %s", (task["id"], task["id"]))
+                self._integrate_if_ready(uow, self._task(uow, task["id"]))
                 return None
         uow.cur.execute("SELECT coalesce(max(seq), 0) AS seq FROM events WHERE task_id = %s", (task["id"],))
         cursor = int(uow.cur.fetchone()["seq"])  # type: ignore[index]

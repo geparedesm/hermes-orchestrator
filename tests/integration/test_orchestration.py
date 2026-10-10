@@ -626,6 +626,8 @@ def test_a_retried_task_with_its_plan_accepted_is_integrated_without_asking(api,
     services.scheduler.run_once()
     assert state(api, task) in ("TESTING", "REVIEW")
     assert len(executions(services, task, "ORCHESTRATOR")) == steps_before  # no step was needed
+    [row] = q(services, "SELECT step_requested FROM tasks WHERE key = %s", task)
+    assert row["step_requested"] is False
 
 
 def test_a_revision_is_planned_before_an_accepted_plan_is_integrated(api, services, agents, repo, task):
