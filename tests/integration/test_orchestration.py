@@ -609,3 +609,20 @@ def test_a_preemptive_block_does_not_cancel_work_started_in_the_same_step(api, s
          {"type": "REPORT_BLOCKED", "text": "if b fails again we are out of budget"})
     assert state(api, task) == "RUNNING" and active(services, task, "DEVELOPER")
     assert actions(services, task)[-1][1] == "REJECTED"
+
+
+def test_a_retried_task_with_its_plan_accepted_is_integrated_without_asking(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "print('hello')\n"})
+    [rev] = active(services, task, "REVIEWER")
+    with services.ctx.unit_of_work() as uow:  # stand-in: blocked before the last acceptance, then retried
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.BLOCKED, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason="stalled")
+    review_verdict(services, agents, rev)
+    api.post(f"/v1/tasks/{task}/retry")
+    steps_before = len(executions(services, task, "ORCHESTRATOR"))
+    services.scheduler.run_once()
+    services.scheduler.run_once()
+    assert state(api, task) in ("TESTING", "REVIEW")
+    assert len(executions(services, task, "ORCHESTRATOR")) == steps_before  # no step was needed
