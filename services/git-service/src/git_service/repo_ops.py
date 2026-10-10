@@ -113,7 +113,13 @@ def prepare_workspace(repo: Path, name: str, branch: str, base_ref: str, pin_ref
         # The task's base, fixed once so every later workspace of the task starts from it.
         if not re.match(r"^refs/hermes/tasks/T-[0-9]+/base$", pin_ref):
             raise Refused("invalid base pin ref")
-        run(repo, "update-ref", pin_ref, base_sha, "")
+        pinned = try_git(repo, "rev-parse", "--verify", "--quiet", f"{pin_ref}^{{commit}}")
+        if pinned:
+            # Fixed by an earlier attempt whose record was rolled back: only this step creates the pin, so it is this
+            # task's base. Reuse it rather than fail.
+            full, base_sha = pin_ref, pinned
+        else:
+            run(repo, "update-ref", pin_ref, base_sha, "")
     excluded = _ensure_excluded(repo)
     ws.path.parent.mkdir(parents=True, exist_ok=True)
     try:

@@ -183,7 +183,9 @@ class Tasks:
         now = datetime.now(timezone.utc)
         # Time spent waiting for people (approvals, pauses, logins, blocks) does not count as runtime.
         was_waiting, will_wait = current in WAITING_STATES, result.state in WAITING_STATES
-        waited = (now - task["waiting_since"]).total_seconds() if was_waiting and not will_wait and task["waiting_since"] else 0
+        # Only waits after the task started count: runtime is measured from started_at.
+        wait_from = max(task["waiting_since"], task["started_at"]) if task["waiting_since"] and task["started_at"] else None
+        waited = (now - wait_from).total_seconds() if was_waiting and not will_wait and wait_from else 0
         since = now if will_wait and not was_waiting else None if not will_wait else task["waiting_since"] or now
         uow.cur.execute(
             """

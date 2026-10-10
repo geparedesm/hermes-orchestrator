@@ -42,6 +42,7 @@ def test_time_waiting_for_people_is_not_runtime(api, services, agents, task):
 
 
 def test_existing_tasks_are_backfilled_from_their_history(api, services, agents, task):
+    q(services, "UPDATE tasks SET started_at = now() - interval '1 hour' WHERE key = %s", task)
     api.post(f"/v1/tasks/{task}/pause")
     q(services, "UPDATE tasks SET waited_seconds = 0, waiting_since = NULL WHERE key = %s", task)  # as before 0013
     path = Path(__file__).resolve().parents[2] / "migrations" / "versions" / "0013_working_runtime.py"
@@ -74,3 +75,25 @@ def test_a_recorded_workspace_is_never_reclaimed(api, services, repo, agents, ta
     response = api.post(f"/v1/tasks/{task}/git/workspaces", {"suffix": "w1"})  # the same name again
     assert response.status_code == 409 and "already exists" in response.text
     assert q(services, "SELECT count(*) AS n FROM events WHERE type = 'WORKSPACE_RECLAIMED'")[0]["n"] == 0
+
+
+def test_waits_before_the_task_started_do_not_count(api, services, agents, task):
+    q(services, "UPDATE tasks SET started_at = NULL WHERE key = %s", task)
+    api.post(f"/v1/tasks/{task}/pause")
+    q(services, "UPDATE tasks SET waiting_since = now() - interval '2 hours' WHERE key = %s", task)
+    api.post(f"/v1/tasks/{task}/resume")
+    assert row(services, task)["waited_seconds"] == 0  # nothing to subtract: it had not started
+    # Started an hour ago, in the middle of a wait that began three hours ago: only the last hour is waiting.
+    q(services, "UPDATE tasks SET started_at = now() - interval '1 hour' WHERE key = %s", task)
+    api.post(f"/v1/tasks/{task}/pause")
+    q(services, "UPDATE tasks SET waiting_since = now() - interval '3 hours' WHERE key = %s", task)
+    assert budgets.runtime_minutes(row(services, task)) < 1
+
+
+def test_a_first_workspace_left_with_its_base_pin_is_reclaimed(api, services, repo, agents, task):
+    name = f"{task.lower()}-w1"
+    pin = f"refs/hermes/tasks/{task}/base"
+    left = services.ctx.git.prepare_workspace("demo", name, f"hermes/{task.lower()}/w1", "main", pin)  # pinned, unrecorded
+    workspace = test_git.workspace(api, task)
+    assert workspace["name"] == name and workspace["base_sha"] == left["base_sha"]
+    assert str(row(services, task)["base_commit"]) == left["base_sha"]

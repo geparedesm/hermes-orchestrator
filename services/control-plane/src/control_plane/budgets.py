@@ -42,7 +42,7 @@ def runtime_minutes(task: Row) -> float:
     end = task.get("completed_at") or datetime.now(timezone.utc)
     waited = float(task.get("waited_seconds") or 0)
     if task.get("waiting_since"):
-        waited += max(0.0, (end - task["waiting_since"]).total_seconds())
+        waited += max(0.0, (end - max(task["waiting_since"], started)).total_seconds())
     return max(0.0, (end - started).total_seconds() - waited) / 60
 
 
