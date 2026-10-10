@@ -1088,6 +1088,8 @@ class Orchestration:
             if explicit:
                 raise Conflict(f"not all subtasks are accepted: {', '.join(open_) or 'no plan'}")
             return None
+        if task["state"] in (S.PLANNING, S.QUEUED):  # an accepted plan, re-planned or retried: nothing to develop
+            task = self._move(uow, task, S.QUEUED, S.RUNNING, reason="every subtask accepted; integrating")
         if task["state"] != S.RUNNING:
             if explicit:
                 raise Conflict(f"{task['key']} is {task['state']}")

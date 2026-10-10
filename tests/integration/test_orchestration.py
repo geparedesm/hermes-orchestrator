@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from ho_core.enums import TaskState as S
+from ho_core.statemachine import Trigger
 
 from conftest import git_repo  # type: ignore[import-not-found]
 from fake_agents import FakeAgentManager  # type: ignore[import-not-found]
@@ -576,3 +578,21 @@ def test_a_plan_that_replaces_an_open_subtask_is_not_integrated(api, services, a
     services.scheduler.run_once()
     step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("a"), plan_item("c")]})
     assert subtasks(services, task)["c"]["state"] in ("READY", "PENDING") and state(api, task) == "RUNNING"
+
+
+def test_submitting_an_accepted_plan_while_planning_integrates_it(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "print('hello')\n"})
+    [rev] = active(services, task, "REVIEWER")
+    q(services, "UPDATE tasks SET orchestrator_failures = 3 WHERE key = %s", task)
+    with services.ctx.unit_of_work() as uow:  # stand-in: blocked before integrating, then retried
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.BLOCKED, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason="stalled")
+    api.post(f"/v1/tasks/{task}/retry")
+    assert q(services, "SELECT orchestrator_failures FROM tasks WHERE key = %s", task)[0]["orchestrator_failures"] == 0
+    review_verdict(services, agents, rev)  # the subtask is accepted while the task waits to be planned again
+    services.scheduler.run_once()
+    if state(api, task) == "PLANNING":
+        step(services, agents, task, {"type": "SUBMIT_FOR_QUALITY_GATE"})
+    assert state(api, task) in ("TESTING", "REVIEW")
