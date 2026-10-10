@@ -214,6 +214,16 @@ class Approvals:
         )
         return True
 
+    def mark_applied(self, uow: UnitOfWork, approval: Row) -> None:
+        """For approvals applied when they are decided (an assumption confirmed, a budget raised): record them as used,
+        so they never later read as expired or get asked again."""
+        uow.cur.execute("UPDATE approvals SET state = 'CONSUMED', consumed_at = now(), version = version + 1 "
+                        "WHERE id = %s AND state = 'APPROVED' RETURNING id", (approval["id"],))
+        if uow.cur.fetchone() is not None:
+            record_event(uow.cur, "APPROVAL_CONSUMED", actor="control-plane", project_id=approval["project_id"],
+                         task_id=approval["task_id"], summary=f"{approval['action']} approval applied",
+                         data={"approval_id": str(approval["id"])}, pending=uow.events)
+
     def invalidate_open(self, uow: UnitOfWork, *, project_id: UUID, task_id: UUID | None, action: ApprovalAction | None, reason: str) -> int:
         query = "SELECT * FROM approvals WHERE project_id = %s AND task_id IS NOT DISTINCT FROM %s AND state IN ('PENDING', 'APPROVED')"
         params: list[Any] = [project_id, task_id]
