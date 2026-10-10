@@ -80,6 +80,7 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     reviews = Reviews(ctx, tasks, executions, git)
     gate = QualityGate(ctx, tasks, approvals, git, reviews)
     scheduler.hooks += [git.sync, verifications.sync, gate.sync]
+    tasks.on_budget_resume.append(verifications.relaunch_waiting)  # as after a budget raise
     orchestrator = None
     if orchestration:
         orchestrator = Orchestration(ctx, tasks, approvals, executions, git, verifications, reviews, gate)

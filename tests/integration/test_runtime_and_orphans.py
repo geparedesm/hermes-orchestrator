@@ -127,3 +127,23 @@ def test_resume_is_refused_while_the_next_launch_would_not_fit(api, services, ag
                 "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", limit, limit - DEFAULT_USAGE_RESERVATION // 2, task)
     refused = api.post(f"/v1/tasks/{task}/resume")  # under 100 % used, but a launch's reservation does not fit
     assert refused.status_code == 409 and "provider_usage_units" in refused.text
+
+
+def test_resume_checks_a_queued_retry_and_relaunches_waiting_verifications(api, services, agents, task, monkeypatch):
+    import json as _json
+    import uuid as _uuid
+
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason="retries")
+    q(services, "INSERT INTO pending_launches (id, task_id, kind, request, reason) SELECT %s, id, 'DEVELOP', %s, 'budget' "
+                "FROM tasks WHERE key = %s", _uuid.uuid4(), _json.dumps({"purpose": {"retry": True}}), task)
+    q(services, "UPDATE budgets SET consumed = jsonb_set(consumed, '{retries}', limits->'retries') "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # every retry used
+    refused = api.post(f"/v1/tasks/{task}/resume")
+    assert refused.status_code == 409 and "retries" in refused.text
+    relaunched = []
+    monkeypatch.setattr(services.verifications, "relaunch_waiting", lambda uow, t: relaunched.append(t["key"]))
+    services.tasks.on_budget_resume[:] = [services.verifications.relaunch_waiting]
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{retries}', '50') WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)
+    assert api.post(f"/v1/tasks/{task}/resume").status_code == 200 and relaunched == [task]

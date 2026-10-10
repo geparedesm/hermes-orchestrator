@@ -52,6 +52,7 @@ class Tasks:
         self.approvals = approvals
         # Called with (uow, task, reason) before a task is cancelled (for example to stop its executions).
         self.on_cancel: list[Any] = []
+        self.on_budget_resume: list[Any] = []  # (uow, task) after a budget pause resumes: relaunch what waited
         # Called with (uow, updated task, previous state) after every state change (checkpoints, wind-down).
         self.on_transition: list[Any] = []
         approvals.register_handler(ApprovalAction.BUDGET_UNLIMITED, self._on_budget_unlimited_decision)
@@ -233,8 +234,11 @@ class Tasks:
             counter = budgets.exhausted_counter(uow, task)
             if counter is not None:
                 raise Conflict(f"{key} is still out of its {counter} budget: raise it (/orch budget {key} {counter}=N) and approve")
-            return self.transition(uow, task, S(task["resume_state"]), trigger=Trigger.USER, actor=principal.value,
+            task = self.transition(uow, task, S(task["resume_state"]), trigger=Trigger.USER, actor=principal.value,
                                    reason="resumed by user: the budget suffices")
+            for hook in self.on_budget_resume:
+                hook(uow, task)
+            return task
         if task["state"] != S.PAUSED:
             raise Conflict(f"{key} is {task['state']}; only PAUSED tasks, or tasks paused for a budget that suffices again, "
                            "can be resumed (approval waits resolve through approvals)")

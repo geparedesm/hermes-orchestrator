@@ -165,8 +165,12 @@ def exhausted_counter(uow: UnitOfWork, task: Row) -> str | None:
     budget = uow.cur.fetchone()
     if budget is None:
         return None
+    # A queued retry also needs the retries budget (what reserve(retry=True) will check when it launches).
+    uow.cur.execute("SELECT EXISTS (SELECT 1 FROM pending_launches WHERE task_id = %s "
+                    "AND (request->'purpose'->>'retry')::boolean) AS retry", (task["id"],))
+    retry = bool(uow.cur.fetchone()["retry"])  # type: ignore[index]
     blocked = _blocking(task, budget["limits"], budget["consumed"], budget.get("reserved") or {},
-                        {"agent_launches": 1, "provider_usage_units": DEFAULT_USAGE_RESERVATION})
+                        {"agent_launches": 1, **({"retries": 1} if retry else {}), "provider_usage_units": DEFAULT_USAGE_RESERVATION})
     return blocked[0] if blocked else None
 
 
