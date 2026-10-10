@@ -32,9 +32,16 @@ def option(args: list[str], name: str, default: str | None = None) -> str | None
     return args[args.index(name) + 1] if name in args else default
 
 
+def conflicts(base: str, head: str) -> bool:
+    return subprocess.run(["git", "-C", load()["origin"], "merge-tree", "--write-tree", base, head],
+                          capture_output=True, text=True).returncode == 1
+
+
 def view(pr: dict) -> dict:
     head = git("rev-parse", f"refs/heads/{pr['headRefName']}") if pr["state"] == "OPEN" else pr["headRefOid"]
-    return {**pr, "headRefOid": head, "isDraft": False, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN"}
+    clean = pr["state"] != "OPEN" or not conflicts(git("rev-parse", f"refs/heads/{pr['baseRefName']}"), head)
+    return {**pr, "headRefOid": head, "isDraft": False, "mergeable": "MERGEABLE" if clean else "CONFLICTING",
+            "mergeStateStatus": "CLEAN" if clean else "DIRTY"}
 
 
 def main(args: list[str]) -> int:
@@ -76,6 +83,9 @@ def main(args: list[str]) -> int:
             print("head commit does not match", file=sys.stderr)
             return 1
         base = git("rev-parse", f"refs/heads/{pr['baseRefName']}")
+        if conflicts(base, head):
+            print(f"X Pull request #{pr['number']} is not mergeable: the merge commit cannot be cleanly created.", file=sys.stderr)
+            return 1
         tree = git("merge-tree", "--write-tree", base, head).splitlines()[0]
         commit = git("-c", "user.name=GitHub", "-c", "user.email=noreply@github.com", "commit-tree", tree,
                      "-p", base, "-p", head, "-m", f"Merge pull request #{pr['number']}")

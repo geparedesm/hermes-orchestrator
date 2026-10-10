@@ -185,8 +185,17 @@ def merge_pr(repo: Path, *, approval_id: str, number: int, target_branch: str, t
         raise Refused("the pull request head or base changed after approval")
     if remote_branch_sha(repo, target_branch) != target_sha:
         raise Refused(f"{target_branch} on GitHub moved after approval")
+    conflict = (f"pull request #{number} conflicts with {target_branch} on GitHub, which moved after the task was "
+                f"integrated: bring the local {target_branch} up to date and retry the task to integrate it again")
+    if pr.get("mergeable") == "CONFLICTING":  # GitHub's MergeableState
+        raise Refused(conflict)
     flag = {"merge": "--merge", "squash": "--squash", "rebase": "--rebase"}[method]
-    gh("pr", "merge", str(number), "--repo", info["repo"], flag, "--match-head-commit", head_sha)
+    try:
+        gh("pr", "merge", str(number), "--repo", info["repo"], flag, "--match-head-commit", head_sha)
+    except GitError as exc:
+        if "not mergeable" in str(exc):  # GitHub computed the conflict after the check above
+            raise Refused(conflict) from exc
+        raise
     merged = pr_view(repo, number)
     if merged["state"] != "MERGED":
         raise GitError("GitHub did not report the pull request as merged (merge queue?)")
