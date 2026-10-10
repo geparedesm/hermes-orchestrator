@@ -11,6 +11,8 @@ import pytest
 
 import test_git  # type: ignore[import-not-found]
 from control_plane import budgets
+from ho_core.enums import TaskState as S
+from ho_core.statemachine import Trigger
 
 pytestmark = pytest.mark.integration
 agents = pytest.fixture(test_git.agents.__wrapped__)
@@ -97,3 +99,17 @@ def test_a_first_workspace_left_with_its_base_pin_is_reclaimed(api, services, re
     workspace = test_git.workspace(api, task)
     assert workspace["name"] == name and workspace["base_sha"] == left["base_sha"]
     assert str(row(services, task)["base_commit"]) == left["base_sha"]
+
+
+def test_a_task_paused_for_budget_resumes_once_the_budget_suffices(api, services, agents, task):
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.PAUSED_BUDGET, trigger=Trigger.SYSTEM,
+                                  actor="control-plane", reason="out of agent launches")
+    q(services, "UPDATE budgets SET consumed = jsonb_set(consumed, '{agent_launches}', limits->'agent_launches') "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # stand-in: every launch used
+    refused = api.post(f"/v1/tasks/{task}/resume")
+    assert refused.status_code == 409 and "agent_launches" in refused.text and f"/orch budget {task}" in refused.text
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{agent_launches}', '100') "
+                "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # stand-in: the budget was raised
+    resumed = api.post(f"/v1/tasks/{task}/resume")
+    assert resumed.status_code == 200 and resumed.json()["state"] == "READY"

@@ -21,6 +21,7 @@ from ho_core.hashing import hash_value
 from ho_core.ids import uuid7
 from ho_core.statemachine import WAITING_STATES, InvalidTransition, Trigger, transition
 
+from . import budgets
 from .approvals import Approvals
 from .auth import Principal
 from .context import Context, UnitOfWork
@@ -227,8 +228,16 @@ class Tasks:
 
     def resume(self, uow: UnitOfWork, key: str, *, principal: Principal) -> Row:
         task = self.get(uow, key, lock=True)
+        if task["state"] == S.PAUSED_BUDGET:
+            # Resumable once the budget suffices again (a raise elsewhere, or runtime recalculated); otherwise say what to raise.
+            counter = budgets.exhausted_counter(uow, task)
+            if counter is not None:
+                raise Conflict(f"{key} is still out of its {counter} budget: raise it (/orch budget {key} {counter}=N) and approve")
+            return self.transition(uow, task, S(task["resume_state"]), trigger=Trigger.USER, actor=principal.value,
+                                   reason="resumed by user: the budget suffices")
         if task["state"] != S.PAUSED:
-            raise Conflict(f"{key} is {task['state']}; only PAUSED tasks can be resumed (budget and approval waits resolve through approvals)")
+            raise Conflict(f"{key} is {task['state']}; only PAUSED tasks, or tasks paused for a budget that suffices again, "
+                           "can be resumed (approval waits resolve through approvals)")
         return self.transition(uow, task, S(task["resume_state"]), trigger=Trigger.USER, actor=principal.value, reason="resumed by user")
 
     def cancel(self, uow: UnitOfWork, key: str, *, principal: Principal) -> Row:

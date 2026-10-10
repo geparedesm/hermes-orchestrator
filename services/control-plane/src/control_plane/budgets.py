@@ -150,6 +150,16 @@ def usage_units(units: dict[str, Any]) -> int:
     return int(sum(int(units.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens")))
 
 
+def exhausted_counter(uow: UnitOfWork, task: Row) -> str | None:
+    """The counter that still leaves the task without budget, computed now (runtime included), or None."""
+    uow.cur.execute("SELECT * FROM budgets WHERE task_id = %s", (task["id"],))
+    budget = uow.cur.fetchone()
+    if budget is None:
+        return None
+    state, counter, _ = _state(budget, budget["consumed"], budget.get("reserved") or {}, task)
+    return counter if state == "EXHAUSTED" else None
+
+
 def state(uow: UnitOfWork, task: Row) -> dict[str, Any]:
     uow.cur.execute("SELECT * FROM budgets WHERE task_id = %s", (task["id"],))
     budget = uow.cur.fetchone()
