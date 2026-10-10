@@ -165,7 +165,7 @@ ho gate evaluate T-1                     # Quality Gate -> READY_FOR_MERGE
 
 ## 11. Monitoring
 
-- Dashboard → **Orchestration**: required actions, queue, running work, provider usage, a board, and each task's plan, reviews, tests, budget, timeline, and manifests.
+- Dashboard → **Orchestration**: required actions, queue, running work, provider usage by model, a board, and each task's plan, reviews, tests, budget, timeline, and manifests.
 - Chat: `/orch tasks`, `/orch status T-1`.
 - CLI:
 

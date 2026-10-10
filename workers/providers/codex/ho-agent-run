@@ -26,6 +26,16 @@ prompt=/run/ho-input/prompt.md
 codex "$@" < "$prompt" > "$OUT/events.jsonl"
 rc=$?
 
+# The model Codex used: its --json output does not name it, its session record does (turn_context.model).
+# Only the names are copied; prompts and responses in that record stay in this container's memory.
+thread="$(grep -m1 -o '"thread_id":"[0-9a-f-]\{36\}"' "$OUT/events.jsonl" | cut -d'"' -f4)"
+if [[ -n $thread ]]; then
+  rollout="$(find -L "$CODEX_HOME/sessions" -name "rollout-*-$thread.jsonl" 2>/dev/null | head -1)"
+  if [[ -n $rollout ]]; then
+    grep '"type":"turn_context"' "$rollout" | grep -o '"model":"[A-Za-z0-9._:/@-]\{1,100\}"' | cut -d'"' -f4 | awk '!seen[$0]++' > "$OUT/models.txt" || true
+  fi
+fi
+
 if [[ -s $CODEX_HOME/auth.json && "$(sha256sum < "$CODEX_HOME/auth.json")" != "$before" ]]; then
   (
     flock -w 30 9 || exit 0

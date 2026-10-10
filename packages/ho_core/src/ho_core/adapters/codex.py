@@ -37,6 +37,7 @@ from .base import (
     classify_text,
     command_event,
     compose_prompt,
+    model_name,
     normalize_structured,
     result_schema,
     runner_state,
@@ -178,7 +179,15 @@ class CodexAdapter:
                 value = (event.get("usage") or {}).get(key)
                 if isinstance(value, int):
                     totals[key] = totals.get(key, 0) + value
-        return UsageRecord(self.provider, {**totals, "num_turns": turns})
+        units: dict[str, Any] = {**totals, "num_turns": turns}
+        # `codex exec --json` does not name the model; ho-agent-run copies it from the session's own record
+        # (`turn_context.model`) into models.txt, one name per line.
+        models = [m for m in (bundle.text("models.txt") or "").split() if model_name(m)][:5]
+        if models:
+            units["model"] = models[-1]
+            if len(models) > 1:
+                units["models"] = {m: {} for m in models}
+        return UsageRecord(self.provider, units)
 
     def health_check(self, *, pinned_images: Iterable[str], credential_present: bool, credential_status: str) -> ProviderHealth:
         pinned = any(name.startswith("codex-") for name in pinned_images)

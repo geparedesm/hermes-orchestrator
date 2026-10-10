@@ -16,6 +16,8 @@ Conceptual operations from the specification:
 
 from __future__ import annotations
 
+import re
+
 import copy
 import json
 from dataclasses import asdict, dataclass, field
@@ -99,6 +101,15 @@ class OutputBundle:
 class AdapterEvent:
     type: str  # SESSION_STARTED, COMMAND_STARTED, COMMAND_FINISHED, FILES_CHANGED, TOOL_USED, PROVIDER_RETRY, PROVIDER_ERROR, RESULT
     data: dict[str, Any] = field(default_factory=dict)
+
+
+# A model name as the CLIs report it (for example claude-sonnet-5, claude-opus-5-5[1m], gpt-6.1-sol).
+_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,99}$")
+
+
+def model_name(value: Any) -> str | None:
+    """A reported model name, or None when it is missing or not a plausible name (agent output is untrusted)."""
+    return value if isinstance(value, str) and _MODEL_NAME.match(value) else None
 
 
 @dataclass

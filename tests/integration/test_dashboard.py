@@ -63,3 +63,20 @@ def test_budget_shows_runtime_consumed(api, services, agents, task):
     q(services, "UPDATE tasks SET started_at = now() - interval '30 minutes' WHERE key = %s", task)
     view = api.get(f"/v1/dashboard/tasks/{task}").json()
     assert 29 <= view["budget"]["consumed"]["runtime_minutes"] <= 31
+
+
+def test_the_model_each_execution_reported_is_shown(api, services, agents, task):
+    from pathlib import Path
+
+    fixtures = Path(__file__).resolve().parents[1] / "fixtures" / "providers"
+    execution = api.post(f"/v1/tasks/{task}/executions", {"role": "DEVELOPER", "provider": "codex", "prompt": "x"}).json()["id"]
+    agents.finish(execution, 0, {"ho/events.jsonl": (fixtures / "codex-success.jsonl").read_bytes(),
+                                 "ho/runner.json": b'{"exit_code": 0, "reason": "cli_exited"}', "ho/models.txt": b"gpt-6.1-sol\n"})
+    services.scheduler.run_once()
+    [row] = q(services, "SELECT units->>'model' AS model FROM usage_records WHERE execution_id = %s", execution)
+    assert row["model"] == "gpt-6.1-sol"
+    usage = api.get("/v1/dashboard/summary", token=PLUGIN_TOKEN, principal="dashboard:operator").json()["provider_usage"]["24_hours"]
+    assert usage["codex"]["models"]["gpt-6.1-sol"]["executions"] == 1
+    [shown] = [e for e in api.get(f"/v1/dashboard/tasks/{task}").json()["executions"] if e["id"] == execution]
+    assert shown["model"] == "gpt-6.1-sol"
+    assert 'ho_model_tokens_total{provider="codex",model="gpt-6.1-sol"}' in api.get("/metrics").text

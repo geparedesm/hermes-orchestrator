@@ -80,7 +80,9 @@
         ["Duration", function (e) { return minutes(e.minutes); }]] })),
       h(Section, { title: "Provider usage (24 h)" }, h(Table, { rows: Object.keys(usage).map(function (p) { return Object.assign({ id: p, provider: p }, usage[p]); }),
         empty: "No agent executions in the last 24 hours.", columns: [
-          ["Provider", function (u) { return u.provider; }], ["Executions", function (u) { return count(u.executions); }],
+          ["Provider", function (u) { return u.provider; }],
+          ["Models", function (u) { return Object.keys(u.models || {}).map(function (m) { return m + " (" + u.models[m].executions + ")"; }).join(", ") || "—"; }],
+          ["Executions", function (u) { return count(u.executions); }],
           ["Succeeded", function (u) { return count(u.succeeded); }], ["Failed", function (u) { return count(u.failed); }],
           ["Tokens", function (u) { return count(u.tokens); }], ["Mean duration", function (u) { return minutes(u.mean_minutes); }]] }),
         h("p", { className: "orch-muted" }, "Last 7 days: " + s.resilience_7_days.retries + " retries, " + s.resilience_7_days.fallbacks +
@@ -316,6 +318,7 @@
         ["Commit", function (v) { return (v.commit_sha || "").slice(0, 12); }], ["Duration", function (v) { return minutes(v.minutes); }]] })),
       h(Section, { title: "Executions" }, h(Table, { rows: data.executions, empty: "No executions.", columns: [
         ["Role", function (e) { return e.role; }], ["Provider", function (e) { return e.provider || "runner"; }],
+        ["Model", function (e) { return e.model || (e.provider ? "not recorded" : "—"); }],
         ["Subtask", function (e) { return e.subtask || "—"; }], ["State", function (e) { return h(Badge, { value: e.state }); }],
         ["Failure", function (e) { return e.failure_class ? e.failure_class + ": " + (e.failure_reason || "") : "—"; }],
         ["Tokens", function (e) { return e.tokens ? count(e.tokens) : "—"; }], ["Duration", function (e) { return minutes(e.minutes); }]] })),

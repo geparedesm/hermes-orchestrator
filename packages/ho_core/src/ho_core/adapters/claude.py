@@ -37,11 +37,13 @@ from .base import (
     classify_text,
     command_event,
     compose_prompt,
+    model_name,
     normalize_structured,
     result_schema,
     runner_state,
 )
 
+_MODEL_USAGE_KEYS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")
 _TOOLS = {
     Role.DEVELOPER: ["Bash", "Edit", "Glob", "Grep", "Read", "Write"],
     Role.REVIEWER: ["Bash", "Glob", "Grep", "Read"],
@@ -174,7 +176,7 @@ class ClaudeAdapter:
         return FailureClass.TASK  # finished, but without a valid structured result
 
     def collect_usage(self, bundle: OutputBundle) -> UsageRecord:
-        _, final = self._events(bundle)
+        raw, final = self._events(bundle)
         usage = (final or {}).get("usage") or {}
         units = {k: usage.get(k) for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens",
                                            "cache_read_input_tokens") if isinstance(usage.get(k), int)}
@@ -184,6 +186,18 @@ class ClaudeAdapter:
         if isinstance((final or {}).get("total_cost_usd"), (int, float)):
             # Client-side estimate reported by the CLI; subscription usage is not billed per request.
             units["reported_cost_usd_estimate"] = final["total_cost_usd"]  # type: ignore[index]
+        # The model: `system/init` names the one that ran the session; `result.modelUsage` splits the usage by
+        # model (other models may run auxiliary steps). Only names and token counts are kept.
+        init = next((e for e in raw if e.get("type") == "system" and e.get("subtype") == "init"), None)
+        per_model = {}
+        for name, stats in ((final or {}).get("modelUsage") or {}).items():
+            if model_name(name) and isinstance(stats, dict):
+                per_model[name] = {k: stats[k] for k in _MODEL_USAGE_KEYS if isinstance(stats.get(k), int)}
+        model = model_name((init or {}).get("model")) or max(per_model, key=lambda m: per_model[m].get("outputTokens", 0), default=None)
+        if model:
+            units["model"] = model
+        if per_model:
+            units["models"] = per_model
         return UsageRecord(self.provider, units)
 
     def health_check(self, *, pinned_images: Iterable[str], credential_present: bool, credential_status: str) -> ProviderHealth:
