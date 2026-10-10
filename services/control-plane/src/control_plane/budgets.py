@@ -34,8 +34,16 @@ def _lock(uow: UnitOfWork, task: Row) -> Row:
 
 
 def runtime_minutes(task: Row) -> float:
+    """Working time since the task started: waiting for people (approvals, pauses, logins, blocks) is excluded,
+    and a finished task stops counting."""
     started = task.get("started_at")
-    return 0.0 if not started else (datetime.now(timezone.utc) - started).total_seconds() / 60
+    if not started:
+        return 0.0
+    end = task.get("completed_at") or datetime.now(timezone.utc)
+    waited = float(task.get("waited_seconds") or 0)
+    if task.get("waiting_since"):
+        waited += max(0.0, (end - task["waiting_since"]).total_seconds())
+    return max(0.0, (end - started).total_seconds() - waited) / 60
 
 
 def _state(budget: Row, consumed: dict[str, Any], reserved: dict[str, Any], task: Row) -> tuple[str, str | None, float]:

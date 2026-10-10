@@ -19,7 +19,7 @@ from ho_core.config import stricter_autonomy
 from ho_core.enums import ApprovalAction, BudgetProfile, ProjectStatus, Risk, TaskState
 from ho_core.hashing import hash_value
 from ho_core.ids import uuid7
-from ho_core.statemachine import InvalidTransition, Trigger, transition
+from ho_core.statemachine import WAITING_STATES, InvalidTransition, Trigger, transition
 
 from .approvals import Approvals
 from .auth import Principal
@@ -181,15 +181,20 @@ class Tasks:
         except InvalidTransition as exc:
             raise Conflict(f"{task['key']}: cannot move from {current} to {target} ({exc.reason})") from exc
         now = datetime.now(timezone.utc)
+        # Time spent waiting for people (approvals, pauses, logins, blocks) does not count as runtime.
+        was_waiting, will_wait = current in WAITING_STATES, result.state in WAITING_STATES
+        waited = (now - task["waiting_since"]).total_seconds() if was_waiting and not will_wait and task["waiting_since"] else 0
+        since = now if will_wait and not was_waiting else None if not will_wait else task["waiting_since"] or now
         uow.cur.execute(
             """
             UPDATE tasks SET state = %s, resume_state = %s, state_reason = %s, updated_at = %s, version = version + 1,
+                             waited_seconds = waited_seconds + %s, waiting_since = %s,
                              ready_at = CASE WHEN %s = 'READY' THEN %s ELSE ready_at END,
                              completed_at = CASE WHEN %s IN ('DONE', 'CANCELLED', 'FAILED') THEN %s ELSE completed_at END
             WHERE id = %s AND version = %s
             RETURNING *
             """,
-            (result.state.value, result.resume_state.value if result.resume_state else None, reason, now,
+            (result.state.value, result.resume_state.value if result.resume_state else None, reason, now, int(waited), since,
              result.state.value, now, result.state.value, now, task["id"], task["version"]),
         )
         updated = uow.cur.fetchone()
