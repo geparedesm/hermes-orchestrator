@@ -1187,7 +1187,10 @@ class Orchestration:
         if approval["task_id"] is None:
             return
         task = self._task(uow, approval["task_id"])
-        uow.cur.execute("UPDATE assumptions SET status = %s WHERE approval_id = %s", ("APPROVED" if approved else "REJECTED", approval["id"]))
+        uow.cur.execute("UPDATE assumptions SET status = %s WHERE approval_id = %s RETURNING id",
+                        ("APPROVED" if approved else "REJECTED", approval["id"]))
+        if approved and uow.cur.fetchone() is not None:
+            self.approvals.mark_applied(uow, approval)  # the assumption is confirmed now; nothing uses the approval later
         if task["state"] != S.APPROVAL_REQUIRED:
             return
         if approved:
@@ -1209,6 +1212,7 @@ class Orchestration:
                 limits[counter] = int(limits[counter]) + int(amount)
         uow.cur.execute("UPDATE budgets SET limits = %s, state = 'OK' WHERE task_id = %s", (jsonb(limits), task["id"]))
         self._event(uow, task, "BUDGET_RAISED", f"budget raised by {principal.value}: {approval['subject'].get('add')}")
+        self.approvals.mark_applied(uow, approval)
         if task["state"] == S.PAUSED_BUDGET:
             task = self.tasks.transition(uow, task, S(task["resume_state"]), trigger=Trigger.APPROVAL, actor=principal.value,
                                          reason="budget raised")

@@ -307,7 +307,8 @@
         ["Action", function (a) { return h(Badge, { value: a.action }); }], ["State", function (a) { return h(Badge, { value: a.state }); }],
         ["Summary", function (a) { return a.summary; }], ["Decided by", function (a) { return a.decided_by || "—"; }],
         ["", function (a) { return a.state === "PENDING" ? h(Decide, { id: a.id, done: load })
-          : a.state === "EXPIRED" ? h(Renew, { id: a.id, done: load }) : null; }]] })),
+          : a.state === "EXPIRED" && (!a.decided_by || a.action === "MERGE") ? h(Renew, { id: a.id, done: load })
+          : a.state === "EXPIRED" ? h("span", { className: "orch-muted" }, "approved, not used before it expired") : null; }]] })),
       budget ? h(Section, { title: "Budget (" + budget.profile + ", " + budget.state + ")" }, h(Table, {
         rows: Object.keys(budget.limits).map(function (k) { return { id: k, counter: k, limit: budget.limits[k], used: budget.consumed[k], reserved: (budget.reserved || {})[k] }; }),
         columns: [["Counter", function (b) { return b.counter; }], ["Used", function (b) { return count(b.used); }],

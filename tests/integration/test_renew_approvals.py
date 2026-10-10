@@ -84,10 +84,54 @@ def test_the_expired_list_holds_only_approvals_that_can_be_requested_again(api, 
     assert api.get("/v1/approvals?state=EXPIRED", **DASHBOARD).json()["approvals"] == []
 
 
-def test_an_applied_budget_raise_that_later_expired_is_not_asked_again(api, services, agents, task):
+def test_an_applied_budget_raise_is_never_asked_again(api, services, agents, task):
     raised = api.post(f"/v1/tasks/{task}/budget", {"add": {"agent_launches": 5}}).json()
-    api.post(f"/v1/approvals/{raised['id']}/decision", {"decision": "APPROVE"})  # applied, left APPROVED
-    expire(services, raised["id"])
+    api.post(f"/v1/approvals/{raised['id']}/decision", {"decision": "APPROVE"})  # applied and recorded as used
+    orch.q(services, "UPDATE approvals SET expires_at = now() - interval '1 minute' WHERE id = %s", raised["id"])
+    with services.ctx.unit_of_work() as uow:
+        services.approvals.expire_due(uow)
+    response = api.post(f"/v1/approvals/{raised['id']}/renew", **DASHBOARD)
+    assert response.status_code == 409 and "CONSUMED" in response.text
+    # An approved one that expired anyway (rows from before approvals were recorded as used) is refused too.
+    orch.q(services, "UPDATE approvals SET state = 'EXPIRED' WHERE id = %s", raised["id"])
     response = api.post(f"/v1/approvals/{raised['id']}/renew", **DASHBOARD)
     assert response.status_code == 409 and "already decided" in response.text
     assert api.get("/v1/approvals?state=EXPIRED", **DASHBOARD).json()["approvals"] == []
+
+
+def test_approvals_applied_when_decided_are_recorded_as_used(api, services, agents, task):
+    raised = api.post(f"/v1/tasks/{task}/budget", {"add": {"retries": 2}}).json()
+    api.post(f"/v1/approvals/{raised['id']}/decision", {"decision": "APPROVE"})
+    orch.step(services, agents, task, {"type": "RECORD_ASSUMPTION", "text": "Keep the API", "level": "HIGH", "reversible": False})
+    [assumption] = orch.q(services, "SELECT id FROM approvals WHERE action = 'ASSUMPTION'")
+    api.post(f"/v1/approvals/{assumption['id']}/decision", {"decision": "APPROVE"})
+    states = {r["action"]: r["state"] for r in orch.q(services, "SELECT action, state FROM approvals WHERE task_id IS NOT NULL")}
+    assert states == {"BUDGET_INCREASE": "CONSUMED", "ASSUMPTION": "CONSUMED"}
+    orch.q(services, "UPDATE approvals SET expires_at = now() - interval '1 minute'")
+    with services.ctx.unit_of_work() as uow:
+        assert services.approvals.expire_due(uow) == 0  # used approvals never turn into "expired"
+
+
+def test_rows_applied_before_the_fix_are_corrected(api, services, agents, task):
+    import importlib.util
+    import sys
+    import types
+    from pathlib import Path
+
+    raised = api.post(f"/v1/tasks/{task}/budget", {"add": {"retries": 1}}).json()
+    api.post(f"/v1/approvals/{raised['id']}/decision", {"decision": "APPROVE"})
+    orch.q(services, "UPDATE approvals SET state = 'EXPIRED', consumed_at = NULL, invalidated_reason = 'approval window elapsed' "
+           "WHERE id = %s", raised["id"])  # how such a row looked before the fix
+    path = Path(__file__).resolve().parents[2] / "migrations" / "versions" / "0011_applied_approvals.py"
+    spec = importlib.util.spec_from_file_location("m0011", path)
+    module = importlib.util.module_from_spec(spec)
+    statements: list[str] = []
+    sys.modules["alembic"] = types.SimpleNamespace(op=types.SimpleNamespace(execute=statements.append))
+    try:
+        spec.loader.exec_module(module)
+        module.upgrade()
+    finally:
+        del sys.modules["alembic"]
+    orch.q(services, statements[0])
+    [row] = orch.q(services, "SELECT state, consumed_at IS NOT NULL AS used FROM approvals WHERE id = %s", raised["id"])
+    assert row["state"] == "CONSUMED" and row["used"]
