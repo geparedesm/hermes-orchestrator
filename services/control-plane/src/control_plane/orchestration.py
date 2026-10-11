@@ -1383,7 +1383,9 @@ class Orchestration:
             for row in uow.cur.fetchall():
                 self.leases.renew(uow, row["task_id"])
         with self.ctx.unit_of_work() as uow:  # final manifests for tasks that ended since the last pass
-            uow.cur.execute("SELECT t.* FROM tasks t WHERE t.state IN ('DONE', 'CANCELLED', 'FAILED') AND t.started_at IS NOT NULL "
+            # An unregistered project's repository may be gone: its tasks cannot be described and would be retried forever.
+            uow.cur.execute("SELECT t.* FROM tasks t JOIN projects p ON p.id = t.project_id "
+                            "WHERE t.state IN ('DONE', 'CANCELLED', 'FAILED') AND t.started_at IS NOT NULL AND p.status <> 'UNREGISTERED' "
                             "AND NOT EXISTS (SELECT 1 FROM manifests m WHERE m.task_id = t.id AND m.kind = 'FINAL') LIMIT 20")
             for task in uow.cur.fetchall():
                 try:

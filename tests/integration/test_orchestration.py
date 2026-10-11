@@ -673,3 +673,11 @@ def test_each_conflicting_workspace_gets_one_resolution_attempt(api, services, a
     assert len(handed) == 1 and inputs() == 1
     conflict("t-1-8a1")  # another subtask's workspace conflicting too gets its own attempt
     assert len(handed) == 2 and inputs() == 1
+
+
+def test_no_final_manifest_for_tasks_of_an_unregistered_project(api, services, agents, repo, task):
+    api.post(f"/v1/tasks/{task}/cancel")
+    assert api.delete("/v1/projects/demo").json()["status"] == "UNREGISTERED"
+    services.orchestration.sync()  # its repository may be gone: the task is not described (nor retried every pass)
+    assert q(services, "SELECT count(*) AS n FROM manifests m JOIN tasks t ON t.id = m.task_id WHERE t.key = %s AND m.kind = 'FINAL'",
+             task)[0]["n"] == 0
