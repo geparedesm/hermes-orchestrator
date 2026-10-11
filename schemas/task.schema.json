@@ -17,6 +17,7 @@
     "request": { "type": "string", "minLength": 1, "maxLength": 20000, "description": "Original user request, stored as an artifact." },
     "priority": { "$ref": "#/$defs/priority", "default": "NORMAL" },
     "budget_profile": { "$ref": "#/$defs/budgetProfile" },
+    "approve_plan": { "type": "boolean", "default": false, "description": "The plan waits for the requester's approval before work starts (can only add supervision to the project's setting)." },
     "expansion_profile": { "$ref": "#/$defs/budgetProfile" },
     "autonomy": { "enum": ["SUPERVISED", "BALANCED", "AUTONOMOUS"] },
     "related_tasks": {
@@ -108,6 +109,13 @@
         "state_reason": { "type": "string", "maxLength": 500 },
         "priority": { "$ref": "#/$defs/priority" },
         "risk": { "$ref": "#/$defs/risk" },
+        "approve_plan": { "type": "boolean" },
+        "plan_approval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "state"],
+          "properties": { "version": { "type": "integer" }, "state": { "enum": ["PENDING", "APPROVED", "REJECTED"] } }
+        },
         "subtasks": {
           "type": "array",
           "items": {

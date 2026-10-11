@@ -89,6 +89,10 @@ def task_view(row: Row, *, project_slug: str, budget: Row | None = None, pending
         view["state_reason"] = row["state_reason"]
     if row["risk"]:
         view["risk"] = row["risk"]
+    if row.get("approve_plan"):
+        view["approve_plan"] = True
+    if row.get("plan_approval_state"):
+        view["plan_approval"] = {"version": row["plan_approval_version"], "state": row["plan_approval_state"]}
     if pending_approvals:
         view["pending_approvals"] = pending_approvals
     if budget:

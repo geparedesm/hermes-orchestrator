@@ -54,7 +54,7 @@ def test_a_task_is_created_as_the_dashboard_operator(dashboard):
     [(principal, args, kwargs)] = calls
     assert principal == "dashboard:operator"
     assert args == ("odoo-job-finder", "Add tests", None, "HIGH")
-    assert kwargs == {"budget": "SMALL", "depends_on": ["T-3", "T-4"], "idempotency_key": KEY, "attachments": []}
+    assert kwargs == {"budget": "SMALL", "depends_on": ["T-3", "T-4"], "idempotency_key": KEY, "attachments": [], "approve_plan": False}
 
 
 @pytest.mark.parametrize("change,status", [

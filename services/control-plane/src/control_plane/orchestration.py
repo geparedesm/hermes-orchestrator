@@ -35,7 +35,7 @@ from .auth import Principal
 from .budgets import BudgetExhausted
 from .context import Context, UnitOfWork
 from .db import Row, jsonb
-from .errors import ApiError, Conflict, NotFound, UpstreamError
+from .errors import ApiError, BadRequest, Conflict, Forbidden, NotFound, UpstreamError
 from .events import record_event
 from .executions import ACTIVE, ExecutionRequest, Executions
 from .gitops import CONTROL_PLANE, GitChanges
@@ -53,6 +53,7 @@ FAILBACK_HOLD = timedelta(minutes=10)
 MAX_REVIEW_RETRIES = 2
 # Only these events make the orchestrator think again (design change 2).
 RESOLVE_ATTEMPTS = 5  # agent-assisted conflict resolutions per task
+REQUIREMENTS_LIMIT = 50_000  # characters of one requirements version
 TRIGGERS = ("ORCHESTRATOR_INPUT", "REQUIREMENTS_REVISED", "APPROVAL_DECIDED", "BUDGET_RAISED")
 STEP_STATES = (S.PLANNING, S.QUEUED, S.RUNNING, S.FIX_REQUIRED)
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -125,6 +126,7 @@ class Orchestration:
         approvals.register_renewer(ApprovalAction.ASSUMPTION, self._renew_assumption)
         approvals.register_handler(ApprovalAction.SCOPE_EXPANSION, self._on_waiting_approval)
         approvals.register_handler(ApprovalAction.BUDGET_INCREASE, self._on_budget_increase)
+        approvals.register_handler(ApprovalAction.PLAN, self._on_plan_decision)
 
     # ------------------------------------------------------------- helpers
 
@@ -288,6 +290,12 @@ class Orchestration:
                 if epoch is not None and (lease is None or int(lease["epoch"]) != int(epoch)):
                     self._event(uow, task, "LAUNCH_DROPPED", f"{row['kind'].lower()} decided under an older lease epoch")
                     continue
+                if row["kind"] in ("DEVELOP", "FIX"):
+                    try:
+                        self._check_plan_approved(uow, task)
+                    except Conflict as exc:
+                        self._event(uow, task, "LAUNCH_DROPPED", f"{row['kind'].lower()} dropped: {exc}")
+                        continue
                 subtask = None
                 if row["subtask_id"]:
                     uow.cur.execute("SELECT * FROM subtasks WHERE id = %s", (row["subtask_id"],))
@@ -436,6 +444,37 @@ class Orchestration:
             lines += [f"## Requirements (version {task['current_requirements_version']})", "", text[:5000], ""]
         else:
             lines += ["## Requirements", "", "None yet: start with SET_REQUIREMENTS, then SET_PLAN.", ""]
+        # The person's answers, in full and outside the requirements' cut above (docs/design/clarifications.md).
+        episode = self._episode(uow, task)
+        uow.cur.execute("SELECT questions, answers, episode FROM clarifications WHERE task_id = %s AND state = 'ANSWERED' "
+                        "ORDER BY asked_at", (task["id"],))
+        answered = uow.cur.fetchall()
+
+        def answer_lines(rounds: list[Row]) -> list[str]:
+            return [f"- {q['text']} — {((r['answers'] or {}).get(q['id']) or {}).get('label') or ((r['answers'] or {}).get(q['id']) or {}).get('text') or '(no answer)'}"
+                    for r in rounds for q in r["questions"]]
+        current = [r for r in answered if r["episode"] == episode]
+        earlier = [r for r in answered if r["episode"] != episode]
+        if current:
+            lines += ["## Clarifications answered by the person (authoritative: plan with them)", "", *answer_lines(current), ""]
+        if earlier:
+            lines += ["## Earlier answers (before the person revised the request: the revision takes precedence)", "",
+                      *answer_lines(earlier), ""]
+        if task["current_plan_version"] and self._supervised(uow, task) and not (
+                task.get("plan_approval_state") == "APPROVED" and task.get("plan_approval_version") == task["current_plan_version"]) \
+                and task.get("plan_approval_state") != "PENDING":
+            lines += ["## Plan approval", "", "The current plan is not approved for the current requirements: submit SET_PLAN (the same "
+                      "plan if it still fits) to ask the person; no subtask starts before they approve it.", ""]
+        if task["state"] == S.PLANNING:
+            left = self._rounds_left(uow, task)
+            lines += ["## Questions for the person", "",
+                      ("Before SET_PLAN you may ask ONE round of ASK_QUESTIONS (1 to 5 questions), and only when an answer would "
+                       "change what is built or how it is tested. Never ask what the request, the attachments, or the repository "
+                       "already answer. Each question: 2 to 4 short options with exactly one recommended, a `why` saying what "
+                       "the answer changes, and allow_other when a free answer makes sense. Return ASK_QUESTIONS alone in that "
+                       "step: the task waits for the answers. If nothing is ambiguous, plan directly."
+                       if left > 0 else "No more questions in this planning episode: plan with what you know; record "
+                       "assumptions (RECORD_ASSUMPTION) for anything still unclear."), ""]
         uow.cur.execute("SELECT level, assumption, status FROM assumptions WHERE task_id = %s ORDER BY created_at", (task["id"],))
         assumptions = uow.cur.fetchall()
         if assumptions:
@@ -503,6 +542,9 @@ class Orchestration:
         for seq, action in enumerate(actions[:MAX_ACTIONS]):
             task = self._task(uow, task["id"])
             try:
+                if S(task["state"]) not in STEP_STATES:
+                    # An earlier action of this step made the task wait for a person (questions, a supervised plan).
+                    raise ValueError(f"task is {task['state']}: waiting for the person")
                 if action.get("type") == "REPORT_BLOCKED" and started:
                     # A block "in case it fails" would cancel the work just started; report it if that work fails.
                     raise ValueError("this step already started work; report blocked only if that work fails")
@@ -566,6 +608,8 @@ class Orchestration:
             return self._set_requirements(uow, task, action.get("text") or "", source="ORCHESTRATOR", reason="orchestrator")
         if kind == "RECORD_ASSUMPTION":
             return self._record_assumption(uow, task, action)
+        if kind == "ASK_QUESTIONS":
+            return self._ask_questions(uow, task, action.get("questions") or [])
         if kind == "SET_PLAN":
             return self._set_plan(uow, task, action.get("subtasks") or [])
         if kind == "REQUEST_EXECUTION":
@@ -616,9 +660,11 @@ class Orchestration:
     def _set_requirements(self, uow: UnitOfWork, task: Row, text: str, *, source: str, reason: str) -> str:
         if not text.strip():
             raise ValueError("requirements text is empty")
+        if len(text) > REQUIREMENTS_LIMIT:
+            raise ValueError(f"requirements are longer than {REQUIREMENTS_LIMIT} characters")
         version = int(task["current_requirements_version"] or 0) + 1
         artifact = self.ctx.artifacts.write(uow.cur, project_id=task["project_id"], task_id=task["id"], kind="requirements",
-                                            name=f"requirements-v{version}.md", content=text[:50_000].encode(), media_type="text/markdown")
+                                            name=f"requirements-v{version}.md", content=text.encode(), media_type="text/markdown")
         uow.cur.execute("INSERT INTO requirement_versions (id, task_id, version, artifact_id, source, change_reason) "
                         "VALUES (%s, %s, %s, %s, %s, %s)", (uuid7(), task["id"], version, artifact.id, source, reason[:300]))
         uow.cur.execute("UPDATE tasks SET current_requirements_version = %s WHERE id = %s", (version, task["id"]))
@@ -726,6 +772,11 @@ class Orchestration:
         self._event(uow, task, "PLAN_VERSIONED", f"plan version {version}: {len(items)} subtask(s), {len(new_keys)} new",
                     {"version": version, "artifact": str(artifact.id)})
         task = self._task(uow, task["id"])  # the new plan version
+        self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.PLAN,
+                                       reason="superseded by a new plan")
+        if self._supervised(uow, task):
+            return self._request_plan_approval(uow, task, items, version)
+        uow.cur.execute("UPDATE tasks SET plan_approval_version = NULL, plan_approval_state = NULL WHERE id = %s", (task["id"],))
         if task["state"] == S.PLANNING:
             task = self._move(uow, task, S.QUEUED, reason="plan accepted")
         subtasks = self._subtasks(uow, task)
@@ -735,6 +786,205 @@ class Orchestration:
             task = self._move(uow, task, S.RUNNING, reason="every subtask accepted; integrating")
             self._integrate_if_ready(uow, task)
         return f"version {version}"
+
+    # ------------------------------------------------- clarifying questions and supervised plans
+
+    def _planning(self, uow: UnitOfWork, task: Row) -> dict[str, Any]:
+        return {"questions": True, "max_question_rounds": 1, "approve_plan": False, **(self._config(uow, task).get("planning") or {})}
+
+    def _supervised(self, uow: UnitOfWork, task: Row) -> bool:
+        return bool(task.get("approve_plan")) or bool(self._planning(uow, task)["approve_plan"])
+
+    def _episode(self, uow: UnitOfWork, task: Row) -> int:
+        """The person's requirements version that opened the current planning episode (0: the original request).
+        Versions created from answers do not open a new one, so answering never re-arms another round."""
+        uow.cur.execute("SELECT coalesce(max(version), 0) AS v FROM requirement_versions WHERE task_id = %s AND source = 'USER'",
+                        (task["id"],))
+        return int(uow.cur.fetchone()["v"])  # type: ignore[index]
+
+    def _rounds_left(self, uow: UnitOfWork, task: Row) -> int:
+        planning = self._planning(uow, task)
+        if not planning["questions"]:
+            return 0
+        uow.cur.execute("SELECT count(*) AS n FROM clarifications WHERE task_id = %s AND episode = %s AND state <> 'CANCELLED'",
+                        (task["id"], self._episode(uow, task)))
+        return max(0, int(planning["max_question_rounds"]) - int(uow.cur.fetchone()["n"]))  # type: ignore[index]
+
+    def _ask_questions(self, uow: UnitOfWork, task: Row, questions: list[dict[str, Any]]) -> str | None:
+        if task["state"] != S.PLANNING:
+            raise Conflict("questions are asked while planning, before the plan")
+        if self._rounds_left(uow, task) <= 0:
+            raise Conflict("no more questions in this planning episode: plan with what you know, recording assumptions")
+        if not 1 <= len(questions) <= 5:
+            raise ValueError("ask between 1 and 5 questions")
+        clean = []
+        for n, q in enumerate(questions, start=1):
+            options = [o for o in (q.get("options") or []) if str(o.get("label") or "").strip()]
+            if not str(q.get("text") or "").strip() or not 2 <= len(options) <= 4:
+                raise ValueError(f"question {n} needs a text and 2 to 4 options")
+            if sum(1 for o in options if o.get("recommended")) != 1:
+                raise ValueError(f"question {n} must mark exactly one recommended option")
+            clean.append({"id": f"q{n}", "text": str(q["text"]).strip()[:300], "why": str(q.get("why") or "").strip()[:300],
+                          "allow_other": bool(q.get("allow_other")),
+                          "options": [{"key": "abcd"[i], "label": str(o["label"]).strip()[:150], "recommended": bool(o.get("recommended"))}
+                                      for i, o in enumerate(options)]})
+        uow.cur.execute("INSERT INTO clarifications (id, task_id, episode, requirements_version, questions, state) "
+                        "VALUES (%s, %s, %s, %s, %s, 'PENDING') RETURNING id, number",
+                        (uuid7(), task["id"], self._episode(uow, task), task["current_requirements_version"], jsonb(clean)))
+        row = uow.cur.fetchone()
+        self._event(uow, task, "QUESTIONS_ASKED", f"{len(clean)} question(s) before planning; answer with #{row['number']}",  # type: ignore[index]
+                    {"clarification_id": str(row["id"]), "number": int(row["number"])})  # type: ignore[index]
+        self._move(uow, task, S.APPROVAL_REQUIRED, reason=f"waiting for your answers to {len(clean)} question(s)")
+        return None
+
+    def answer_questions(self, uow: UnitOfWork, task_key: str, reference: str, *, principal: Principal,
+                         answers: dict[str, dict[str, str]] | None = None, use_recommended: bool = False) -> dict[str, Any]:
+        """A person's answers (never an agent's, AD-10): stored structured, appended to the requirements as a new
+        version, and the task goes back to planning in the same transaction."""
+        if principal.value not in self.ctx.platform["platform"]["approvers"]:
+            raise Forbidden(f"{principal.value} may not answer questions")
+        task = self.tasks.get(uow, task_key, lock=True)
+        number = reference.lstrip("#")
+        uow.cur.execute("SELECT * FROM clarifications WHERE task_id = %s AND (id::text = %s OR number::text = %s) FOR UPDATE",
+                        (task["id"], reference, number))
+        round_ = uow.cur.fetchone()
+        if round_ is None:
+            raise NotFound("question round not found")
+        if round_["state"] != "PENDING":
+            raise Conflict(f"these questions are {round_['state'].lower()}")
+        if task["state"] != S.APPROVAL_REQUIRED or task["resume_state"] != S.PLANNING:
+            raise Conflict(f"{task_key} is {task['state']}, not waiting for these answers")
+        if round_["requirements_version"] != task["current_requirements_version"]:
+            raise Conflict("the requirements changed since these questions were asked")
+        chosen: dict[str, dict[str, str]] = {}
+        for q in round_["questions"]:
+            given = {} if use_recommended else (answers or {}).get(q["id"]) or {}
+            if not given:
+                if not use_recommended:
+                    raise BadRequest(f"{q['id']} has no answer (or answer with the recommended options)")
+                option = next(o for o in q["options"] if o["recommended"])
+                chosen[q["id"]] = {"option": option["key"], "label": option["label"]}
+            elif given.get("option"):
+                option = next((o for o in q["options"] if o["key"] == given["option"]), None)
+                if option is None:
+                    raise BadRequest(f"{q['id']} has no option {given['option']!r}")
+                chosen[q["id"]] = {"option": option["key"], "label": option["label"]}
+            elif given.get("text"):
+                if not q["allow_other"]:
+                    raise BadRequest(f"{q['id']} takes one of its options, not free text")
+                chosen[q["id"]] = {"text": str(given["text"]).strip()[:1000]}
+            else:
+                raise BadRequest(f"{q['id']} needs an option or a text")
+        lines = [f"## Clarifications (answered by {principal.value})", ""]
+        for q in round_["questions"]:
+            a = chosen[q["id"]]
+            lines.append(f"- {q['text']} — {a.get('label') or a.get('text')}")
+        version = None
+        if task["current_requirements_version"]:
+            base = self._requirements_text(uow, task)
+            text = base.rstrip() + "\n\n" + "\n".join(lines) + "\n"
+            if len(text) > REQUIREMENTS_LIMIT:
+                raise Conflict("the requirements would exceed their size limit; revise the request to shorten them first")
+            version = self._set_requirements(uow, task, text, source="CLARIFICATION", reason=f"answers from {principal.value}")
+        uow.cur.execute("UPDATE clarifications SET state = 'ANSWERED', answers = %s, answered_by = %s, answered_at = now() "
+                        "WHERE id = %s", (jsonb(chosen), principal.value, round_["id"]))
+        task = self.tasks.transition(uow, self._task(uow, task["id"]), S.PLANNING, trigger=Trigger.APPROVAL, actor=principal.value,
+                                     reason="questions answered")
+        self._event(uow, task, "QUESTIONS_ANSWERED", f"{len(chosen)} answer(s) from {principal.value}", {"clarification_id": str(round_["id"])},
+                    actor=principal.value)
+        self._input(uow, task, "the person answered your questions: plan with the answers (see Clarifications)")
+        return {"task": task_key, "number": int(round_["number"]), "answers": chosen, "requirements": version}
+
+    def _requirements_text(self, uow: UnitOfWork, task: Row) -> str:
+        uow.cur.execute("SELECT a.path FROM requirement_versions r JOIN artifacts a ON a.id = r.artifact_id "
+                        "WHERE r.task_id = %s ORDER BY r.version DESC LIMIT 1", (task["id"],))
+        row = uow.cur.fetchone()
+        return self.ctx.artifacts.read(row["path"]).decode("utf-8", "replace") if row else ""
+
+    def _requirements_digest(self, uow: UnitOfWork, task: Row) -> str:
+        return hashlib.sha256(self._requirements_text(uow, task).encode()).hexdigest()
+
+    def _plan_subject(self, uow: UnitOfWork, task: Row, version: int) -> dict[str, Any]:
+        uow.cur.execute("SELECT s.local_key, s.title, s.kind, s.risk, s.preferred_provider, s.estimated_scope, "
+                        "(SELECT array_agg(x.local_key ORDER BY x.local_key) FROM subtask_dependencies d JOIN subtasks x "
+                        "ON x.id = d.depends_on_subtask_id WHERE d.subtask_id = s.id) AS depends_on "
+                        "FROM subtasks s WHERE s.task_id = %s AND s.plan_version = %s AND s.state <> 'CANCELLED' ORDER BY s.key",
+                        (task["id"], version))
+        items = [{k: (list(v) if isinstance(v, list) else v) for k, v in r.items()} for r in uow.cur.fetchall()]
+        return {"kind": "plan", "plan_version": version,
+                "plan_digest": hashlib.sha256(json.dumps(items, sort_keys=True, default=str).encode()).hexdigest(),
+                "requirements_version": task["current_requirements_version"], "requirements_digest": self._requirements_digest(uow, task),
+                "subtasks": items}
+
+    def _request_plan_approval(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], version: int) -> str:
+        subject = self._plan_subject(uow, task, version)
+        uow.cur.execute("UPDATE tasks SET plan_approval_version = %s, plan_approval_state = 'PENDING' WHERE id = %s", (version, task["id"]))
+        # Developer launches queued under an earlier plan wait for this one's decision: they are dropped.
+        uow.cur.execute("DELETE FROM pending_launches WHERE task_id = %s AND kind IN ('DEVELOP', 'FIX')", (task["id"],))
+        self.approvals.request(uow, action=ApprovalAction.PLAN, project_id=task["project_id"], task_id=task["id"], subject=subject,
+                               config_hash=self._config(uow, task)["_hash"], risk=Risk.MEDIUM, requested_by="orchestrator",
+                               summary=f"{task['key']}: review plan v{version} ({len(subject['subtasks'])} subtask(s)) before work starts",
+                               from_task_state=task["state"])
+        if S(task["state"]) in STEP_STATES:
+            self._move(uow, task, S.APPROVAL_REQUIRED, reason=f"plan v{version} waits for your approval")
+        return f"version {version}: waiting for the person's approval"
+
+    def _check_plan_approved(self, uow: UnitOfWork, task: Row) -> None:
+        """A supervised task starts work only on a plan explicitly approved: missing approval state is not permission
+        (a revision or a failed consumption clears it, and the plan must be approved again)."""
+        if not task["current_plan_version"]:
+            return
+        approved = task.get("plan_approval_state") == "APPROVED" and task.get("plan_approval_version") == task["current_plan_version"]
+        if not approved and (self._supervised(uow, task) or task.get("plan_approval_state") in ("PENDING", "REJECTED")):
+            raise Conflict(f"plan v{task['current_plan_version']} is not approved; no subtask starts before it is")
+
+    def _on_plan_decision(self, uow: UnitOfWork, approval: Row, approved: bool, principal: Principal) -> None:
+        task = self._task(uow, approval["task_id"])
+        uow.cur.execute("SELECT * FROM tasks WHERE id = %s FOR UPDATE", (task["id"],))
+        task = uow.cur.fetchone()
+        subject = approval["subject"] or {}
+        current = task["plan_approval_state"] == "PENDING" and task["plan_approval_version"] == subject.get("plan_version") \
+            and task["current_plan_version"] == subject.get("plan_version")
+        if not current:
+            return  # superseded meanwhile (a new plan or a revision); its own decision is requested
+        resume = S(task["resume_state"]) if task["state"] == S.APPROVAL_REQUIRED and task["resume_state"] else None
+        if not approved:
+            uow.cur.execute("UPDATE tasks SET plan_approval_state = 'REJECTED' WHERE id = %s", (task["id"],))
+            if resume is not None:
+                task = self.tasks.transition(uow, task, resume, trigger=Trigger.APPROVAL, actor=principal.value,
+                                             reason=f"plan v{subject.get('plan_version')} rejected")
+            note = (approval.get("decision_note") or "").strip()
+            self._input(uow, task, f"the person rejected plan v{subject.get('plan_version')}: write a new plan"
+                        + (f". Their note: {note[:500]}" if note else ""))
+            return
+        if not self.approvals.consume(uow, approval, subject=self._plan_subject(uow, task, int(subject["plan_version"])),
+                                      config_hash=self._config(uow, task)["_hash"]):
+            uow.cur.execute("UPDATE tasks SET plan_approval_state = NULL, plan_approval_version = NULL WHERE id = %s", (task["id"],))
+            if resume is not None:
+                task = self.tasks.transition(uow, task, resume, trigger=Trigger.APPROVAL, actor=principal.value,
+                                             reason="the plan or requirements changed after the approval was requested")
+            self._input(uow, task, "the approved plan no longer matches the task: submit the plan again")
+            return
+        uow.cur.execute("UPDATE tasks SET plan_approval_state = 'APPROVED' WHERE id = %s", (task["id"],))
+        if resume is not None:
+            task = self.tasks.transition(uow, task, resume, trigger=Trigger.APPROVAL, actor=principal.value,
+                                         reason=f"plan v{subject.get('plan_version')} approved")
+        if task["state"] == S.PLANNING:
+            task = self._move(uow, task, S.QUEUED, reason="plan approved")
+        self._input(uow, task, f"the person approved plan v{subject.get('plan_version')}: request executions for READY subtasks")
+
+    def _cancel_planning_waits(self, uow: UnitOfWork, task: Row, reason: str) -> bool:
+        """A revision supersedes pending questions and plan approvals. Returns whether the task was waiting on them."""
+        uow.cur.execute("UPDATE clarifications SET state = 'CANCELLED', cancel_reason = %s WHERE task_id = %s AND state = 'PENDING' "
+                        "RETURNING id", (reason, task["id"]))
+        waited = uow.cur.fetchone() is not None
+        if task.get("plan_approval_state") == "PENDING":
+            waited = True
+        self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.PLAN, reason=reason)
+        # An approval (pending or given) was bound to the old requirements: the plan must be approved again.
+        uow.cur.execute("UPDATE tasks SET plan_approval_state = NULL, plan_approval_version = NULL "
+                        "WHERE id = %s AND plan_approval_state IN ('PENDING', 'APPROVED')", (task["id"],))
+        return waited
 
     def _expansion_approved(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], added: int, limit: int) -> bool:
         """A plan beyond the expansion profile needs a human approval bound to that exact plan (design change)."""
@@ -780,6 +1030,7 @@ class Orchestration:
                            "verification and reviews run automatically")
         if subtask["state"] not in ("READY", "FIX_REQUIRED"):
             raise Conflict(f"{subtask['key']} is {subtask['state']}")
+        self._check_plan_approved(uow, task)
         if task["state"] == S.PLANNING and task["current_plan_version"]:
             task = self._move(uow, task, S.QUEUED, reason="plan accepted")  # a plan exists (for example after a release)
         if task["state"] not in (S.QUEUED, S.RUNNING, S.FIX_REQUIRED):
@@ -800,6 +1051,7 @@ class Orchestration:
     def _develop(self, uow: UnitOfWork, task: Row, subtask: Row, provider: str, *, extra: str, epoch: int | None,
                  kind: str, fresh: bool = False, retry: bool = False) -> Row | None:
         """Launch a developer execution for a subtask in its workspace (a fresh one for a new attempt)."""
+        self._check_plan_approved(uow, self._task(uow, task["id"]))  # no subtask starts before its supervised plan is approved
         workspace = None
         if subtask["workspace_id"] and not fresh:
             uow.cur.execute("SELECT * FROM workspaces WHERE id = %s AND status = 'ACTIVE'", (subtask["workspace_id"],))
@@ -1280,6 +1532,12 @@ class Orchestration:
         if S(task["state"]) in (S.DONE, S.CANCELLED, S.FAILED, S.MERGING, S.VERIFYING):
             raise Conflict(f"{task_key} is {task['state']}")
         version = self._set_requirements(uow, task, text, source="USER", reason=f"revised by {principal.value}")
+        if self._cancel_planning_waits(uow, task, "requirements revised") and task["state"] == S.APPROVAL_REQUIRED \
+                and task["resume_state"]:
+            # Back to where the wait started (PLANNING, or active work for a re-plan); the revision event makes the
+            # orchestrator plan again, and a supervised plan asks for a new decision.
+            task = self.tasks.transition(uow, self._task(uow, task["id"]), S(task["resume_state"]), trigger=Trigger.USER,
+                                         actor=principal.value, reason="requirements revised: planning again")
         self._event(uow, task, "REQUIREMENTS_REVISED", f"requirements revised by {principal.value} ({version}); impact analysis "
                     "follows: keep, replan, cancel, or add subtasks", {"version": version}, actor=principal.value)
         if task["state"] == S.READY_FOR_MERGE:

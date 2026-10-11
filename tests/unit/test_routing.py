@@ -44,6 +44,6 @@ def test_request_similarity():
 
 def test_orchestrator_step_schema_is_closed():
     action = {"type": "WAIT", "text": None, "subtasks": None, "subtask": None, "role": None, "provider": None, "prompt": None,
-              "level": None, "reversible": None, "category": None, "anchors": None}
+              "level": None, "reversible": None, "category": None, "anchors": None, "questions": None}
     assert schemas.errors_for("orchestrator-step", {"summary": "s", "actions": [action]}) == []
     assert schemas.errors_for("orchestrator-step", {"summary": "s", "actions": [{**action, "type": "MERGE"}]})

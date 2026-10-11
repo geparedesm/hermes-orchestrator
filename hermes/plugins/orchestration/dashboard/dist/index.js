@@ -279,6 +279,65 @@
       error ? h("div", { className: "orch-alert" }, error) : null);
   }
 
+  // A round of planning questions: pick an option per question (the recommended one is preselected), or write
+  // your own answer where allowed. The answers become part of the task's requirements.
+  function QuestionCard(props) {
+    const c = props.round;
+    const initial = {};
+    (c.questions || []).forEach(function (q) {
+      const rec = q.options.find(function (o) { return o.recommended; });
+      initial[q.id] = { option: rec ? rec.key : q.options[0].key, text: "" };
+    });
+    const [picked, setPicked] = useState(initial);
+    const [busy, setBusy] = useState(null);
+    const [error, setError] = useState(null);
+    function choose(qid, value) { setPicked(function (p) { const n = Object.assign({}, p); n[qid] = Object.assign({}, p[qid], value); return n; }); }
+    function send(recommended) {
+      const answers = {};
+      Object.keys(picked).forEach(function (qid) {
+        const a = picked[qid];
+        answers[qid] = a.option === "other" ? { text: a.text.trim() } : { option: a.option };
+      });
+      const missing = Object.keys(answers).find(function (qid) { return answers[qid].text !== undefined && !answers[qid].text; });
+      if (!recommended && missing) { setError("Write your answer for " + missing.replace("q", "question ") + ", or pick an option."); return; }
+      setBusy(recommended ? "rec" : "send");
+      setError(null);
+      post("/tasks/" + c.task + "/clarifications/" + c.id + "/answer", recommended ? { use_recommended: true } : { answers: answers })
+        .then(props.done).catch(function (e) { setError(message(e)); }).finally(function () { setBusy(null); });
+    }
+    return h("article", { className: "orch-approval orch-questions" },
+      h("div", { className: "orch-approval-head" },
+        h("span", { className: "orch-approval-icon" }, h(Icon, { name: "alert", size: 16 })),
+        h("strong", null, (c.questions || []).length + " question" + ((c.questions || []).length === 1 ? "" : "s") + " before planning"),
+        c.number !== undefined && c.number !== null ? h("span", { className: "orch-muted" }, "#" + c.number) : null,
+        c.asked_at ? h("span", { className: "orch-approval-expiry" }, h(Icon, { name: "clock", size: 13 }), "asked " + ago(c.asked_at)) : null),
+      c.task ? h("div", { className: "orch-approval-task" }, h(TaskLink, { task: c.task, open: props.open }),
+        c.task_title ? h("span", null, c.task_title) : null, c.project ? h(Pill, null, c.project) : null) : null,
+      h("p", { className: "orch-muted orch-small", style: { margin: 0 } }, "Your answers become part of the task's requirements; nothing is planned until you answer."),
+      h("ol", { className: "orch-question-list" }, (c.questions || []).map(function (q) {
+        const value = picked[q.id] || {};
+        return h("li", { key: q.id, className: "orch-question" },
+          h("div", { className: "orch-question-text" }, q.text),
+          q.why ? h("div", { className: "orch-muted orch-small" }, q.why) : null,
+          h("div", { className: "orch-options", role: "radiogroup", "aria-label": q.text },
+            q.options.map(function (o) {
+              return h("label", { key: o.key, className: cx("orch-option", value.option === o.key && "orch-option-on") },
+                h("input", { type: "radio", name: c.id + q.id, checked: value.option === o.key, onChange: function () { choose(q.id, { option: o.key }); } }),
+                h("span", null, o.label), o.recommended ? h(Pill, { tone: "good" }, "recommended") : null);
+            }),
+            q.allow_other ? h("label", { className: cx("orch-option", value.option === "other" && "orch-option-on") },
+              h("input", { type: "radio", name: c.id + q.id, checked: value.option === "other", onChange: function () { choose(q.id, { option: "other" }); } }),
+              h("span", null, "Other")) : null),
+          q.allow_other && value.option === "other" ? h("input", { className: "orch-other", value: value.text, maxLength: 1000, autoFocus: true,
+            placeholder: "Your answer", onChange: function (e) { choose(q.id, { text: e.target.value }); } }) : null);
+      })),
+      h("div", { className: "orch-approval-actions" },
+        h(Button, { kind: "good", icon: "check", disabled: !!busy, onClick: function () { send(false); } }, busy === "send" ? "Sending…" : "Send answers"),
+        h(Button, { disabled: !!busy, onClick: function () { send(true); } }, busy === "rec" ? "Sending…" : "Use the recommended answers"),
+        c.task && props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(c.task); } }, "Open task") : null),
+      error ? h("div", { className: "orch-alert" }, error) : null);
+  }
+
   // An expired approval requested again: the platform checks it still applies and says why when it does not.
   function Renew(props) {
     const [busy, setBusy] = useState(false);
@@ -403,14 +462,15 @@
     const s = summary.data;
     const tasks = board.data.tasks.filter(function (t) { return matches(t, props.query); });
     const approvals = s.required_actions.approvals.filter(function (a) { return !props.query || matches({ key: a.task, title: a.task_title, project: a.project }, props.query); });
+    const rounds = (s.required_actions.clarifications || []).filter(function (c) { return !props.query || matches({ key: c.task, title: c.task_title, project: c.project }, props.query); });
     const waiting = tasks.filter(function (t) { return WAITING.indexOf(t.state) >= 0 && t.state !== "APPROVAL_REQUIRED"; });
     const active = tasks.filter(function (t) { return FINISHED.indexOf(t.state) < 0 && WAITING.indexOf(t.state) < 0; });
-    const needs = approvals.length + waiting.length;
+    const needs = rounds.length + approvals.length + waiting.length;
     const done = s.done_tasks_30_days || {};
     function reload() { summary.reload(); board.reload(); }
     return h("div", { className: "orch-home" },
       h("div", { className: "orch-stats" },
-        h(Stat, { icon: "alert", tone: needs ? "warn" : "good", value: needs, label: "Need you", sub: needs ? "decisions and stuck tasks" : "all clear" }),
+        h(Stat, { icon: "alert", tone: needs ? "warn" : "good", value: needs, label: "Need you", sub: needs ? "questions, decisions, stuck tasks" : "all clear" }),
         h(Stat, { icon: "play", tone: "info", value: active.length, label: "In progress", onClick: function () { props.go("board"); } }),
         h(Stat, { icon: "cpu", tone: "info", value: s.running.length, label: "Agents running", onClick: function () { props.go("system"); } }),
         h(Stat, { icon: "check", tone: "good", value: count(done.count), label: "Done in 30 days", sub: done.mean_minutes ? "about " + minutes(done.mean_minutes) + " each" : null })),
@@ -419,6 +479,7 @@
           h(Card, { title: "Needs you", count: needs, className: needs ? "orch-attention" : null },
             needs === 0 ? h(Empty, { icon: "check", title: "All clear", text: "Nothing is waiting for you right now." })
               : h("div", { className: "orch-stack" },
+                rounds.map(function (c) { return h(QuestionCard, { key: c.id, round: c, done: reload, open: props.open }); }),
                 approvals.map(function (a) { return h(ApprovalCard, { key: a.id, approval: a, done: reload, open: props.open }); }),
                 waiting.map(function (t) { return h(WaitingCard, { key: t.key, task: t, open: props.open, done: reload }); }))),
           h(Card, { title: "In progress", count: active.length, action: h(Button, { small: true, onClick: function () { props.go("board"); } }, "Open board") },
@@ -477,11 +538,14 @@
     }));
     let body;
     if (tab === "PENDING") {
+      const rounds = summary.data ? summary.data.required_actions.clarifications || [] : [];
       body = !summary.data ? h(Loading, { error: summary.error })
-        : summary.data.required_actions.approvals.length === 0 ? h(Empty, { icon: "check", title: "No decisions waiting", text: "When an agent needs you, it appears here and in your chat." })
-          : h("div", { className: "orch-approval-grid" }, summary.data.required_actions.approvals.map(function (a) {
-            return h(ApprovalCard, { key: a.id, approval: a, done: summary.reload, open: props.open });
-          }));
+        : summary.data.required_actions.approvals.length + rounds.length === 0 ? h(Empty, { icon: "check", title: "No decisions waiting", text: "When an agent needs you, it appears here and in your chat." })
+          : h("div", { className: "orch-approval-grid" },
+            rounds.map(function (c) { return h(QuestionCard, { key: c.id, round: c, done: summary.reload, open: props.open }); }),
+            summary.data.required_actions.approvals.map(function (a) {
+              return h(ApprovalCard, { key: a.id, approval: a, done: summary.reload, open: props.open });
+            }));
     } else {
       body = !expired.data ? h(Loading, { error: expired.error }) : h(Card, null, h(Table, { rows: expired.data.approvals, empty: "No expired approvals.", columns: [
         ["Decision", function (a) { return a.summary; }],
@@ -818,8 +882,20 @@
     const budget = d.budget;
     const pending = d.approvals.filter(function (a) { return a.state === "PENDING"; });
     const [error, setError] = useState(null);
+    const rounds = d.clarifications || [];
+    const answered = rounds.filter(function (c) { return c.state === "ANSWERED"; });
     return h("div", { className: "orch-stack" },
+      rounds.filter(function (c) { return c.state === "PENDING"; }).map(function (c) {
+        return h(QuestionCard, { key: c.id, round: Object.assign({ task: t.key }, c), done: props.reload });
+      }),
       pending.map(function (a) { return h(ApprovalCard, { key: a.id, approval: Object.assign({ task_title: t.title }, a), done: props.reload }); }),
+      answered.length ? h(Card, { title: "Your answers", count: answered.reduce(function (n, c) { return n + c.questions.length; }, 0) },
+        h("ul", { className: "orch-facts" }, answered.flatMap(function (c) {
+          return c.questions.map(function (q) {
+            const a = (c.answers || {})[q.id] || {};
+            return h("li", { key: c.id + q.id }, h("span", null, q.text), h("strong", null, a.label || a.text || "—"));
+          });
+        }))) : null,
       WAITING.indexOf(t.state) >= 0 && nextStep(t) ? h("div", { className: "orch-callout orch-tone-border-" + tone(t.state) }, nextStep(t)) : null,
       h(Card, { title: "About" }, h("ul", { className: "orch-facts" },
         h("li", null, h("span", null, "Project"), h("strong", null, t.project)),
@@ -909,7 +985,7 @@
   // idempotency key per form, so a double click or a retried request creates one task.
   function NewTask(props) {
     const [projects, setProjects] = useState(null);
-    const [form, setForm] = useState({ project: props.project || "", request: "", title: "", priority: "NORMAL", budget: "", depends_on: "" });
+    const [form, setForm] = useState({ project: props.project || "", request: "", title: "", priority: "NORMAL", budget: "", depends_on: "", approve_plan: false });
     const [key] = useState(newKey);
     const [files, setFiles] = useState([]);
     const [more, setMore] = useState(false);
@@ -947,7 +1023,7 @@
       Promise.all(files.map(function (f) { return readBase64(f).then(function (b64) { return { name: f.name, content_base64: b64 }; }); }))
         .then(function (attachments) {
           return post("/tasks", { project: form.project, request: form.request, title: form.title || null, priority: form.priority,
-            budget: form.budget || null, idempotency_key: key, attachments: attachments,
+            budget: form.budget || null, idempotency_key: key, attachments: attachments, approve_plan: form.approve_plan,
             depends_on: form.depends_on.split(/[\s,]+/).filter(function (k) { return k; }) });
         })
         .then(function (t) { props.created(t.key); })
@@ -975,6 +1051,10 @@
           h(Button, { small: true, icon: "x", label: "Remove " + f.name, onClick: function () { setFiles(files.filter(function (g) { return g !== f; })); setError(null); } }));
       })) : null,
       h("p", { className: "orch-muted orch-small" }, "The agents read attachments, so they are sent to the AI providers (Anthropic, OpenAI). Do not attach passwords, keys, or personal data."),
+      h("label", { className: "orch-check-row" }, h("input", { type: "checkbox", checked: form.approve_plan,
+        onChange: function (e) { const v = e.target.checked; setForm(function (f) { return Object.assign({}, f, { approve_plan: v }); }); } }),
+        h("span", null, h("strong", null, "Review the plan before work starts"),
+          h("span", { className: "orch-muted orch-small" }, " — the plan comes to you as a decision; nothing is built until you approve it."))),
       h("button", { type: "button", className: "orch-disclosure", onClick: function () { setMore(!more); } }, (more ? "▾ " : "▸ ") + "More options"),
       more ? h("div", { className: "orch-form-row" },
         h("label", null, h("span", null, "Title"), h("input", { value: form.title, onChange: field("title"), maxLength: 200, placeholder: "Written for you if empty" })),
@@ -1020,7 +1100,7 @@
       window.addEventListener("keydown", onKey);
       return function () { window.removeEventListener("keydown", onKey); };
     }, []);
-    const pending = counts.data ? counts.data.required_actions.approvals.length : 0;
+    const pending = counts.data ? counts.data.required_actions.approvals.length + (counts.data.required_actions.clarifications || []).length : 0;
     const waiting = counts.data ? counts.data.required_actions.waiting_tasks.filter(function (t) { return t.state !== "APPROVAL_REQUIRED" && t.state !== "FIX_REQUIRED"; }).length : 0;
     const go = function (v) { setView(v); };
     const props = { open: open, query: query, go: go };

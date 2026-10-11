@@ -30,7 +30,8 @@
           "level",
           "reversible",
           "category",
-          "anchors"
+          "anchors",
+          "questions"
         ],
         "properties": {
           "type": {
@@ -42,6 +43,7 @@
               "REQUEST_EXECUTION",
               "ACCEPT_SUBTASK",
               "REJECT_SUBTASK",
+              "ASK_QUESTIONS",
               "REQUEST_APPROVAL",
               "PROPOSE_KNOWLEDGE",
               "SUBMIT_FOR_QUALITY_GATE",
@@ -211,6 +213,61 @@
               "type": "string"
             },
             "description": "PROPOSE_KNOWLEDGE: paths the item depends on."
+          },
+          "questions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "minItems": 1,
+            "maxItems": 5,
+            "description": "ASK_QUESTIONS only: questions for the person, asked only when an answer changes what is built or how it is tested.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "text",
+                "why",
+                "options",
+                "allow_other"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "The question, short and concrete."
+                },
+                "why": {
+                  "type": "string",
+                  "description": "What the answer changes in the work."
+                },
+                "options": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 4,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "label",
+                      "recommended"
+                    ],
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "recommended": {
+                        "type": "boolean",
+                        "description": "Exactly one option per question is recommended."
+                      }
+                    }
+                  }
+                },
+                "allow_other": {
+                  "type": "boolean",
+                  "description": "Whether the person may answer in their own words."
+                }
+              }
+            }
           }
         }
       }

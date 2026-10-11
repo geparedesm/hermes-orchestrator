@@ -133,12 +133,13 @@ class Tasks:
         uow.cur.execute(
             """
             INSERT INTO tasks (id, key, project_id, title, original_request_artifact_id, requested_by, priority, state,
-                               autonomy, budget_profile, expansion_profile, labels, idempotency_key)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'BACKLOG', %s, %s, %s, %s, %s)
+                               autonomy, budget_profile, expansion_profile, labels, idempotency_key, approve_plan)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'BACKLOG', %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (task_id, key, project["id"], title, artifact.id, principal.value, body.get("priority", "NORMAL"),
-             autonomy, budget_profile, body.get("expansion_profile"), body.get("labels", []), body["idempotency_key"]),
+             autonomy, budget_profile, body.get("expansion_profile"), body.get("labels", []), body["idempotency_key"],
+             bool(body.get("approve_plan"))),
         )
         task = uow.cur.fetchone()
         assert task is not None
@@ -204,6 +205,9 @@ class Tasks:
         updated = uow.cur.fetchone()
         if updated is None:
             raise Conflict(f"{task['key']} was modified concurrently; retry")
+        if result.state.value in ("DONE", "CANCELLED", "FAILED"):
+            uow.cur.execute("UPDATE clarifications SET state = 'CANCELLED', cancel_reason = %s WHERE task_id = %s AND state = 'PENDING'",
+                            (f"task {result.state.value.lower()}", task["id"]))
         data = {"from": current.value, "to": result.state.value, "trigger": trigger.value}
         record_event(
             uow.cur, "TASK_STATE_CHANGED", actor=actor, project_id=task["project_id"], task_id=task["id"],
@@ -271,7 +275,8 @@ class Tasks:
         new_task = self.create(
             uow, principal=principal,
             body={"project": found["slug"], "title": task["title"], "request": request_text, "priority": task["priority"],
-                  "budget_profile": task["budget_profile"], "idempotency_key": idempotency_key},
+                  "budget_profile": task["budget_profile"], "idempotency_key": idempotency_key,
+                  **({"approve_plan": True} if task.get("approve_plan") else {})},
             inherit_attachments_from=task["id"],  # the same files, so the retry sees what the original saw
         )
         uow.cur.execute(

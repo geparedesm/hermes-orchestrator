@@ -214,3 +214,27 @@ def test_shown_references_work_in_every_approval_command(monkeypatch):
     api.renew("#12")
     api.decide("#12", True)
     assert paths[0] == "/v1/approvals/12/renew" and "#" not in paths[1]
+
+
+def test_planning_answers_in_one_short_reply():
+    assert plugin.short_reply_command("r 21 1a 2b 3: Solo remotos") == "/orch answer 21 '1a 2b 3: Solo remotos'"
+    assert plugin.short_reply_command("respuesta #21 ok") == "/orch answer 21 ok"
+    assert plugin.short_reply_command("r 21") is None
+    assert plugin.parse_answers("1a 2B 3: only remote jobs, in Spain") == (
+        False, {"q1": {"option": "a"}, "q2": {"option": "b"}, "q3": {"text": "only remote jobs, in Spain"}})
+    assert plugin.parse_answers("OK") == (True, {})
+    with pytest.raises(plugin.ApiError):
+        plugin.parse_answers("whatever")
+
+
+def test_answers_are_a_human_action(monkeypatch):
+    calls = []
+
+    class Api:
+        def answer(self, number, **kw):
+            calls.append((number, kw))
+            return {"task": "T-21"}
+
+    assert "403" in str(pytest.raises(plugin.ApiError, plugin.run_verb, Api(), ["answer", "21", "ok"], human=False).value.status)
+    assert plugin.run_verb(Api(), ["answer", "21", "1a", "2b"], human=True).endswith("T-21; it plans again with them.") or calls
+    assert calls[-1] == ("21", {"answers": {"q1": {"option": "a"}, "q2": {"option": "b"}}, "use_recommended": False})
