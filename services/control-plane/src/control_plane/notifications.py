@@ -27,7 +27,7 @@ import httpx
 
 from .context import Context
 from .db import Row
-from . import notify_text
+from . import approval_details, notify_text
 from .events import record_event
 
 log = logging.getLogger(__name__)
@@ -106,14 +106,18 @@ class Outbox:
             projects = {r["id"]: r["slug"] for r in uow.cur.fetchall()}
             uow.cur.execute("SELECT * FROM approvals WHERE id::text = ANY(%s)", (approval_ids,))
             approvals = {str(r["id"]): r for r in uow.cur.fetchall()}
+            # What each pending decision changes (its first lines go into the message).
+            details = {key: approval_details.details(uow, row, self.ctx.platform.get("project_defaults") or {})
+                       for key, row in approvals.items() if row["state"] == "PENDING"}
         out = {}
         for row in rows:
             payload = row["payload"]
             task = tasks.get(payload.get("task_id") or "")
+            approval_id = (payload.get("data") or {}).get("approval_id") or ""
             out[str(row["id"])] = notify_text.Context(
                 task=task["key"] if task else None, title=task["title"] if task else None,
                 project=task["slug"] if task else projects.get(payload.get("project_id") or ""),
-                approval=approvals.get((payload.get("data") or {}).get("approval_id") or ""))
+                approval=approvals.get(approval_id), details=details.get(approval_id))
         return out
 
     def _send(self, rows: list[Row], request_id: str, body: Any) -> tuple[str | None, list[Row]]:

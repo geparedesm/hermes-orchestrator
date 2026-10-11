@@ -204,9 +204,49 @@
   // ------------------------------------------------------------ approvals
 
   // One decision, explained the way the chat explains it, with the two outcomes as the buttons.
+  const CHANGE_MARK = { "+": ["+", "good"], "-": ["−", "bad"], "~": ["~", "info"], "!": ["!", "warn"], "?": ["?", "info"] };
+  const RISK_TONE = { low: "muted", medium: "info", high: "warn", critical: "bad" };
+  const REQUESTERS = { "quality-gate": "the quality gate", orchestrator: "the orchestrator", "control-plane": "the platform" };
+  function requester(value) {
+    if (!value) return null;
+    const who = String(value).split(":").pop();
+    return REQUESTERS[who] || REQUESTERS[value] || who;
+  }
+
+  // What a decision changes, why it needs you, and what each answer does (approval_details on the server).
+  function ApprovalDetails(props) {
+    const d = props.details;
+    const [all, setAll] = useState(false);
+    if (!d) return null;
+    const changes = d.changes || [];
+    const shown = all ? changes : changes.slice(0, 5);
+    return h("div", { className: "orch-approval-details" },
+      changes.length ? h("div", null,
+        h("div", { className: "orch-approval-label" }, "What changes"),
+        h("ul", { className: "orch-changes" }, shown.map(function (c, i) {
+          const mark = CHANGE_MARK[c.kind] || ["•", "muted"];
+          return h("li", { key: i }, h("span", { className: "orch-change-mark orch-tone-" + mark[1] }, mark[0]), h("span", null, c.text));
+        })),
+        changes.length > 5 ? h("button", { type: "button", className: "orch-disclosure", onClick: function () { setAll(!all); } },
+          all ? "▾ Show fewer" : "▸ Show all " + changes.length + " changes") : null) : null,
+      d.why ? h("div", { className: "orch-approval-why" }, h("span", { className: "orch-approval-label" }, "Why you"), h("span", null, d.why)) : null,
+      d.if_yes || d.if_no ? h("div", { className: "orch-outcomes" },
+        d.if_yes ? h("div", { className: "orch-outcome orch-outcome-yes" }, h("strong", null, "If yes"), h("span", null, d.if_yes)) : null,
+        d.if_no ? h("div", { className: "orch-outcome orch-outcome-no" }, h("strong", null, "If no"), h("span", null, d.if_no)) : null) : null,
+      (d.facts || []).length || (d.links || []).length ? h("div", { className: "orch-approval-facts" },
+        (d.facts || []).filter(function (f) { return f[1] && f[1] !== "—"; }).map(function (f) {
+          return h("span", { key: f[0] }, h("span", { className: "orch-muted" }, f[0] + ": "), f[1]);
+        }),
+        (d.links || []).map(function (l) {
+          return h("a", { key: l.url, href: l.url, target: "_blank", rel: "noopener noreferrer", className: "orch-link" }, h(Icon, { name: "link", size: 13 }), l.label);
+        })) : null);
+  }
+
+  // One decision, explained the way the chat explains it, with the two outcomes as the buttons.
   function ApprovalCard(props) {
     const a = props.approval;
     const plain = a.plain || { question: a.summary, yes: "approve", no: "reject", reasons: [] };
+    const d = a.details;
     const [busy, setBusy] = useState(null);
     const [error, setError] = useState(null);
     function decide(decision) {
@@ -216,20 +256,26 @@
         .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(null); });
     }
     const expires = left(a.expires_at);
+    const risk = d && d.risk;
+    const who = d && requester(d.requested_by);
     return h("article", { className: "orch-approval" },
       h("div", { className: "orch-approval-head" },
         h("span", { className: "orch-approval-icon" }, h(Icon, { name: "alert", size: 16 })),
         h("strong", null, "Decision needed"),
         a.number !== undefined && a.number !== null ? h("span", { className: "orch-muted" }, "#" + a.number) : null,
+        risk ? h(Pill, { tone: RISK_TONE[risk] || "muted", title: "risk" }, risk + " risk") : null,
         expires ? h("span", { className: "orch-approval-expiry" }, h(Icon, { name: "clock", size: 13 }), expires) : null),
       a.task ? h("div", { className: "orch-approval-task" }, h(TaskLink, { task: a.task, open: props.open }),
         a.task_title ? h("span", null, a.task_title) : null, a.project ? h(Pill, null, a.project) : null)
         : a.project ? h("div", { className: "orch-approval-task" }, h(Pill, null, a.project)) : null,
       h("p", { className: "orch-approval-question" }, plain.question),
+      h(ApprovalDetails, { details: d }),
+      who || (d && d.requested_at) ? h("div", { className: "orch-muted orch-small" },
+        "Asked" + (who ? " by " + who : "") + (d && d.requested_at ? " · " + ago(d.requested_at) : "")) : null,
       h("div", { className: "orch-approval-actions" },
         h(Button, { kind: "good", icon: "check", disabled: !!busy, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : capital(plain.yes)),
         h(Button, { kind: "bad-outline", icon: "x", disabled: !!busy, onClick: function () { decide("REJECT"); } }, busy === "REJECT" ? "Saving…" : capital(plain.no)),
-        a.task && props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Details") : null),
+        a.task && props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Open task") : null),
       error ? h("div", { className: "orch-alert" }, error) : null);
   }
 

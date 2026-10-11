@@ -77,3 +77,12 @@ def test_options_say_what_really_happens_and_digests_name_projects():
     assert "queda bloqueada" in ask("SCOPE_EXPANSION", {"kind": "plan_expansion", "added": 3, "limit": 1})
     items = [({"type": "PROJECT_READY", "summary": "demo is ready"}, Context(project="demo"))]
     assert render_digest(items, "es") == "📋 *Avances* (1)\n• demo: proyecto listo"
+
+
+def test_a_decision_lists_its_first_changes():
+    ctx = Context(project="odoo-base", approval=approval("PROJECT_READY", {"config_id": "x"}),
+                  details={"changes": [{"kind": "+", "text": "Can create modules"}, {"kind": "~", "text": "Toolchain profiles: python → odoo"},
+                                       {"kind": "~", "text": "Command test: a → b"}, {"kind": "-", "text": "Network removed"}]})
+    text = render({"type": "APPROVAL_REQUIRED", "summary": "x"}, ctx, "en", now=NOW)
+    assert "*What changes:*\n➕ Can create modules\n✏️ Toolchain profiles: python → odoo\n✏️ Command test: a → b\n… and 1 more in the Dashboard" in text
+    assert "Qué cambia" in render({"type": "APPROVAL_REQUIRED", "summary": "x"}, ctx, "es", now=NOW)

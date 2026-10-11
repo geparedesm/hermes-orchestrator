@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from . import budgets, notify_text
+from . import approval_details, budgets, notify_text
 from .context import UnitOfWork
 from .db import Row
 
@@ -40,15 +40,17 @@ def _minutes(start: datetime | None, end: datetime | None = None) -> float | Non
     return round(((end or datetime.now(timezone.utc)) - start).total_seconds() / 60, 1)
 
 
-def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]) -> dict[str, Any]:
+def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any],
+            defaults: dict[str, Any] | None = None) -> dict[str, Any]:
     cur = uow.cur
     cur.execute("SELECT state, count(*) AS n FROM tasks GROUP BY state")
     states = {r["state"]: int(r["n"]) for r in cur.fetchall()}
 
-    cur.execute("SELECT a.id, a.number, a.action, a.subject, a.summary, a.risk, a.requested_at, a.expires_at, t.key AS task, "
-                "t.title AS task_title, p.slug AS project FROM approvals a LEFT JOIN tasks t ON t.id = a.task_id "
-                "LEFT JOIN projects p ON p.id = a.project_id WHERE a.state = 'PENDING' ORDER BY a.requested_at")
-    approvals = [_with_plain(r) for r in cur.fetchall()]
+    cur.execute("SELECT a.id, a.number, a.action, a.subject, a.summary, a.risk, a.requested_at, a.requested_by, a.expires_at, "
+                "a.project_id, a.task_id, t.key AS task, t.title AS task_title, p.slug AS project FROM approvals a "
+                "LEFT JOIN tasks t ON t.id = a.task_id LEFT JOIN projects p ON p.id = a.project_id "
+                "WHERE a.state = 'PENDING' ORDER BY a.requested_at")
+    approvals = [_with_plain(r, uow, defaults) for r in cur.fetchall()]
     cur.execute("SELECT t.key, t.title, t.state, t.state_reason, t.priority, t.updated_at, p.slug AS project FROM tasks t "
                 "JOIN projects p ON p.id = t.project_id WHERE t.state = ANY(%s) ORDER BY t.updated_at", (list(WAITING),))
     waiting = cur.fetchall()
@@ -109,9 +111,12 @@ def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]
     }
 
 
-def _with_plain(approval: Row) -> Row:
+def _with_plain(approval: Row, uow: UnitOfWork | None = None, defaults: dict[str, Any] | None = None) -> Row:
     plain = notify_text.plain_approval(approval, task=approval.get("task"), project=approval.get("project"))
-    return {**{k: v for k, v in approval.items() if k != "subject"}, "plain": plain}
+    out = {**{k: v for k, v in approval.items() if k not in ("subject", "project_id", "task_id")}, "plain": plain}
+    if uow is not None and approval.get("state", "PENDING") == "PENDING":
+        out["details"] = approval_details.details(uow, approval, defaults)
+    return out
 
 
 def recent_activity(uow: UnitOfWork, limit: int = 25) -> list[dict[str, Any]]:
@@ -158,10 +163,10 @@ def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
     edges = [{"from": keys[r["depends_on_subtask_id"]], "to": keys[r["subtask_id"]]} for r in cur.fetchall()
              if r["depends_on_subtask_id"] in keys]
 
-    cur.execute("SELECT a.id, a.number, a.action, a.subject, a.state, a.summary, a.risk, a.requested_at, a.expires_at, a.decided_by, "
-                "a.decided_at, %s AS task, p.slug AS project FROM approvals a JOIN projects p ON p.id = a.project_id "
-                "WHERE a.task_id = %s ORDER BY a.requested_at DESC", (task["key"], tid))
-    approvals = [_with_plain(r) for r in cur.fetchall()]
+    cur.execute("SELECT a.id, a.number, a.action, a.subject, a.state, a.summary, a.risk, a.requested_at, a.requested_by, a.expires_at, "
+                "a.decided_by, a.decided_at, a.project_id, a.task_id, %s AS task, p.slug AS project FROM approvals a "
+                "JOIN projects p ON p.id = a.project_id WHERE a.task_id = %s ORDER BY a.requested_at DESC", (task["key"], tid))
+    approvals = [_with_plain(r, uow) for r in cur.fetchall()]
     cur.execute("SELECT profile, state, limits, consumed, reserved FROM budgets WHERE task_id = %s", (tid,))
     budget = cur.fetchone()
     if budget is not None:  # runtime is computed from the task's start, not stored (budgets.runtime_minutes)
