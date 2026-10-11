@@ -90,6 +90,11 @@ def test_board_shows_active_and_recently_finished_tasks_with_progress(api, servi
     assert rows[done]["state"] == "CANCELLED"  # finished recently: still on the board
     assert rows[task]["project"] == "demo" and rows[task]["subtasks"] == 0 and rows[task]["subtasks_done"] == 0
     assert {"pending_approvals", "running"} <= set(rows[task])
+    with services.ctx.unit_of_work() as uow:  # finished history is limited apart: it never hides active work
+        from control_plane import dashboard
+
+        keys = [t["key"] for t in dashboard.board(uow, finished_limit=0)]
+    assert task in keys and done not in keys
 
 
 def test_approvals_are_explained_in_plain_words_and_activity_is_listed(api, services, agents, task):

@@ -161,6 +161,7 @@
   }
   function TaskLink(props) {
     if (!props.task) return null;
+    if (!props.open) return h("span", { className: "orch-key" }, props.task);
     return h("button", { type: "button", className: "orch-tasklink", onClick: function (e) { e.stopPropagation(); props.open(props.task); } }, props.task);
   }
   function Table(props) {

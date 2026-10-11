@@ -121,8 +121,9 @@ def recent_activity(uow: UnitOfWork, limit: int = 25) -> list[dict[str, Any]]:
     return [{**r, "tone": ACTIVITY[r["type"]][0], "label": ACTIVITY[r["type"]][1]} for r in uow.cur.fetchall()]
 
 
-def board(uow: UnitOfWork, finished_days: int = 7, limit: int = 200) -> list[dict[str, Any]]:
-    """Active tasks and those finished recently, with the progress of their current plan."""
+def board(uow: UnitOfWork, finished_days: int = 7, finished_limit: int = 50) -> list[dict[str, Any]]:
+    """Every active task and the most recent finished ones (limited apart, so history never hides active work),
+    with the progress of their current plan."""
     uow.cur.execute(
         """
         SELECT t.key, t.title, t.state, t.resume_state, t.state_reason, t.priority, t.risk, t.created_at, t.updated_at, t.completed_at,
@@ -135,10 +136,12 @@ def board(uow: UnitOfWork, finished_days: int = 7, limit: int = 200) -> list[dic
                (SELECT count(*) FROM executions e WHERE e.task_id = t.id
                 AND e.state IN ('REQUESTED', 'STARTING', 'RUNNING', 'STOPPING')) AS running
         FROM tasks t JOIN projects p ON p.id = t.project_id
-        WHERE t.state <> ALL(%s) OR t.updated_at > now() - make_interval(days => %s)
-        ORDER BY t.updated_at DESC LIMIT %s
+        WHERE t.id IN (SELECT id FROM tasks WHERE state <> ALL(%s))
+           OR t.id IN (SELECT id FROM tasks WHERE state = ANY(%s) AND updated_at > now() - make_interval(days => %s)
+                       ORDER BY updated_at DESC LIMIT %s)
+        ORDER BY t.updated_at DESC
         """,
-        (list(FINISHED), finished_days, limit),
+        (list(FINISHED), list(FINISHED), finished_days, finished_limit),
     )
     return [{**r, **{k: int(r[k]) for k in ("subtasks", "subtasks_done", "pending_approvals", "running")}}
             for r in uow.cur.fetchall()]
