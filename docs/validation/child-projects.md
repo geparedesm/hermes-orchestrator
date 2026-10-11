@@ -51,7 +51,13 @@ Odoo CLI flags were checked with `odoo-bin server --help` in the built image. Th
   - a confined, exclusive destination;
   - an approval bound to the parent SHA, the parameters, and the repository;
   - an addons layout in which Odoo finds the module.
-- **Codex review of the code:** see the PR.
+- **Codex review of the code** found three issues, all fixed:
+  - **P1:** a nested children path could be redirected by swapping a component for a link after the checks. Now
+    each component is opened relative to the previous one with `O_NOFOLLOW`, and Git runs in the opened directory
+    (`/proc/self/fd`). Elsewhere, the inode is checked before and after each step.
+  - **P2:** a renewed `CREATE_CHILD` approval left its creation pointing at the expired one. A renewer now moves the
+    creation to the new approval, and an expired creation can be abandoned to free its name.
+  - **P2:** destination uniqueness was global. It is now per parent.
 
 ## Not yet verified
 
