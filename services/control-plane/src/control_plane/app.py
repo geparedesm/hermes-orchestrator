@@ -37,6 +37,7 @@ from .budgets import BudgetExhausted
 from .executions import ExecutionRequest, Executions
 from .scheduler import Scheduler
 from .orchestration import Orchestration
+from .children import Children
 from .tasks import Tasks
 from .updates import Updates
 from .views import approval_view, config_view, execution_view, project_view
@@ -64,6 +65,7 @@ class Services:
     outbox: Outbox | None = None
     maintenance: Maintenance | None = None
     updates: Updates | None = None
+    children: Children | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None,
@@ -94,8 +96,10 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     maintenance = Maintenance(ctx)
     scheduler.hooks += [recovery.periodic, outbox.deliver, maintenance.tick]
     gate.on_evaluated.append(_request_merge_when_ready(git, orchestrator))
+    children = Children(ctx, projects, approvals)
+    scheduler.hooks.append(children.sync)
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
-                    verifications, reviews, gate, orchestrator, recovery, outbox, maintenance, Updates(ctx, approvals))
+                    verifications, reviews, gate, orchestrator, recovery, outbox, maintenance, Updates(ctx, approvals), children)
 
 
 def _request_merge_when_ready(git: GitChanges, orchestrator: Any = None) -> Any:
@@ -122,6 +126,12 @@ class RegisterProject(BaseModel):
     path: str = Field(min_length=1, max_length=1000, description="Host path inside the projects root, or a path relative to it")
     name: str | None = Field(default=None, max_length=100)
     slug: str | None = None
+
+
+class NewChild(BaseModel):
+    name: str = Field(min_length=2, max_length=41, pattern=r"^[a-z][a-z0-9_]{1,40}$")
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
 
 
 class Decision(BaseModel):
@@ -269,7 +279,34 @@ def create_app(services: Services) -> FastAPI:
     @app.get("/v1/projects")
     def list_projects(_: Identity = Depends(identity), include_unregistered: bool = False) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
-            return {"projects": [project_view(r) for r in services.projects.list(uow, include_unregistered=include_unregistered)]}
+            rows = services.projects.list(uow, include_unregistered=include_unregistered)
+            slugs = {r["id"]: r["slug"] for r in rows}
+            out = []
+            for row in rows:
+                config = services.projects.active_config(uow, row["id"])
+                settings = ((config or {}).get("effective_config") or {}).get("children")
+                out.append({**project_view(row), "parent": slugs.get(row.get("parent_project_id")),
+                            "children": {"label": settings.get("label") or "child project"} if settings else None})
+            return {"projects": out}
+
+    @app.get("/v1/projects/{slug}/children")
+    def list_children(slug: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return jsonable({"creations": services.children.list(uow, slug)})
+
+    @app.post("/v1/projects/{slug}/children")
+    def create_child(slug: str, body: NewChild, who: Principal = Depends(principal),
+                     idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            return 201, jsonable(services.children.request(uow, principal=who, slug=slug, name=body.name, title=body.title,
+                                                           description=body.description))
+        return idempotent(idempotency_key, who, {"op": "create-child", "slug": slug, **body.model_dump()}, command)
+
+    @app.post("/v1/projects/{slug}/children/{operation_id}/{verb}")
+    def child_action(slug: str, operation_id: UUID, verb: Literal["retry", "abandon"], who: Principal = Depends(principal)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            action = services.children.retry if verb == "retry" else services.children.abandon
+            return jsonable(action(uow, principal=who, slug=slug, operation_id=operation_id))
 
     @app.get("/v1/projects/{slug}")
     def get_project(slug: str, _: Identity = Depends(identity)) -> dict[str, Any]:

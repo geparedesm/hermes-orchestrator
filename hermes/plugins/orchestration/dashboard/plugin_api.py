@@ -60,6 +60,16 @@ class NewTaskBody(BaseModel):
     attachments: list[AttachmentBody] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
 
 
+class NewChildBody(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{1,40}$")
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    idempotency_key: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
+
+
+_SLUG = r"^[a-z0-9][a-z0-9-]{0,62}$"
+
+
 def _api():
     return _client.TaskApi(PRINCIPAL)
 
@@ -102,6 +112,13 @@ def projects() -> Any:
 @router.get("/workers")
 def workers() -> Any:
     return _call(_api().workers)
+
+
+@router.get("/projects/{slug}/children")
+def children(slug: str) -> Any:
+    if not re.match(_SLUG, slug):
+        raise HTTPException(status_code=404, detail="unknown project")
+    return _call(_api().children, slug)
 
 
 @router.get("/approvals")
@@ -169,6 +186,23 @@ def task_action(key: str, verb: str) -> Any:
     if verb not in TASK_ACTIONS:
         raise HTTPException(status_code=404, detail="unknown action")
     return _call(_api().action, key, verb)
+
+
+@router.post("/projects/{slug}/children")
+def create_child(slug: str, body: NewChildBody) -> Any:
+    """A new child project (an Odoo module of odoo-base). The control plane asks for a CREATE_CHILD approval
+    before anything is written; the Dashboard operator decides it like any other approval."""
+    if not re.match(_SLUG, slug):
+        raise HTTPException(status_code=404, detail="unknown project")
+    return _call(lambda: _api().create_child(slug, body.name, body.title.strip(), body.description.strip(),
+                                             idempotency_key=body.idempotency_key))
+
+
+@router.post("/projects/{slug}/children/{operation_id}/{verb}")
+def child_action(slug: str, operation_id: UUID, verb: Literal["retry", "abandon"]) -> Any:
+    if not re.match(_SLUG, slug):
+        raise HTTPException(status_code=404, detail="unknown project")
+    return _call(_api().child_action, slug, str(operation_id), verb)
 
 
 @router.post("/approvals/{approval_id}/renew")

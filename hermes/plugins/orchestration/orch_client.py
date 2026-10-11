@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -131,6 +132,18 @@ class TaskApi:
     def summary(self) -> Any:
         return self.call("GET", "/v1/dashboard/summary")
 
+    def children(self, slug: str) -> Any:
+        return self.call("GET", f"/v1/projects/{_slug(slug)}/children")
+
+    def create_child(self, slug: str, name: str, title: str, description: str, *, idempotency_key: str | None = None) -> Any:
+        return self.call("POST", f"/v1/projects/{_slug(slug)}/children", {"name": name, "title": title, "description": description},
+                         idempotency_key=idempotency_key)
+
+    def child_action(self, slug: str, operation_id: str, verb: str) -> Any:
+        if verb not in ("retry", "abandon"):
+            raise ApiError(400, f"unknown creation action {verb}")
+        return self.call("POST", f"/v1/projects/{_slug(slug)}/children/{urllib.parse.quote(operation_id, safe='')}/{verb}")
+
     def board(self) -> Any:
         return self.call("GET", "/v1/dashboard/board")
 
@@ -171,6 +184,12 @@ def _key(key: str) -> str:
 
 
 # ---------------------------------------------------------------- rendering
+
+
+def _slug(slug: str) -> str:
+    if not re.match(r"^[a-z0-9][a-z0-9-]{0,62}$", slug or ""):
+        raise ApiError(400, "invalid project")
+    return slug
 
 
 def task_line(task: dict[str, Any]) -> str:

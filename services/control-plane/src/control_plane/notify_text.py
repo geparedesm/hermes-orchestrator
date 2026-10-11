@@ -84,6 +84,9 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
                                   "no, keep the current one"),
         "ENVIRONMENT_ACCESS": ("{summary}. Allow it?", "yes, allow it", "no"),
         "UPDATE": ("Update the platform from *{from_version}* to *{to_version}*?", "yes, update", "no, not now"),
+        "CREATE_CHILD": ("Create *{child}* ({child_title}) in project *{project}*: a new folder {child_path} and the "
+                         "{visibility} GitHub repository *{child_repo}*, from the template at {parent_sha}?",
+                         "yes, create it", "no, don't create it"),
         "REQUEST": ("Claude asks:\n_{text}_", "yes, go ahead", "no, stop the task"),
         "OTHER": ("{summary}", "yes", "no"),
     },
@@ -107,6 +110,9 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
                                   "no, mantener la actual"),
         "ENVIRONMENT_ACCESS": ("{summary}. ¿Lo permito?", "sí, permitirlo", "no"),
         "UPDATE": ("¿Actualizo la plataforma de *{from_version}* a *{to_version}*?", "sí, actualizar", "ahora no"),
+        "CREATE_CHILD": ("¿Creo *{child}* ({child_title}) en el proyecto *{project}*: una carpeta nueva {child_path} y el "
+                         "repositorio {visibility_es} de GitHub *{child_repo}*, desde la plantilla en {parent_sha}?",
+                         "sí, créalo", "no, no lo crees"),
         "REQUEST": ("Claude pregunta:\n_{text}_", "sí, adelante", "no, para la tarea"),
         "OTHER": ("{summary}", "sí", "no"),
     },
@@ -223,6 +229,12 @@ def _approval_parts(approval: dict[str, Any], task: str | None, project: str | N
         "reasons": "\n".join(f"• {r}" for r in _reasons(summary, lang)),
         "project": project or "", "summary": summary, "text": str(subject.get("text") or summary)[:600],
         "from_version": subject.get("from_version", "?"), "to_version": subject.get("to_version", "?"),
+        "child": subject.get("name", "?"), "child_title": (subject.get("params") or {}).get("title", ""),
+        "child_repo": f"{subject.get('owner', '?')}/{subject.get('repo', '?')}",
+        "child_path": f"{subject.get('children_path', '?')}/{subject.get('name', '?')}",
+        "visibility": "private" if subject.get("private", True) else "public",
+        "visibility_es": "privado" if subject.get("private", True) else "público",
+        "parent_sha": str(subject.get("parent_sha") or "?")[:12],
     }
     return kind, question, yes, no, fields
 

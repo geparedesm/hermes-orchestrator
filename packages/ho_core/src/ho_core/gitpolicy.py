@@ -101,6 +101,41 @@ def verify_merge(key: bytes, token: dict[str, Any], *, now: datetime | None = No
     return {"approval_id": body["approval_id"], **subject}
 
 
+# Everything a child-project creation uses, pinned when it is requested (docs/design/child-projects.md).
+CHILD_SUBJECT_KEYS = ("operation_id", "parent", "parent_sha", "template_path", "template_tree", "children_path", "name",
+                      "params", "owner", "repo", "private", "commit_message")
+CHILD_NAME = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
+
+
+def sign_child(key: bytes, *, approval_id: str, subject: dict[str, Any], expires_at: datetime) -> dict[str, Any]:
+    """Authorization for exactly one child creation: the approved, pinned subject, the approval ID, and an expiry."""
+    body = {"approval_id": approval_id, "subject": {k: subject.get(k) for k in CHILD_SUBJECT_KEYS},
+            "expires_at": expires_at.astimezone(timezone.utc).isoformat()}
+    return {**body, "signature": hmac.new(key, _canonical({"child": body}), hashlib.sha256).hexdigest()}
+
+
+def verify_child(key: bytes, token: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    """Return the approved subject, or raise GitPolicyError if the token is forged, altered, expired, or loose."""
+    try:
+        body = {"approval_id": str(token["approval_id"]), "subject": dict(token["subject"]), "expires_at": str(token["expires_at"])}
+        signature = str(token["signature"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GitPolicyError("malformed child-project authorization") from exc
+    expected = hmac.new(key, _canonical({"child": body}), hashlib.sha256).hexdigest()
+    if not key or not hmac.compare_digest(signature, expected):
+        raise GitPolicyError("child-project authorization signature is invalid")
+    if datetime.fromisoformat(body["expires_at"]) <= (now or datetime.now(timezone.utc)):
+        raise GitPolicyError("child-project authorization has expired")
+    subject = body["subject"]
+    if set(subject) != set(CHILD_SUBJECT_KEYS):
+        raise GitPolicyError("child-project authorization subject is incomplete")
+    if not (valid_sha(subject["parent_sha"] or "") and valid_sha(subject["template_tree"] or "")):
+        raise GitPolicyError("child-project authorization must bind exact objects")
+    if not CHILD_NAME.match(str(subject["name"] or "")):
+        raise GitPolicyError("invalid child name")
+    return {"approval_id": body["approval_id"], **subject}
+
+
 # --------------------------------------------------------------------------
 # Human change classification (section 37)
 # --------------------------------------------------------------------------

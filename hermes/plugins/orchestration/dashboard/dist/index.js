@@ -448,33 +448,139 @@
 
   // ------------------------------------------------------------ projects view
 
-  const PROJECT_STATUS = { PROJECT_READY: ["Ready", "good"], SCANNING: ["Scanning", "info"], AWAITING_APPROVAL: ["Needs approval", "warn"],
-    SUSPENDED: ["Suspended", "bad"], UNREGISTERED: ["Removed", "muted"] };
+  const PROJECT_STATUS = { PROJECT_READY: ["Ready", "good"], PROPOSED: ["Needs your approval", "warn"], REGISTERED: ["Registered", "info"],
+    DRIFT_DETECTED: ["Configuration changed", "warn"], SUSPENDED: ["Suspended", "bad"], UNREGISTERED: ["Removed", "muted"] };
+  const CREATION = { AWAITING_APPROVAL: ["Waiting for your approval", "warn"], RUNNING: ["Creating…", "info"],
+    NEEDS_RECOVERY: ["Stopped: needs you", "bad"], DONE: ["Created", "good"], REJECTED: ["Rejected", "muted"],
+    INVALIDATED: ["Request again: the parent changed", "muted"], FAILED: ["Abandoned", "muted"] };
+
+  function projectStats(tasks, slug) {
+    const mine = tasks.filter(function (t) { return t.project === slug; });
+    return { active: mine.filter(function (t) { return FINISHED.indexOf(t.state) < 0; }).length,
+      needs: mine.filter(function (t) { return WAITING.indexOf(t.state) >= 0; }).length };
+  }
+  function ChildRow(props) {
+    const c = props.project;
+    const st = PROJECT_STATUS[c.status] || [c.status, "muted"];
+    const stats = projectStats(props.tasks, c.slug);
+    return h("li", { className: "orch-child" },
+      h(Icon, { name: "folder", size: 14 }),
+      h("div", { className: "orch-child-body" }, h("strong", { className: "orch-ellipsis" }, c.slug),
+        h("div", { className: "orch-muted orch-small orch-ellipsis" }, stats.active + " active" + (stats.needs ? " · " + stats.needs + " need you" : ""))),
+      h(Pill, { tone: st[1] }, st[0]),
+      c.status === "PROJECT_READY" ? h(Button, { small: true, icon: "plus", onClick: function () { props.create(c.slug); } }, "Task") : null,
+      h(Button, { small: true, onClick: function () { props.filter(c.slug); } }, "Tasks"));
+  }
+  // Creations of a parent's children: waiting for approval, running, or stopped for a person.
+  function Creations(props) {
+    const list = usePoll("/projects/" + props.slug + "/children");
+    const [busy, setBusy] = useState(null);
+    const [error, setError] = useState(null);
+    if (!list.data) return list.error ? h("div", { className: "orch-alert" }, list.error) : null;
+    const live = list.data.creations.filter(function (c) { return ["AWAITING_APPROVAL", "RUNNING", "NEEDS_RECOVERY"].indexOf(c.state) >= 0; });
+    if (!live.length) return null;
+    function act(c, verb) {
+      setBusy(c.id + verb);
+      setError(null);
+      post("/projects/" + props.slug + "/children/" + c.id + "/" + verb).then(list.reload)
+        .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(null); });
+    }
+    return h("ul", { className: "orch-creations" }, live.map(function (c) {
+      const expired = c.state === "AWAITING_APPROVAL" && (c.approval_state === "EXPIRED" || c.approval_state === "INVALIDATED");
+      const st = expired ? ["Approval expired", "muted"] : CREATION[c.state] || [c.state, "muted"];
+      return h("li", { key: c.id, className: "orch-creation" },
+        h("div", { className: "orch-row" }, h("strong", null, c.name), c.title ? h("span", { className: "orch-muted" }, c.title) : null,
+          h(Pill, { tone: st[1], className: "orch-right" }, st[0])),
+        h("div", { className: "orch-muted orch-small" }, c.destination + " · " + c.github_repo +
+          (c.state === "AWAITING_APPROVAL" && !expired ? " · approve it in Needs you" + (c.approval_number ? " (#" + c.approval_number + ")" : "") : "")),
+        c.error ? h("div", { className: "orch-reason" }, c.error) : null,
+        expired ? h("div", { className: "orch-row" },
+          h("span", { className: "orch-small" }, "Request it again from Approvals › Expired, or abandon it to free the name."),
+          h(Button, { kind: "bad-outline", small: true, disabled: !!busy, onClick: function () { act(c, "abandon"); } }, "Abandon")) : null,
+        c.state === "NEEDS_RECOVERY" ? h("div", { className: "orch-row" },
+          h("span", { className: "orch-small" }, "Move or remove what is in the way, then retry. Nothing was deleted."),
+          h(Button, { kind: "primary", small: true, icon: "retry", disabled: !!busy, onClick: function () { act(c, "retry"); } }, "Retry"),
+          h(Button, { kind: "bad-outline", small: true, disabled: !!busy, onClick: function () { act(c, "abandon"); } }, "Abandon")) : null);
+    }), error ? h("div", { className: "orch-alert" }, error) : null);
+  }
+
   function Projects(props) {
     const projects = usePoll("/projects");
     const board = usePoll("/board");
+    const [newChild, setNewChild] = useState(null);
     if (!projects.data) return h(Loading, { error: projects.error });
     const list = (projects.data.projects || []).filter(function (p) { return p.status !== "UNREGISTERED"; });
     if (!list.length) return h(Empty, { icon: "folder", title: "No projects yet", text: "Register one from chat or the CLI: ho project register <path>." });
     const tasks = (board.data && board.data.tasks) || [];
-    return h("div", { className: "orch-project-grid" }, list.map(function (p) {
-      const mine = tasks.filter(function (t) { return t.project === p.slug; });
-      const active = mine.filter(function (t) { return FINISHED.indexOf(t.state) < 0; }).length;
-      const needs = mine.filter(function (t) { return WAITING.indexOf(t.state) >= 0; }).length;
-      const st = PROJECT_STATUS[p.status] || [p.status, "muted"];
-      return h("article", { key: p.slug, className: "orch-project" },
-        h("div", { className: "orch-project-head" }, h("span", { className: "orch-project-icon" }, h(Icon, { name: "folder", size: 18 })),
-          h("div", null, h("strong", null, p.slug), h("div", { className: "orch-muted orch-small orch-ellipsis" }, p.host_path || p.name)),
-          h(Pill, { tone: st[1], className: "orch-right" }, st[0])),
-        h("div", { className: "orch-project-facts" },
-          h("span", null, h(Icon, { name: "branch", size: 13 }), " ", p.default_branch || "—"),
-          h("span", null, active + " active"), needs ? h("span", { className: "orch-text-warn" }, needs + " need you") : null,
-          h("span", { className: "orch-muted" }, "since " + new Date(p.registered_at).toLocaleDateString())),
-        p.git_remote ? h("div", { className: "orch-muted orch-small orch-ellipsis" }, p.git_remote) : null,
-        h("div", { className: "orch-row" },
-          p.status === "PROJECT_READY" ? h(Button, { kind: "primary", small: true, icon: "plus", onClick: function () { props.create(p.slug); } }, "New task") : null,
-          h(Button, { small: true, onClick: function () { props.filter(p.slug); } }, "Show tasks")));
-    }));
+    const slugs = list.map(function (p) { return p.slug; });
+    const top = list.filter(function (p) { return !p.parent || slugs.indexOf(p.parent) < 0; });
+    return h("div", null,
+      h("div", { className: "orch-project-grid" }, top.map(function (p) {
+        const stats = projectStats(tasks, p.slug);
+        const st = PROJECT_STATUS[p.status] || [p.status, "muted"];
+        const kids = list.filter(function (c) { return c.parent === p.slug; });
+        const label = p.children ? p.children.label : null;
+        return h("article", { key: p.slug, className: cx("orch-project", (label || kids.length) && "orch-project-parent") },
+          h("div", { className: "orch-project-head" }, h("span", { className: "orch-project-icon" }, h(Icon, { name: "folder", size: 18 })),
+            h("div", null, h("strong", null, p.slug), h("div", { className: "orch-muted orch-small orch-ellipsis" }, p.host_path || p.name)),
+            h(Pill, { tone: st[1], className: "orch-right" }, st[0])),
+          h("div", { className: "orch-project-facts" },
+            h("span", null, h(Icon, { name: "branch", size: 13 }), " ", p.default_branch || "—"),
+            h("span", null, stats.active + " active"), stats.needs ? h("span", { className: "orch-text-warn" }, stats.needs + " need you") : null,
+            h("span", { className: "orch-muted" }, "since " + new Date(p.registered_at).toLocaleDateString())),
+          p.git_remote ? h("div", { className: "orch-muted orch-small orch-ellipsis" }, p.git_remote) : null,
+          h("div", { className: "orch-row" },
+            p.status === "PROJECT_READY" ? h(Button, { kind: "primary", small: true, icon: "plus", onClick: function () { props.create(p.slug); } }, "New task") : null,
+            label && p.status === "PROJECT_READY" ? h(Button, { small: true, icon: "plus", onClick: function () { setNewChild(p); } }, "New " + label) : null,
+            h(Button, { small: true, onClick: function () { props.filter(p.slug); } }, "Show tasks")),
+          label || kids.length ? h("div", { className: "orch-children" },
+            h("div", { className: "orch-small orch-muted orch-children-title" }, capital((label || "child project") + "s") + " (" + kids.length + ")"),
+            kids.length ? h("ul", { className: "orch-child-list" }, kids.map(function (c) {
+              return h(ChildRow, { key: c.slug, project: c, tasks: tasks, create: props.create, filter: props.filter });
+            })) : h("div", { className: "orch-muted orch-small" }, "None yet."),
+            label ? h(Creations, { slug: p.slug }) : null) : null);
+      })),
+      newChild ? h(NewChild, { parent: newChild, close: function () { setNewChild(null); }, done: function () { setNewChild(null); projects.reload(); props.go("home"); } }) : null);
+  }
+
+  // A child project from the parent's template. The control plane asks for an approval before anything is created.
+  function NewChild(props) {
+    const p = props.parent;
+    const label = p.children.label;
+    const [form, setForm] = useState({ name: "", title: "", description: "" });
+    const [key] = useState(newKey);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const valid = /^[a-z][a-z0-9_]{1,40}$/.test(form.name);
+    function field(name) {
+      return function (e) { const value = e.target.value; setForm(function (f) { const n = Object.assign({}, f); n[name] = value; return n; }); };
+    }
+    function submit(e) {
+      e.preventDefault();
+      setBusy(true);
+      setError(null);
+      post("/projects/" + p.slug + "/children", { name: form.name, title: form.title, description: form.description, idempotency_key: key })
+        .then(props.done).catch(function (e) { setError(message(e)); setBusy(false); });
+    }
+    return h("div", { className: "orch-overlay orch-overlay-center", onClick: function () { if (!busy) props.close(); } },
+      h("div", { className: "orch-modal", role: "dialog", "aria-label": "New " + label, onClick: function (e) { e.stopPropagation(); } },
+        h("header", { className: "orch-panel-head" }, h("div", { className: "orch-panel-title" }, h("h2", null, "New " + label + " in " + p.slug),
+          h("div", { className: "orch-muted orch-small" }, "Created from the template " + p.slug + " versions, with its development rules, as its own private repository.")),
+        h(Button, { kind: "ghost", icon: "x", label: "Close", onClick: props.close })),
+        h("form", { className: "orch-form", onSubmit: submit },
+          h("label", null, h("span", null, "Technical name"), h("input", { value: form.name, onChange: field("name"), required: true, autoFocus: true,
+            maxLength: 41, placeholder: "job_alerts", pattern: "[a-z][a-z0-9_]{1,40}" }),
+          h("span", { className: cx("orch-small", form.name && !valid ? "orch-text-warn" : "orch-muted") },
+            "Lowercase letters, digits, and underscores, starting with a letter. It names the folder and the repository.")),
+          h("label", null, h("span", null, "Title"), h("input", { value: form.title, onChange: field("title"), required: true, maxLength: 120, placeholder: "Job alerts" })),
+          h("label", null, h("span", null, "Description"), h("textarea", { value: form.description, onChange: field("description"), rows: 3, maxLength: 500,
+            placeholder: "What this " + label + " is for, in one or two sentences." })),
+          h("div", { className: "orch-callout orch-small" }, "Nothing is created yet: you will get a decision card saying exactly what will be made " +
+            "(folder, GitHub repository, template version). Approve it and the " + label + " appears here, ready for its configuration approval."),
+          error ? h("div", { className: "orch-alert" }, error) : null,
+          h("div", { className: "orch-form-actions" },
+            h(Button, { onClick: props.close, disabled: busy }, "Cancel"),
+            h(Button, { kind: "primary", type: "submit", icon: "plus", disabled: busy || !valid || !form.title.trim() }, busy ? "Requesting…" : "Request " + label)))));
   }
 
   // ------------------------------------------------------------ system view
