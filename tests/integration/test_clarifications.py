@@ -216,3 +216,28 @@ def test_answers_stay_in_context_past_long_requirements_and_oversized_ones_are_r
     response = answer(api, task, pending_round(services, task)["number"], use_recommended=True)
     assert response.status_code == 409 and "size limit" in response.json()["message"]
     assert state(api, task) == "APPROVAL_REQUIRED"  # nothing applied: still waiting, answers not lost
+
+
+def test_a_revised_supervised_plan_starts_nothing_until_a_new_plan_is_approved(api, services, agents, projects_root):
+    task = make_task(api, services, projects_root, yaml=SUPERVISED)
+    plan(services, agents, task)
+    api.post(f"/v1/tasks/{task}/revise", {"text": "Also a goodbye endpoint."})
+    services.scheduler.run_once()
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "a", "provider": "codex"})
+    assert actions(services, task)[-1][:2] == ("REQUEST_EXECUTION", "REJECTED") and not active(services, task, "DEVELOPER")
+
+
+def test_a_supervised_task_keeps_supervision_when_retried(api, services, agents, projects_root):
+    task = make_task(api, services, projects_root, approve_plan=True)
+    api.post(f"/v1/tasks/{task}/cancel")
+    retried = api.post(f"/v1/tasks/{task}/retry").json()
+    assert api.get(f"/v1/tasks/{retried['key']}").json()["approve_plan"] is True
+
+
+def test_cancelling_removes_the_question_card(api, services, agents, task):
+    ask(services, agents, task)
+    api.post(f"/v1/tasks/{task}/cancel")
+    summary = api.get("/v1/dashboard/summary", token=PLUGIN_TOKEN, principal="dashboard:operator").json()
+    assert summary["required_actions"]["clarifications"] == []
+    [row] = q(services, "SELECT c.state FROM clarifications c JOIN tasks t ON t.id = c.task_id WHERE t.key = %s", task)
+    assert row["state"] == "CANCELLED"

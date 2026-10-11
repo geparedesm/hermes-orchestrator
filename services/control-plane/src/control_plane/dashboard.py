@@ -53,7 +53,7 @@ def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]
     approvals = [_with_plain(r, uow, defaults) for r in cur.fetchall()]
     cur.execute("SELECT c.id, c.number, c.questions, c.asked_at, t.key AS task, t.title AS task_title, p.slug AS project "
                 "FROM clarifications c JOIN tasks t ON t.id = c.task_id JOIN projects p ON p.id = t.project_id "
-                "WHERE c.state = 'PENDING' ORDER BY c.asked_at")
+                "WHERE c.state = 'PENDING' AND t.state NOT IN ('DONE', 'CANCELLED', 'FAILED') ORDER BY c.asked_at")
     clarifications = cur.fetchall()
     cur.execute("SELECT t.key, t.title, t.state, t.state_reason, t.priority, t.updated_at, p.slug AS project FROM tasks t "
                 "JOIN projects p ON p.id = t.project_id WHERE t.state = ANY(%s) ORDER BY t.updated_at", (list(WAITING),))

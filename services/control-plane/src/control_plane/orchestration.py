@@ -290,6 +290,12 @@ class Orchestration:
                 if epoch is not None and (lease is None or int(lease["epoch"]) != int(epoch)):
                     self._event(uow, task, "LAUNCH_DROPPED", f"{row['kind'].lower()} decided under an older lease epoch")
                     continue
+                if row["kind"] in ("DEVELOP", "FIX"):
+                    try:
+                        self._check_plan_approved(uow, task)
+                    except Conflict as exc:
+                        self._event(uow, task, "LAUNCH_DROPPED", f"{row['kind'].lower()} dropped: {exc}")
+                        continue
                 subtask = None
                 if row["subtask_id"]:
                     uow.cur.execute("SELECT * FROM subtasks WHERE id = %s", (row["subtask_id"],))
@@ -903,6 +909,8 @@ class Orchestration:
     def _request_plan_approval(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], version: int) -> str:
         subject = self._plan_subject(uow, task, version)
         uow.cur.execute("UPDATE tasks SET plan_approval_version = %s, plan_approval_state = 'PENDING' WHERE id = %s", (version, task["id"]))
+        # Developer launches queued under an earlier plan wait for this one's decision: they are dropped.
+        uow.cur.execute("DELETE FROM pending_launches WHERE task_id = %s AND kind IN ('DEVELOP', 'FIX')", (task["id"],))
         self.approvals.request(uow, action=ApprovalAction.PLAN, project_id=task["project_id"], task_id=task["id"], subject=subject,
                                config_hash=self._config(uow, task)["_hash"], risk=Risk.MEDIUM, requested_by="orchestrator",
                                summary=f"{task['key']}: review plan v{version} ({len(subject['subtasks'])} subtask(s)) before work starts",
@@ -911,9 +919,14 @@ class Orchestration:
             self._move(uow, task, S.APPROVAL_REQUIRED, reason=f"plan v{version} waits for your approval")
         return f"version {version}: waiting for the person's approval"
 
-    def _check_plan_approved(self, task: Row) -> None:
-        if task.get("plan_approval_state") in ("PENDING", "REJECTED") and task.get("plan_approval_version") == task["current_plan_version"]:
-            raise Conflict(f"plan v{task['current_plan_version']} is not approved yet; no subtask starts before it is")
+    def _check_plan_approved(self, uow: UnitOfWork, task: Row) -> None:
+        """A supervised task starts work only on a plan explicitly approved: missing approval state is not permission
+        (a revision or a failed consumption clears it, and the plan must be approved again)."""
+        if not task["current_plan_version"]:
+            return
+        approved = task.get("plan_approval_state") == "APPROVED" and task.get("plan_approval_version") == task["current_plan_version"]
+        if not approved and (self._supervised(uow, task) or task.get("plan_approval_state") in ("PENDING", "REJECTED")):
+            raise Conflict(f"plan v{task['current_plan_version']} is not approved; no subtask starts before it is")
 
     def _on_plan_decision(self, uow: UnitOfWork, approval: Row, approved: bool, principal: Principal) -> None:
         task = self._task(uow, approval["task_id"])
@@ -1006,7 +1019,7 @@ class Orchestration:
                            "verification and reviews run automatically")
         if subtask["state"] not in ("READY", "FIX_REQUIRED"):
             raise Conflict(f"{subtask['key']} is {subtask['state']}")
-        self._check_plan_approved(task)
+        self._check_plan_approved(uow, task)
         if task["state"] == S.PLANNING and task["current_plan_version"]:
             task = self._move(uow, task, S.QUEUED, reason="plan accepted")  # a plan exists (for example after a release)
         if task["state"] not in (S.QUEUED, S.RUNNING, S.FIX_REQUIRED):
@@ -1027,7 +1040,7 @@ class Orchestration:
     def _develop(self, uow: UnitOfWork, task: Row, subtask: Row, provider: str, *, extra: str, epoch: int | None,
                  kind: str, fresh: bool = False, retry: bool = False) -> Row | None:
         """Launch a developer execution for a subtask in its workspace (a fresh one for a new attempt)."""
-        self._check_plan_approved(self._task(uow, task["id"]))  # no subtask starts before its supervised plan is approved
+        self._check_plan_approved(uow, self._task(uow, task["id"]))  # no subtask starts before its supervised plan is approved
         workspace = None
         if subtask["workspace_id"] and not fresh:
             uow.cur.execute("SELECT * FROM workspaces WHERE id = %s AND status = 'ACTIVE'", (subtask["workspace_id"],))
@@ -1509,9 +1522,11 @@ class Orchestration:
             raise Conflict(f"{task_key} is {task['state']}")
         version = self._set_requirements(uow, task, text, source="USER", reason=f"revised by {principal.value}")
         if self._cancel_planning_waits(uow, task, "requirements revised") and task["state"] == S.APPROVAL_REQUIRED \
-                and task["resume_state"] == S.PLANNING:
-            task = self.tasks.transition(uow, self._task(uow, task["id"]), S.PLANNING, trigger=Trigger.USER, actor=principal.value,
-                                         reason="requirements revised: planning again")
+                and task["resume_state"]:
+            # Back to where the wait started (PLANNING, or active work for a re-plan); the revision event makes the
+            # orchestrator plan again, and a supervised plan asks for a new decision.
+            task = self.tasks.transition(uow, self._task(uow, task["id"]), S(task["resume_state"]), trigger=Trigger.USER,
+                                         actor=principal.value, reason="requirements revised: planning again")
         self._event(uow, task, "REQUIREMENTS_REVISED", f"requirements revised by {principal.value} ({version}); impact analysis "
                     "follows: keep, replan, cancel, or add subtasks", {"version": version}, actor=principal.value)
         if task["state"] == S.READY_FOR_MERGE:

@@ -205,6 +205,9 @@ class Tasks:
         updated = uow.cur.fetchone()
         if updated is None:
             raise Conflict(f"{task['key']} was modified concurrently; retry")
+        if result.state.value in ("DONE", "CANCELLED", "FAILED"):
+            uow.cur.execute("UPDATE clarifications SET state = 'CANCELLED', cancel_reason = %s WHERE task_id = %s AND state = 'PENDING'",
+                            (f"task {result.state.value.lower()}", task["id"]))
         data = {"from": current.value, "to": result.state.value, "trigger": trigger.value}
         record_event(
             uow.cur, "TASK_STATE_CHANGED", actor=actor, project_id=task["project_id"], task_id=task["id"],
@@ -272,7 +275,8 @@ class Tasks:
         new_task = self.create(
             uow, principal=principal,
             body={"project": found["slug"], "title": task["title"], "request": request_text, "priority": task["priority"],
-                  "budget_profile": task["budget_profile"], "idempotency_key": idempotency_key},
+                  "budget_profile": task["budget_profile"], "idempotency_key": idempotency_key,
+                  **({"approve_plan": True} if task.get("approve_plan") else {})},
             inherit_attachments_from=task["id"],  # the same files, so the retry sees what the original saw
         )
         uow.cur.execute(
