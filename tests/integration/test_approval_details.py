@@ -126,3 +126,18 @@ def test_a_merge_lists_what_is_included_and_links_the_pull_request(api, services
     assert texts(approval) == ["S1: Search connectors"]
     assert approval["details"]["links"] == [{"label": "Pull request #4", "url": "https://github.com/x/y/pull/4"}]
     assert approval["details"]["if_yes"].startswith("Pull request #4 is merged into main")
+
+
+def test_budget_details_show_computed_runtime_and_unlimited_outcomes(api, services, projects_root):
+    from ho_core.enums import ApprovalAction
+
+    key, row = _task(api, services, projects_root)
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE tasks SET started_at = now() - interval '90 minutes' WHERE id = %s", (row["id"],))
+    with services.ctx.unit_of_work() as uow:
+        services.approvals.request(uow, action=ApprovalAction.BUDGET_UNLIMITED, project_id=row["project_id"], task_id=row["id"],
+                                   subject={}, config_hash="0" * 64, summary=f"{key}: unlimited", requested_by="test")
+    [approval] = pending(api, "BUDGET_UNLIMITED")
+    runtime = next(t for t in texts(approval) if t.startswith("working time"))
+    assert runtime.startswith("working time (min): 90 used of ") or runtime.startswith("working time (min): 89 used of ")
+    assert approval["details"]["if_no"] == "The task continues with its current, limited budget."

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from . import budgets
 from .context import UnitOfWork
 from .db import Row
 
@@ -180,6 +181,9 @@ def _budget(uow: UnitOfWork, approval: Row, unlimited: bool) -> dict[str, Any]:
     add = (approval["subject"] or {}).get("add") or {}
     uow.cur.execute("SELECT limits, consumed FROM budgets WHERE task_id = %s", (approval["task_id"],))
     budget = uow.cur.fetchone() or {"limits": {}, "consumed": {}}
+    task = _task(uow, approval)
+    if task is not None:  # runtime is computed from the task's timestamps, not stored (budgets.runtime_minutes)
+        budget = {**budget, "consumed": {**budget["consumed"], "runtime_minutes": round(budgets.runtime_minutes(task))}}
     if unlimited:
         changes = [{"kind": "~", "text": f"{COUNTERS.get(k, k)}: {budget['consumed'].get(k, 0)} used of {v} → no limit"}
                    for k, v in budget["limits"].items() if v is not None]
@@ -193,7 +197,8 @@ def _budget(uow: UnitOfWork, approval: Row, unlimited: bool) -> dict[str, Any]:
                else "An unlimited budget removes every limit on this task; only a person may allow it.",
         "if_yes": "The limits are raised and the task resumes where it stopped." if not unlimited
                   else "The task runs without budget limits until it finishes.",
-        "if_no": "The task stays paused; you can still cancel it or raise less.",
+        "if_no": "The task stays paused; you can still cancel it or raise less." if not unlimited
+                 else "The task continues with its current, limited budget.",
         "facts": [], "links": [],
     }
 
