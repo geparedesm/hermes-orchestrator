@@ -192,8 +192,20 @@ def render_digest(items: list[tuple[dict[str, Any], Context]], lang: str = "en",
     return "\n".join(lines)
 
 
-def _approval(ctx: Context, lang: str, now: datetime) -> str:
-    approval = ctx.approval or {}
+def plain_approval(approval: dict[str, Any], *, task: str | None = None, project: str | None = None,
+                   lang: str = "en") -> dict[str, Any]:
+    """What an approval asks and what yes and no do, in plain words without chat markup (the Dashboard)."""
+    kind, question, yes, no, fields = _approval_parts(approval, task, project, lang)
+
+    def plain(template: str) -> str:
+        return template.replace("*", "").replace("_{", "{").replace("}_", "}").format(**fields)
+
+    return {"kind": kind, "question": plain(question), "yes": plain(yes), "no": plain(no),
+            "reasons": _reasons(fields["summary"], lang) if kind == "GATE" else []}
+
+
+def _approval_parts(approval: dict[str, Any], task: str | None, project: str | None,
+                    lang: str) -> tuple[str, str, str, str, dict[str, Any]]:
     subject = approval.get("subject") or {}
     action = str(approval.get("action") or "")
     kind = action
@@ -202,16 +214,22 @@ def _approval(ctx: Context, lang: str, now: datetime) -> str:
     elif action == "SCOPE_EXPANSION" and subject.get("kind") != "plan_expansion":
         kind = "REQUEST"  # the orchestrator's own question (REQUEST_APPROVAL), shown as asked
     question, yes, no = _APPROVAL[lang].get(kind, _APPROVAL[lang]["OTHER"])
-    summary = _strip_task(str(approval.get("summary") or action), ctx.task)
+    summary = _strip_task(str(approval.get("summary") or action), task)
     fields = {
         "branch": subject.get("target_branch") or "main",
         "assumption": str(subject.get("assumption") or summary)[:500],
         "added": subject.get("added", "?"), "limit": subject.get("limit", "?"),
         "budget": ", ".join(f"+{v} {_COUNTERS[lang].get(k, k)}" for k, v in (subject.get("add") or {}).items()) or summary,
         "reasons": "\n".join(f"• {r}" for r in _reasons(summary, lang)),
-        "project": ctx.project or "", "summary": summary, "text": str(subject.get("text") or summary)[:600],
+        "project": project or "", "summary": summary, "text": str(subject.get("text") or summary)[:600],
         "from_version": subject.get("from_version", "?"), "to_version": subject.get("to_version", "?"),
     }
+    return kind, question, yes, no, fields
+
+
+def _approval(ctx: Context, lang: str, now: datetime) -> str:
+    approval = ctx.approval or {}
+    _, question, yes, no, fields = _approval_parts(approval, ctx.task, ctx.project, lang)
     text, words, number = _TEXT[lang], _WORDS[lang], approval.get("number")
     ref = number if number is not None else approval.get("id")
     who = f" · {ctx.task}" + (f" «{ctx.title}»" if lang == "es" and ctx.title else f" “{ctx.title}”" if ctx.title else "") if ctx.task else ""

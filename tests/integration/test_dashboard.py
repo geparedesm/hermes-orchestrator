@@ -80,3 +80,30 @@ def test_the_model_each_execution_reported_is_shown(api, services, agents, task)
     [shown] = [e for e in api.get(f"/v1/dashboard/tasks/{task}").json()["executions"] if e["id"] == execution]
     assert shown["model"] == "gpt-6.1-sol"
     assert 'ho_model_tokens_total{provider="codex",model="gpt-6.1-sol"}' in api.get("/metrics").text
+
+
+def test_board_shows_active_and_recently_finished_tasks_with_progress(api, services, agents, task):
+    done = api.post("/v1/tasks", {"project": "demo", "request": "Something small"}).json()["key"]
+    api.post(f"/v1/tasks/{done}/cancel")
+    board = api.get("/v1/dashboard/board", token=PLUGIN_TOKEN, principal="dashboard:operator").json()["tasks"]
+    rows = {t["key"]: t for t in board}
+    assert rows[done]["state"] == "CANCELLED"  # finished recently: still on the board
+    assert rows[task]["project"] == "demo" and rows[task]["subtasks"] == 0 and rows[task]["subtasks_done"] == 0
+    assert {"pending_approvals", "running"} <= set(rows[task])
+
+
+def test_approvals_are_explained_in_plain_words_and_activity_is_listed(api, services, agents, task):
+    from ho_core.enums import ApprovalAction
+
+    [row] = q(services, "SELECT id, project_id FROM tasks WHERE key = %s", task)
+    with services.ctx.unit_of_work() as uow:
+        services.approvals.request(uow, action=ApprovalAction.BUDGET_INCREASE, project_id=row["project_id"], task_id=row["id"],
+                                   subject={"add": {"agent_launches": 5}}, config_hash="0" * 64,
+                                   summary=f"{task}: raise budget", requested_by="test")
+    summary = api.get("/v1/dashboard/summary", token=PLUGIN_TOKEN, principal="dashboard:operator").json()
+    [approval] = summary["required_actions"]["approvals"]
+    assert approval["plain"]["question"].startswith("The task needs more budget") and "*" not in approval["plain"]["question"]
+    assert approval["plain"]["yes"] == "yes, raise it" and approval["task"] == task and "subject" not in approval
+    assert any(a["type"] == "TASK_CREATED" and a["task"] == task and a["label"] == "Task created" for a in summary["recent_activity"])
+    view = api.get(f"/v1/dashboard/tasks/{task}", token=PLUGIN_TOKEN, principal="dashboard:operator").json()
+    assert view["approvals"][0]["plain"]["no"] == "no, leave it paused"

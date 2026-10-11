@@ -131,6 +131,9 @@ class TaskApi:
     def summary(self) -> Any:
         return self.call("GET", "/v1/dashboard/summary")
 
+    def board(self) -> Any:
+        return self.call("GET", "/v1/dashboard/board")
+
     def task_view(self, key: str) -> Any:
         return self.call("GET", f"/v1/dashboard/tasks/{_key(key)}")
 

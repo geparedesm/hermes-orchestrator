@@ -10,12 +10,26 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from . import budgets
+from . import budgets, notify_text
 from .context import UnitOfWork
 from .db import Row
 
 WAITING = ("APPROVAL_REQUIRED", "AUTH_REQUIRED", "PAUSED_BUDGET", "BLOCKED", "FIX_REQUIRED", "PAUSED")
 FINISHED = ("DONE", "CANCELLED", "FAILED")
+# Events worth a line in the Dashboard's recent activity: (tone, plain words).
+ACTIVITY = {
+    "TASK_CREATED": ("info", "Task created"), "PLAN_VERSIONED": ("info", "New plan"),
+    "SUBTASK_ACCEPTED": ("good", "Subtask accepted"), "INTEGRATION_COMPLETED": ("good", "Work integrated"),
+    "INTEGRATION_CONFLICT": ("warn", "Integration conflict"), "TEST_PASSED": ("good", "Tests passed"),
+    "TEST_FAILED": ("bad", "Tests failed"), "REVIEW_PASSED": ("good", "Review passed"),
+    "REVIEW_FAILED": ("warn", "Review asked for changes"), "READY_FOR_MERGE": ("good", "Ready to merge"),
+    "PR_CREATED": ("info", "Pull request created"), "MERGE_COMPLETED": ("good", "Merged"),
+    "TASK_COMPLETED": ("good", "Completed"), "TASK_FAILED": ("bad", "Failed"), "TASK_CANCELLED": ("muted", "Cancelled"),
+    "BLOCKED": ("bad", "Blocked"), "PAUSED_BUDGET": ("warn", "Out of budget"), "AUTH_REQUIRED": ("warn", "Sign-in needed"),
+    "APPROVAL_REQUIRED": ("warn", "Waiting for your decision"), "APPROVAL_DECIDED": ("info", "Decision recorded"),
+    "BUDGET_RAISED": ("info", "Budget raised"), "REQUIREMENTS_REVISED": ("info", "Requirements revised"),
+    "PROJECT_READY": ("good", "Project ready"),
+}
 _TOKENS = ("COALESCE((u.units->>'input_tokens')::bigint, 0) + COALESCE((u.units->>'output_tokens')::bigint, 0) + "
            "COALESCE((u.units->>'cache_creation_input_tokens')::bigint, 0)")
 
@@ -31,9 +45,10 @@ def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]
     cur.execute("SELECT state, count(*) AS n FROM tasks GROUP BY state")
     states = {r["state"]: int(r["n"]) for r in cur.fetchall()}
 
-    cur.execute("SELECT a.id, a.action, a.summary, a.risk, a.requested_at, a.expires_at, t.key AS task FROM approvals a "
-                "LEFT JOIN tasks t ON t.id = a.task_id WHERE a.state = 'PENDING' ORDER BY a.requested_at")
-    approvals = cur.fetchall()
+    cur.execute("SELECT a.id, a.number, a.action, a.subject, a.summary, a.risk, a.requested_at, a.expires_at, t.key AS task, "
+                "t.title AS task_title, p.slug AS project FROM approvals a LEFT JOIN tasks t ON t.id = a.task_id "
+                "LEFT JOIN projects p ON p.id = a.project_id WHERE a.state = 'PENDING' ORDER BY a.requested_at")
+    approvals = [_with_plain(r) for r in cur.fetchall()]
     cur.execute("SELECT t.key, t.title, t.state, t.state_reason, t.priority, t.updated_at, p.slug AS project FROM tasks t "
                 "JOIN projects p ON p.id = t.project_id WHERE t.state = ANY(%s) ORDER BY t.updated_at", (list(WAITING),))
     waiting = cur.fetchall()
@@ -90,7 +105,43 @@ def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]
                                "mean_minutes": round(float(durations["mean"]), 1) if durations["mean"] else None},  # type: ignore[index]
         "health": health,
         "pending_notifications": pending_notifications,
+        "recent_activity": recent_activity(uow),
     }
+
+
+def _with_plain(approval: Row) -> Row:
+    plain = notify_text.plain_approval(approval, task=approval.get("task"), project=approval.get("project"))
+    return {**{k: v for k, v in approval.items() if k != "subject"}, "plain": plain}
+
+
+def recent_activity(uow: UnitOfWork, limit: int = 25) -> list[dict[str, Any]]:
+    uow.cur.execute("SELECT e.seq, e.type, e.summary, e.occurred_at, t.key AS task, t.title AS task_title, p.slug AS project "
+                    "FROM events e LEFT JOIN tasks t ON t.id = e.task_id LEFT JOIN projects p ON p.id = e.project_id "
+                    "WHERE e.type = ANY(%s) ORDER BY e.seq DESC LIMIT %s", (list(ACTIVITY), limit))
+    return [{**r, "tone": ACTIVITY[r["type"]][0], "label": ACTIVITY[r["type"]][1]} for r in uow.cur.fetchall()]
+
+
+def board(uow: UnitOfWork, finished_days: int = 7, limit: int = 200) -> list[dict[str, Any]]:
+    """Active tasks and those finished recently, with the progress of their current plan."""
+    uow.cur.execute(
+        """
+        SELECT t.key, t.title, t.state, t.resume_state, t.state_reason, t.priority, t.risk, t.created_at, t.updated_at, t.completed_at,
+               p.slug AS project,
+               (SELECT count(*) FROM subtasks s WHERE s.task_id = t.id AND s.plan_version = t.current_plan_version
+                AND s.state <> 'CANCELLED') AS subtasks,
+               (SELECT count(*) FROM subtasks s WHERE s.task_id = t.id AND s.plan_version = t.current_plan_version
+                AND s.state IN ('ACCEPTED', 'INTEGRATED')) AS subtasks_done,
+               (SELECT count(*) FROM approvals a WHERE a.task_id = t.id AND a.state = 'PENDING') AS pending_approvals,
+               (SELECT count(*) FROM executions e WHERE e.task_id = t.id
+                AND e.state IN ('REQUESTED', 'STARTING', 'RUNNING', 'STOPPING')) AS running
+        FROM tasks t JOIN projects p ON p.id = t.project_id
+        WHERE t.state <> ALL(%s) OR t.updated_at > now() - make_interval(days => %s)
+        ORDER BY t.updated_at DESC LIMIT %s
+        """,
+        (list(FINISHED), finished_days, limit),
+    )
+    return [{**r, **{k: int(r[k]) for k in ("subtasks", "subtasks_done", "pending_approvals", "running")}}
+            for r in uow.cur.fetchall()]
 
 
 def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
@@ -104,9 +155,10 @@ def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
     edges = [{"from": keys[r["depends_on_subtask_id"]], "to": keys[r["subtask_id"]]} for r in cur.fetchall()
              if r["depends_on_subtask_id"] in keys]
 
-    cur.execute("SELECT id, action, state, summary, risk, requested_at, decided_by, decided_at FROM approvals WHERE task_id = %s "
-                "ORDER BY requested_at DESC", (tid,))
-    approvals = cur.fetchall()
+    cur.execute("SELECT a.id, a.number, a.action, a.subject, a.state, a.summary, a.risk, a.requested_at, a.expires_at, a.decided_by, "
+                "a.decided_at, %s AS task, p.slug AS project FROM approvals a JOIN projects p ON p.id = a.project_id "
+                "WHERE a.task_id = %s ORDER BY a.requested_at DESC", (task["key"], tid))
+    approvals = [_with_plain(r) for r in cur.fetchall()]
     cur.execute("SELECT profile, state, limits, consumed, reserved FROM budgets WHERE task_id = %s", (tid,))
     budget = cur.fetchone()
     if budget is not None:  # runtime is computed from the task's start, not stored (budgets.runtime_minutes)

@@ -1,40 +1,316 @@
-.orch-page { padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
-.orch-nav { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.orch-tab, .orch-button { border: 1px solid rgba(127, 127, 127, 0.35); border-radius: 0.4rem; padding: 0.25rem 0.7rem; background: transparent; color: inherit; cursor: pointer; }
-.orch-button { margin-right: 0.3rem; font-size: 0.85rem; }
-.orch-tab.orch-active { background: rgba(127, 127, 127, 0.2); font-weight: 600; }
-.orch-section { display: flex; flex-direction: column; gap: 0.4rem; }
-.orch-section h3 { margin: 0.6rem 0 0.2rem; font-size: 1rem; }
+/*
+ * hermes-orchestrator Dashboard tab. Every color comes from the Hermes theme variables (with fallbacks), so the
+ * tab follows the active dashboard theme, light or dark. Tones mix a theme color with transparency.
+ */
+.orch-page {
+  --o-fg: var(--color-foreground, #e7e7ee);
+  --o-muted: var(--color-muted-foreground, #9a9aac);
+  --o-card: var(--color-card, rgba(127, 127, 127, 0.06));
+  --o-border: var(--color-border, rgba(127, 127, 127, 0.25));
+  --o-primary: var(--color-primary, #6ea8fe);
+  --o-primary-fg: var(--color-primary-foreground, #0b0b10);
+  --o-good: var(--color-success, #22a05a);
+  --o-warn: var(--color-warning, #d4a020);
+  --o-bad: var(--color-destructive, #d14a4a);
+  --o-info: var(--color-primary, #6ea8fe);
+  --o-radius: var(--radius, 0.6rem);
+  --o-soft: color-mix(in srgb, var(--o-fg) 6%, transparent);
+  color: var(--o-fg);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 1500px;
+  margin: 0 auto;
+  font-size: 0.92rem;
+}
+.orch-page *, .orch-overlay * { box-sizing: border-box; }
+.orch-page code, .orch-page pre, .orch-overlay code, .orch-overlay pre { background: transparent !important; color: inherit; }
+.orch-icon { flex: none; }
+.orch-muted { color: var(--o-muted); }
+.orch-small { font-size: 0.8rem; }
+.orch-right { margin-left: auto; }
+.orch-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.orch-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.orch-stack { display: flex; flex-direction: column; gap: 0.75rem; }
+.orch-pad { padding: 0.5rem 0; }
+.orch-text-warn { color: var(--o-warn); }
+.orch-link { color: var(--o-primary); text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem; }
+.orch-link:hover { text-decoration: underline; }
+
+/* ---- tones ---- */
+.orch-tone-good { color: var(--o-good); background: color-mix(in srgb, var(--o-good) 15%, transparent); }
+.orch-tone-warn { color: var(--o-warn); background: color-mix(in srgb, var(--o-warn) 16%, transparent); }
+.orch-tone-bad { color: var(--o-bad); background: color-mix(in srgb, var(--o-bad) 15%, transparent); }
+.orch-tone-info { color: var(--o-info); background: color-mix(in srgb, var(--o-info) 15%, transparent); }
+.orch-tone-muted { color: var(--o-muted); background: var(--o-soft); }
+.orch-tone-border-good { border-left: 3px solid var(--o-good) !important; }
+.orch-tone-border-warn { border-left: 3px solid var(--o-warn) !important; }
+.orch-tone-border-bad { border-left: 3px solid var(--o-bad) !important; }
+.orch-tone-border-info { border-left: 3px solid var(--o-info) !important; }
+.orch-tone-border-muted { border-left: 3px solid var(--o-border) !important; }
+.orch-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex: none; display: inline-block; }
+.orch-dot.orch-tone-good { background: var(--o-good); }
+.orch-dot.orch-tone-warn { background: var(--o-warn); }
+.orch-dot.orch-tone-bad { background: var(--o-bad); }
+.orch-dot.orch-tone-info { background: var(--o-info); }
+.orch-dot.orch-tone-muted { background: var(--o-muted); }
+
+/* ---- header and navigation ---- */
+.orch-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.orch-hello h1 { margin: 0; font-size: 1.55rem; font-weight: 650; letter-spacing: -0.01em; }
+.orch-hello p { margin: 0.2rem 0 0; }
+.orch-top-tools { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.orch-search { display: flex; align-items: center; gap: 0.45rem; border: 1px solid var(--o-border); border-radius: var(--o-radius);
+  padding: 0.4rem 0.6rem; min-width: 16rem; color: var(--o-muted); background: var(--o-card); }
+.orch-search:focus-within { border-color: var(--o-primary); }
+.orch-search input { flex: 1; border: 0; outline: 0; background: transparent; color: var(--o-fg); font: inherit; min-width: 0; }
+.orch-search kbd { font-size: 0.72rem; border: 1px solid var(--o-border); border-radius: 0.3rem; padding: 0 0.35rem; }
+.orch-search-clear { border: 0; background: transparent; color: var(--o-muted); cursor: pointer; display: flex; padding: 0; }
+.orch-nav { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--o-border); overflow-x: auto; }
+.orch-nav-item { border: 0; background: transparent; color: var(--o-muted); font: inherit; font-weight: 550; padding: 0.55rem 0.85rem;
+  cursor: pointer; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+.orch-nav-item:hover { color: var(--o-fg); }
+.orch-nav-on { color: var(--o-fg); border-bottom-color: var(--o-primary); }
+.orch-badge { background: var(--o-warn); color: #111; border-radius: 999px; font-size: 0.7rem; font-weight: 700; padding: 0 0.42rem; line-height: 1.25rem; }
+.orch-count { font-size: 0.75rem; color: var(--o-muted); background: var(--o-soft); border-radius: 999px; padding: 0 0.45rem; line-height: 1.25rem; }
+
+/* ---- buttons, pills, chips ---- */
+.orch-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; font: inherit; font-weight: 550;
+  border-radius: calc(var(--o-radius) - 0.1rem); padding: 0.45rem 0.85rem; cursor: pointer; border: 1px solid var(--o-border);
+  background: transparent; color: var(--o-fg); white-space: nowrap; transition: filter 0.12s, background 0.12s; }
+.orch-btn:hover:not(:disabled) { background: var(--o-soft); }
+.orch-btn:disabled { opacity: 0.55; cursor: default; }
+.orch-btn-sm { padding: 0.28rem 0.6rem; font-size: 0.82rem; }
+.orch-btn-primary { background: var(--o-primary); border-color: var(--o-primary); color: var(--o-primary-fg); }
+.orch-btn-primary:hover:not(:disabled) { background: var(--o-primary); filter: brightness(1.08); }
+.orch-btn-good { background: var(--o-good); border-color: var(--o-good); color: #fff; }
+.orch-btn-good:hover:not(:disabled) { background: var(--o-good); filter: brightness(1.08); }
+.orch-btn-bad { background: var(--o-bad); border-color: var(--o-bad); color: #fff; }
+.orch-btn-bad:hover:not(:disabled) { background: var(--o-bad); filter: brightness(1.08); }
+.orch-btn-bad-outline { color: var(--o-bad); border-color: color-mix(in srgb, var(--o-bad) 55%, transparent); }
+.orch-btn-bad-outline:hover:not(:disabled) { background: color-mix(in srgb, var(--o-bad) 10%, transparent); }
+.orch-btn-ghost { border-color: transparent; }
+.orch-pill { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.74rem; font-weight: 600; border-radius: 999px;
+  padding: 0.1rem 0.55rem; white-space: nowrap; line-height: 1.3; }
+.orch-chips { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.orch-chip { border: 1px solid var(--o-border); background: transparent; color: var(--o-muted); border-radius: 999px; padding: 0.25rem 0.75rem;
+  font: inherit; font-size: 0.82rem; cursor: pointer; }
+.orch-chip:hover { color: var(--o-fg); }
+.orch-chip-on { color: var(--o-fg); border-color: var(--o-primary); background: color-mix(in srgb, var(--o-primary) 12%, transparent); }
+.orch-tasklink { border: 0; background: transparent; padding: 0; font: inherit; font-weight: 650; color: var(--o-primary); cursor: pointer; }
+.orch-tasklink:hover { text-decoration: underline; }
+.orch-key { font-weight: 650; font-variant-numeric: tabular-nums; }
+.orch-live { color: var(--o-good); }
+
+/* ---- cards and layout ---- */
+.orch-card { background: var(--o-card); border: 1px solid var(--o-border); border-radius: var(--o-radius); padding: 1rem; min-width: 0; }
+.orch-card-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+.orch-card-head h3 { margin: 0; font-size: 1rem; font-weight: 650; }
+.orch-card-action { margin-left: auto; }
+.orch-attention { border-color: color-mix(in srgb, var(--o-warn) 45%, var(--o-border)); }
+.orch-home { display: flex; flex-direction: column; gap: 1rem; }
+.orch-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr); gap: 1rem; align-items: start; }
+.orch-main, .orch-side { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.orch-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
+.orch-stat { display: flex; align-items: center; gap: 0.8rem; text-align: left; font: inherit; color: inherit; background: var(--o-card);
+  border: 1px solid var(--o-border); border-radius: var(--o-radius); padding: 0.9rem 1rem; cursor: default; }
+.orch-clickable { cursor: pointer; }
+.orch-clickable:hover { border-color: var(--o-primary); }
+.orch-stat-icon { width: 2.4rem; height: 2.4rem; border-radius: 0.6rem; display: flex; align-items: center; justify-content: center; flex: none; }
+.orch-stat-body { display: flex; flex-direction: column; min-width: 0; }
+.orch-stat-n { font-size: 1.5rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.orch-stat-label { font-weight: 550; }
+.orch-stat-sub { font-size: 0.78rem; color: var(--o-muted); }
+.orch-empty { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; padding: 1.4rem 0.5rem; color: var(--o-muted); text-align: center; }
+.orch-empty-title { color: var(--o-fg); font-weight: 600; }
+.orch-loading { display: flex; align-items: center; gap: 0.5rem; color: var(--o-muted); padding: 1rem 0; }
+.orch-spinner { width: 1rem; height: 1rem; border: 2px solid var(--o-border); border-top-color: var(--o-primary); border-radius: 50%; animation: orch-spin 0.8s linear infinite; }
+@keyframes orch-spin { to { transform: rotate(360deg); } }
+.orch-alert { display: flex; align-items: center; gap: 0.45rem; color: var(--o-bad); background: color-mix(in srgb, var(--o-bad) 10%, transparent);
+  border-radius: 0.45rem; padding: 0.45rem 0.65rem; font-size: 0.85rem; margin-top: 0.4rem; }
+.orch-callout { background: var(--o-soft); border-radius: 0.45rem; padding: 0.6rem 0.8rem; }
+
+/* ---- approvals and waiting tasks ---- */
+.orch-approval { border: 1px solid color-mix(in srgb, var(--o-warn) 40%, var(--o-border)); background: color-mix(in srgb, var(--o-warn) 6%, var(--o-card));
+  border-radius: var(--o-radius); padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.orch-approval-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.orch-approval-icon { color: var(--o-warn); display: flex; }
+.orch-approval-expiry { margin-left: auto; display: inline-flex; align-items: center; gap: 0.25rem; color: var(--o-muted); font-size: 0.8rem; }
+.orch-approval-task { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.orch-approval-question { margin: 0; white-space: pre-wrap; line-height: 1.45; font-size: 0.97rem; }
+.orch-approval-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.orch-approval-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: 0.85rem; }
+.orch-waiting { border: 1px solid var(--o-border); border-radius: var(--o-radius); padding: 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.4rem; background: var(--o-card); }
+.orch-waiting-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.orch-waiting-title { font-weight: 600; }
+.orch-reason { margin: 0; color: var(--o-muted); font-size: 0.85rem; line-height: 1.4; max-height: 4.2em; overflow: hidden; }
+.orch-next { margin: 0; font-size: 0.86rem; }
+.orch-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.orch-confirm { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+
+/* ---- task rows, stepper, progress ---- */
+.orch-list { display: flex; flex-direction: column; }
+.orch-taskrow { display: flex; align-items: center; gap: 1rem; width: 100%; text-align: left; font: inherit; color: inherit; background: transparent;
+  border: 0; border-top: 1px solid var(--o-border); padding: 0.7rem 0.25rem; cursor: pointer; }
+.orch-taskrow:first-child { border-top: 0; }
+.orch-taskrow:hover { background: var(--o-soft); }
+.orch-taskrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.orch-taskrow-top { display: flex; gap: 0.5rem; min-width: 0; }
+.orch-taskrow-side { display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem; flex: none; width: 11rem; }
+.orch-stepper { list-style: none; display: flex; margin: 0; padding: 0; gap: 0; width: 100%; }
+.orch-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; position: relative; font-size: 0.75rem; color: var(--o-muted); }
+.orch-step::before { content: ""; position: absolute; top: 0.45rem; left: -50%; width: 100%; height: 2px; background: var(--o-border); z-index: 0; }
+.orch-step:first-child::before { display: none; }
+.orch-step-done::before, .orch-step-now::before, .orch-step-wait::before, .orch-step-bad::before { background: var(--o-good); }
+.orch-step-dot { width: 0.95rem; height: 0.95rem; border-radius: 50%; border: 2px solid var(--o-border); background: var(--color-background, #111);
+  z-index: 1; display: flex; align-items: center; justify-content: center; color: #fff; }
+.orch-step-done .orch-step-dot { background: var(--o-good); border-color: var(--o-good); }
+.orch-step-now .orch-step-dot { border-color: var(--o-primary); background: var(--o-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--o-primary) 25%, transparent); }
+.orch-step-wait .orch-step-dot { border-color: var(--o-warn); background: var(--o-warn); }
+.orch-step-bad .orch-step-dot { border-color: var(--o-bad); background: var(--o-bad); }
+.orch-step-off { opacity: 0.45; }
+.orch-step-now .orch-step-name, .orch-step-wait .orch-step-name, .orch-step-bad .orch-step-name { color: var(--o-fg); font-weight: 600; }
+.orch-stepper-compact .orch-step::before { top: 0.27rem; }
+.orch-stepper-compact .orch-step-dot { width: 0.6rem; height: 0.6rem; border-width: 1.5px; }
+.orch-stepper-compact .orch-step-dot svg { display: none; }
+.orch-progress { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; width: 100%; }
+.orch-progress .orch-meter { flex: 1; }
+.orch-meter { height: 0.4rem; border-radius: 999px; background: var(--o-soft); overflow: hidden; min-width: 3rem; }
+.orch-meter-fill { height: 100%; border-radius: 999px; transition: width 0.3s; }
+.orch-fill-good { background: var(--o-good); }
+.orch-fill-warn { background: var(--o-warn); }
+.orch-fill-bad { background: var(--o-bad); }
+.orch-fill-info { background: var(--o-info); }
+
+/* ---- activity and agents ---- */
+.orch-feed, .orch-agents, .orch-checks, .orch-facts, .orch-budget, .orch-files, .orch-plan, .orch-timeline, .orch-checklist, .orch-findings { list-style: none; margin: 0; padding: 0; }
+.orch-feed-item { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.5rem 0; border-top: 1px solid var(--o-border); }
+.orch-feed-item:first-child { border-top: 0; padding-top: 0; }
+.orch-feed-item .orch-dot { margin-top: 0.4rem; }
+.orch-feed-body { flex: 1; min-width: 0; }
+.orch-feed-time { font-size: 0.75rem; white-space: nowrap; }
+.orch-agent { display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0; border-top: 1px solid var(--o-border); }
+.orch-agent:first-child { border-top: 0; padding-top: 0; }
+.orch-avatar { width: 2rem; height: 2rem; border-radius: 50%; background: color-mix(in srgb, var(--o-primary) 18%, transparent); color: var(--o-primary);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.8rem; flex: none; }
+.orch-agent-body { flex: 1; min-width: 0; }
+.orch-agent-stats { text-align: right; font-size: 0.8rem; }
+
+/* ---- board ---- */
+.orch-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.orch-board { display: grid; grid-template-columns: repeat(5, minmax(15rem, 1fr)); gap: 0.75rem; overflow-x: auto; padding-bottom: 0.5rem; align-items: start; }
+.orch-column { background: var(--o-soft); border-radius: var(--o-radius); padding: 0.65rem; display: flex; flex-direction: column; gap: 0.55rem; min-height: 8rem; }
+.orch-column-attention { background: color-mix(in srgb, var(--o-warn) 9%, transparent); }
+.orch-column-head { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; padding: 0.15rem 0.2rem 0.3rem; }
+.orch-column-head .orch-small { flex-basis: 100%; }
+.orch-column-empty { color: var(--o-muted); font-size: 0.82rem; text-align: center; padding: 1.2rem 0; border: 1px dashed var(--o-border); border-radius: 0.5rem; }
+.orch-tile { display: flex; flex-direction: column; gap: 0.45rem; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
+  background: var(--o-card); border: 1px solid var(--o-border); border-radius: 0.55rem; padding: 0.7rem 0.75rem; }
+.orch-tile:hover { border-color: var(--o-primary); }
+.orch-tile-top { display: flex; align-items: center; gap: 0.35rem; }
+.orch-tile-title { font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.orch-tile-status { font-size: 0.8rem; color: var(--o-muted); }
+.orch-tile-foot { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
+.orch-tile-foot .orch-pill { background: var(--o-soft); color: var(--o-muted); }
+
+/* ---- projects ---- */
+.orch-project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 0.85rem; }
+.orch-project { background: var(--o-card); border: 1px solid var(--o-border); border-radius: var(--o-radius); padding: 1rem; display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.orch-project-head { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+.orch-project-head > div { min-width: 0; }
+.orch-project-icon { width: 2.2rem; height: 2.2rem; border-radius: 0.55rem; background: color-mix(in srgb, var(--o-primary) 15%, transparent); color: var(--o-primary);
+  display: flex; align-items: center; justify-content: center; flex: none; }
+.orch-project-facts { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.84rem; align-items: center; }
+.orch-project-facts > span { display: inline-flex; align-items: center; }
+
+/* ---- system ---- */
+.orch-capacity { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.orch-big { font-size: 1.3rem; font-weight: 700; margin: 0.15rem 0 0.35rem; }
+.orch-health { margin-bottom: 0.6rem; }
+.orch-checks li { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; flex-wrap: wrap; text-transform: capitalize; }
+.orch-facts li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.35rem 0; border-top: 1px solid var(--o-border); }
+.orch-facts li:first-child { border-top: 0; }
+.orch-facts li > span:first-child { color: var(--o-muted); }
+
+/* ---- tables ---- */
 .orch-scroll { overflow-x: auto; }
-.orch-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-.orch-table th { text-align: left; opacity: 0.7; font-weight: 500; }
-.orch-table td, .orch-table th { padding: 0.35rem 0.55rem; border-bottom: 1px solid rgba(127, 127, 127, 0.2); vertical-align: top; }
-.orch-badge { font-size: 0.72rem; padding: 0.08rem 0.45rem; border-radius: 0.4rem; background: rgba(127, 127, 127, 0.18); white-space: nowrap; }
-.orch-ready_for_merge, .orch-done, .orch-passed, .orch-pass, .orch-approved, .orch-accepted, .orch-succeeded, .orch-consumed, .orch-healthy, .orch-integrated { background: rgba(34, 160, 90, 0.25); }
-.orch-blocked, .orch-failed, .orch-fail, .orch-error, .orch-lost, .orch-auth_required, .orch-paused_budget, .orch-degraded, .orch-changes_requested, .orch-high, .orch-critical { background: rgba(210, 60, 60, 0.22); }
-.orch-approval_required, .orch-fix_required, .orch-pending, .orch-in_review, .orch-in_progress, .orch-running, .orch-medium { background: rgba(220, 160, 30, 0.22); }
-.orch-cards { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.orch-card { border: 1px solid rgba(127, 127, 127, 0.25); border-radius: 0.5rem; padding: 0.4rem 0.7rem; min-width: 6rem; }
-.orch-card-n { font-size: 1.4rem; font-weight: 600; }
-.orch-board { display: flex; gap: 0.6rem; overflow-x: auto; padding-bottom: 0.4rem; }
-.orch-column { min-width: 13rem; display: flex; flex-direction: column; gap: 0.4rem; }
-.orch-column-head { padding: 0.2rem 0; }
-.orch-tile, .orch-node { border: 1px solid rgba(127, 127, 127, 0.3); border-radius: 0.5rem; padding: 0.45rem 0.6rem; font-size: 0.86rem; }
-.orch-tile { cursor: pointer; }
-.orch-dag { display: flex; gap: 1rem; overflow-x: auto; }
-.orch-dag-level { display: flex; flex-direction: column; gap: 0.5rem; min-width: 14rem; }
-.orch-review { border-left: 3px solid rgba(127, 127, 127, 0.3); padding-left: 0.6rem; }
-.orch-pre { max-height: 22rem; overflow: auto; font-size: 0.78rem; background: rgba(127, 127, 127, 0.1); padding: 0.6rem; border-radius: 0.4rem; }
-.orch-link { text-decoration: underline; cursor: pointer; }
-.orch-error { color: #d23c3c; }
-.orch-muted { opacity: 0.7; }
-.orch-new { margin-left: auto; font-weight: 600; }
-.orch-form { display: flex; flex-direction: column; gap: 0.6rem; max-width: 46rem; }
-.orch-form h3 { margin: 0.2rem 0; }
-.orch-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.88rem; }
-.orch-form input, .orch-form select, .orch-form textarea { font: inherit; color: inherit; background: transparent; border: 1px solid rgba(127, 127, 127, 0.35); border-radius: 0.4rem; padding: 0.35rem 0.5rem; }
+.orch-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.orch-table th { text-align: left; color: var(--o-muted); font-weight: 550; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.orch-table td, .orch-table th { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--o-border); vertical-align: top; }
+.orch-table tr:last-child td { border-bottom: 0; }
+
+/* ---- side panel and modal ---- */
+.orch-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.45); display: flex; justify-content: flex-end;
+  color: var(--color-foreground, #e7e7ee); animation: orch-fade 0.15s ease-out; }
+.orch-overlay-center { justify-content: center; align-items: flex-start; padding: 6vh 1rem 1rem; overflow-y: auto; }
+@keyframes orch-fade { from { opacity: 0; } }
+.orch-panel, .orch-modal {
+  --o-fg: var(--color-foreground, #e7e7ee); --o-muted: var(--color-muted-foreground, #9a9aac); --o-card: var(--color-card, rgba(127, 127, 127, 0.06));
+  --o-border: var(--color-border, rgba(127, 127, 127, 0.25)); --o-primary: var(--color-primary, #6ea8fe); --o-primary-fg: var(--color-primary-foreground, #0b0b10);
+  --o-good: var(--color-success, #22a05a); --o-warn: var(--color-warning, #d4a020); --o-bad: var(--color-destructive, #d14a4a); --o-info: var(--color-primary, #6ea8fe);
+  --o-radius: var(--radius, 0.6rem); --o-soft: color-mix(in srgb, var(--o-fg) 6%, transparent);
+  background: var(--color-popover, var(--color-background, #15151c)); color: var(--o-fg); font-size: 0.92rem; }
+.orch-panel { width: min(46rem, 100%); height: 100%; overflow-y: auto; border-left: 1px solid var(--o-border); box-shadow: -12px 0 32px rgba(0, 0, 0, 0.25);
+  animation: orch-slide 0.18s ease-out; }
+@keyframes orch-slide { from { transform: translateX(2rem); opacity: 0.4; } }
+.orch-modal { width: min(42rem, 100%); border: 1px solid var(--o-border); border-radius: calc(var(--o-radius) + 0.2rem); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35); }
+.orch-panel-head { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--o-border);
+  position: sticky; top: 0; background: inherit; z-index: 2; }
+.orch-panel-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.orch-panel-title h2 { margin: 0; font-size: 1.2rem; font-weight: 650; line-height: 1.3; }
+.orch-panel-body { padding: 1rem 1.25rem 2rem; display: flex; flex-direction: column; gap: 0.9rem; }
+.orch-modal .orch-form { padding: 1rem 1.25rem 1.25rem; }
+.orch-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--o-border); overflow-x: auto; }
+.orch-tab { border: 0; background: transparent; color: var(--o-muted); font: inherit; font-weight: 550; padding: 0.5rem 0.75rem; cursor: pointer;
+  border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.orch-tab:hover { color: var(--o-fg); }
+.orch-tab-on { color: var(--o-fg); border-bottom-color: var(--o-primary); }
+.orch-plan-item, .orch-timeline-item { display: flex; gap: 0.65rem; align-items: flex-start; padding: 0.55rem 0; border-top: 1px solid var(--o-border); }
+.orch-plan-item:first-child, .orch-timeline-item:first-child { border-top: 0; }
+.orch-plan-item .orch-dot, .orch-timeline-item .orch-dot { margin-top: 0.4rem; }
+.orch-plan-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.orch-checklist li { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.4rem 0; }
+.orch-check { width: 1.2rem; height: 1.2rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; margin-top: 0.05rem; }
+.orch-review { border-left: 3px solid var(--o-border); padding-left: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.orch-review p { margin: 0; }
+.orch-findings li { padding: 0.25rem 0; font-size: 0.84rem; }
+.orch-budget li { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.35rem 0; }
+.orch-files li { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; border-top: 1px solid var(--o-border); }
+.orch-files li:first-child { border-top: 0; }
+.orch-files li .orch-ellipsis { flex: 1; }
+.orch-pre { max-height: 22rem; overflow: auto; font-size: 0.78rem; background: var(--o-soft) !important; padding: 0.7rem; border-radius: 0.45rem; }
+.orch-toggle { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.84rem; color: var(--o-muted); cursor: pointer; }
+
+/* ---- form ---- */
+.orch-form { display: flex; flex-direction: column; gap: 0.85rem; }
+.orch-form label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.86rem; font-weight: 550; }
+.orch-form input, .orch-form select, .orch-form textarea { font: inherit; font-weight: 400; color: var(--o-fg); background: var(--o-card);
+  border: 1px solid var(--o-border); border-radius: calc(var(--o-radius) - 0.1rem); padding: 0.5rem 0.65rem; }
+.orch-form input:focus, .orch-form select:focus, .orch-form textarea:focus { outline: none; border-color: var(--o-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--o-primary) 20%, transparent); }
+.orch-form textarea { resize: vertical; line-height: 1.45; }
 .orch-form select option { color: #000; }
-.orch-form-row { display: flex; flex-wrap: wrap; gap: 0.6rem; }
-.orch-form-row label { flex: 1 1 10rem; }
-.orch-files { margin: 0; padding-left: 1.1rem; font-size: 0.86rem; }
-.orch-note { font-size: 0.8rem; margin: 0; }
+.orch-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.orch-form-actions { display: flex; justify-content: flex-end; gap: 0.5rem; padding-top: 0.25rem; }
+.orch-form p { margin: 0; }
+.orch-drop { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; border: 1.5px dashed var(--o-border); border-radius: var(--o-radius);
+  padding: 0.9rem; cursor: pointer; color: var(--o-muted); text-align: center; }
+.orch-drop:hover, .orch-drop-on { border-color: var(--o-primary); color: var(--o-fg); background: color-mix(in srgb, var(--o-primary) 6%, transparent); }
+.orch-disclosure { align-self: flex-start; border: 0; background: transparent; color: var(--o-muted); font: inherit; font-size: 0.85rem; cursor: pointer; padding: 0; }
+.orch-disclosure:hover { color: var(--o-fg); }
+
+/* ---- small screens ---- */
+@media (max-width: 1100px) {
+  .orch-grid { grid-template-columns: minmax(0, 1fr); }
+  .orch-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .orch-page { padding: 1rem; }
+  .orch-stats, .orch-capacity, .orch-form-row { grid-template-columns: minmax(0, 1fr); }
+  .orch-search { min-width: 0; flex: 1; }
+  .orch-top-tools { width: 100%; }
+  .orch-taskrow { flex-direction: column; align-items: stretch; }
+  .orch-taskrow-side { width: 100%; align-items: stretch; }
+  .orch-approval-grid { grid-template-columns: minmax(0, 1fr); }
+}
