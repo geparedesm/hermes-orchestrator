@@ -45,6 +45,10 @@ from .executions import TERMINAL, ExecutionRequest, Executions
 from .gitops import CONTROL_PLANE, GitChanges
 from .tasks import Tasks
 
+# Answered question rounds of the task's current planning episode (opened by the request or a person's revision).
+CURRENT_ANSWERS = ("SELECT questions, answers FROM clarifications WHERE task_id = %s AND state = 'ANSWERED' AND episode = "
+                   "(SELECT coalesce(max(version), 0) FROM requirement_versions WHERE task_id = %s AND source = 'USER') "
+                   "ORDER BY asked_at")
 log = logging.getLogger(__name__)
 S = TaskState
 GATE_EXCEPTION = "quality_gate_exception"
@@ -365,6 +369,7 @@ class Reviews:
             f"Review {scope}.",
             f"The change is `git diff {base}...HEAD` in /workspace (commit {commit[:12]}).",
             "", "## What was asked", "", (subtask["description"] if subtask else self._request_text(uow, task)).strip()[:6000],
+            *self._answers(uow, task),
             *(["", extra.strip()[:4000]] if extra else []), "",
             "Check correctness, security, tests, and whether the change does what was asked. Run the tests if useful.",
             "Report every problem as a finding with a severity: CRITICAL and HIGH block the merge; MEDIUM and LOW are advice.",
@@ -376,6 +381,13 @@ class Reviews:
             subtask_id=subtask["id"] if subtask else None, lease_epoch=lease_epoch,
             purpose={"review": True, "commit": commit, "developers": developers,
                      "subtask": str(subtask["id"]) if subtask else None}))
+
+    def _answers(self, uow: UnitOfWork, task: Row) -> list[str]:
+        """The person's answers to planning questions in the current episode: part of what was asked."""
+        uow.cur.execute(CURRENT_ANSWERS, (task["id"], task["id"]))
+        lines = [f"- {q['text']} — {((r['answers'] or {}).get(q['id']) or {}).get('label') or ((r['answers'] or {}).get(q['id']) or {}).get('text')}"
+                 for r in uow.cur.fetchall() for q in r["questions"]]
+        return ["", "## The person's answers to planning questions (part of the requirements)", "", *lines] if lines else []
 
     def _request_text(self, uow: UnitOfWork, task: Row) -> str:
         uow.cur.execute("SELECT path FROM artifacts WHERE id = %s", (task["original_request_artifact_id"],))

@@ -445,16 +445,26 @@ class Orchestration:
         else:
             lines += ["## Requirements", "", "None yet: start with SET_REQUIREMENTS, then SET_PLAN.", ""]
         # The person's answers, in full and outside the requirements' cut above (docs/design/clarifications.md).
-        uow.cur.execute("SELECT questions, answers, answered_by FROM clarifications WHERE task_id = %s AND state = 'ANSWERED' "
+        episode = self._episode(uow, task)
+        uow.cur.execute("SELECT questions, answers, episode FROM clarifications WHERE task_id = %s AND state = 'ANSWERED' "
                         "ORDER BY asked_at", (task["id"],))
         answered = uow.cur.fetchall()
-        if answered:
-            lines += ["## Clarifications answered by the person (authoritative: plan with them)", ""]
-            for round_ in answered:
-                for q in round_["questions"]:
-                    a = (round_["answers"] or {}).get(q["id"]) or {}
-                    lines.append(f"- {q['text']} — {a.get('label') or a.get('text') or '(no answer)'}")
-            lines.append("")
+
+        def answer_lines(rounds: list[Row]) -> list[str]:
+            return [f"- {q['text']} — {((r['answers'] or {}).get(q['id']) or {}).get('label') or ((r['answers'] or {}).get(q['id']) or {}).get('text') or '(no answer)'}"
+                    for r in rounds for q in r["questions"]]
+        current = [r for r in answered if r["episode"] == episode]
+        earlier = [r for r in answered if r["episode"] != episode]
+        if current:
+            lines += ["## Clarifications answered by the person (authoritative: plan with them)", "", *answer_lines(current), ""]
+        if earlier:
+            lines += ["## Earlier answers (before the person revised the request: the revision takes precedence)", "",
+                      *answer_lines(earlier), ""]
+        if task["current_plan_version"] and self._supervised(uow, task) and not (
+                task.get("plan_approval_state") == "APPROVED" and task.get("plan_approval_version") == task["current_plan_version"]) \
+                and task.get("plan_approval_state") != "PENDING":
+            lines += ["## Plan approval", "", "The current plan is not approved for the current requirements: submit SET_PLAN (the same "
+                      "plan if it still fits) to ask the person; no subtask starts before they approve it.", ""]
         if task["state"] == S.PLANNING:
             left = self._rounds_left(uow, task)
             lines += ["## Questions for the person", "",
@@ -971,8 +981,9 @@ class Orchestration:
         if task.get("plan_approval_state") == "PENDING":
             waited = True
         self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.PLAN, reason=reason)
+        # An approval (pending or given) was bound to the old requirements: the plan must be approved again.
         uow.cur.execute("UPDATE tasks SET plan_approval_state = NULL, plan_approval_version = NULL "
-                        "WHERE id = %s AND plan_approval_state = 'PENDING'", (task["id"],))
+                        "WHERE id = %s AND plan_approval_state IN ('PENDING', 'APPROVED')", (task["id"],))
         return waited
 
     def _expansion_approved(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], added: int, limit: int) -> bool:

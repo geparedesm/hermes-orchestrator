@@ -59,7 +59,7 @@
         "properties": {
           "version": { "type": "integer", "minimum": 1 },
           "artifact": { "$ref": "#/$defs/artifactRef" },
-          "source": { "enum": ["USER", "ORCHESTRATOR"] },
+          "source": { "enum": ["USER", "ORCHESTRATOR", "CLARIFICATION"] },
           "change_reason": { "type": "string", "maxLength": 1000 },
           "approval": { "$ref": "#/$defs/uuid" },
           "created_at": { "$ref": "#/$defs/timestamp" }
@@ -273,7 +273,7 @@
         "properties": {
           "id": { "$ref": "#/$defs/uuid" },
           "action": {
-            "enum": ["MERGE", "SCOPE_EXPANSION", "BUDGET_INCREASE", "BUDGET_UNLIMITED", "HIGH_RISK_OPERATION", "ENVIRONMENT_ACCESS", "PROJECT_CONFIG_CHANGE", "ASSUMPTION", "UPDATE", "PROJECT_READY"]
+            "enum": ["MERGE", "SCOPE_EXPANSION", "BUDGET_INCREASE", "BUDGET_UNLIMITED", "HIGH_RISK_OPERATION", "ENVIRONMENT_ACCESS", "PROJECT_CONFIG_CHANGE", "ASSUMPTION", "UPDATE", "PROJECT_READY", "CREATE_CHILD", "PLAN"]
           },
           "state": { "enum": ["PENDING", "APPROVED", "REJECTED", "EXPIRED", "INVALIDATED", "CONSUMED"] },
           "state_hash": { "$ref": "#/$defs/sha256" },

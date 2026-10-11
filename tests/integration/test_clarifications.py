@@ -241,3 +241,44 @@ def test_cancelling_removes_the_question_card(api, services, agents, task):
     assert summary["required_actions"]["clarifications"] == []
     [row] = q(services, "SELECT c.state FROM clarifications c JOIN tasks t ON t.id = c.task_id WHERE t.key = %s", task)
     assert row["state"] == "CANCELLED"
+
+
+def test_a_revision_after_approval_requires_the_plan_to_be_approved_again(api, services, agents, projects_root):
+    task = make_task(api, services, projects_root, yaml=SUPERVISED)
+    plan(services, agents, task, plan_item("a"), plan_item("b", depends_on=["a"]))
+    api.post(f"/v1/approvals/{plan_approval(api)['id']}/decision", {"decision": "APPROVE"})
+    api.post(f"/v1/tasks/{task}/revise", {"text": "Also a goodbye endpoint."})
+    services.scheduler.run_once()
+    assert "The current plan is not approved for the current requirements" in bundle(services, task)
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "a", "provider": "codex"})
+    assert actions(services, task)[-1][:2] == ("REQUEST_EXECUTION", "REJECTED") and not active(services, task, "DEVELOPER")
+
+
+def test_answers_reach_reviewers_and_earlier_ones_are_marked_superseded(api, services, agents, task):
+    ask(services, agents, task)
+    answer(api, task, pending_round(services, task)["number"], use_recommended=True)
+    with services.ctx.unit_of_work() as uow:
+        lines = services.reviews._answers(uow, services.tasks.get(uow, task))
+    assert "- How often should alerts be sent? — Daily digest" in lines
+    api.post(f"/v1/tasks/{task}/revise", {"text": "Immediate alerts, not a digest."})
+    text = bundle(services, task)
+    assert "## Earlier answers (before the person revised the request" in text
+    assert "## Clarifications answered by the person" not in text
+    with services.ctx.unit_of_work() as uow:
+        assert services.reviews._answers(uow, services.tasks.get(uow, task)) == []  # not part of the revised request
+
+
+def test_manifests_describe_answers_and_plan_approvals(api, services, agents, projects_root):
+    from control_plane import manifests
+    from ho_core import schemas
+
+    task = make_task(api, services, projects_root, yaml=SUPERVISED)
+    ask(services, agents, task)
+    answer(api, task, pending_round(services, task)["number"], use_recommended=True)
+    services.scheduler.run_once()
+    plan(services, agents, task)
+    api.post(f"/v1/tasks/{task}/cancel")
+    with services.ctx.unit_of_work() as uow:
+        manifest = manifests.build(uow, services.ctx, services.tasks.get(uow, task), "FINAL")
+    schemas.validate("manifest", manifest)
+    assert {r["source"] for r in manifest["requirements"]} >= {"CLARIFICATION"}
