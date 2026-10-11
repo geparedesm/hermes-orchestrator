@@ -773,7 +773,7 @@ def create_app(services: Services) -> FastAPI:
         with ctx.unit_of_work() as uow:
             queue = [e.as_json() for e in services.scheduler.queue(uow)]
             health = services.recovery.health.summary(uow) if services.recovery else {}
-            return jsonable(dashboard.summary(uow, queue, health))
+            return jsonable(dashboard.summary(uow, queue, health, ctx.platform.get("project_defaults") or {}))
 
     @app.get("/v1/dashboard/board")
     def dashboard_board(_: Identity = Depends(identity)) -> dict[str, Any]:

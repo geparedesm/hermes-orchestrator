@@ -39,6 +39,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "test": "{emoji} *Test*\nhermes-orchestrator notifications reach this chat.",
         "digest": "{emoji} *Progress* ({count})",
         "more": "… and {count} more (/orch tasks)",
+        "changes": "*What changes:*", "more_changes": "… and {count} more in the Dashboard",
         "days": "{n} days", "hours": "{n} hours", "minutes": "{n} minutes",
     },
     "es": {
@@ -58,6 +59,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "test": "{emoji} *Prueba*\nLos avisos de hermes-orchestrator llegan a este chat.",
         "digest": "{emoji} *Avances* ({count})",
         "more": "… y {count} más (/orch tasks)",
+        "changes": "*Qué cambia:*", "more_changes": "… y {count} más en el Dashboard",
         "days": "{n} días", "hours": "{n} horas", "minutes": "{n} minutos",
     },
 }
@@ -158,6 +160,7 @@ class Context:
     title: str | None = None
     project: str | None = None
     approval: dict[str, Any] | None = None  # the approval row for APPROVAL_REQUIRED
+    details: dict[str, Any] | None = None  # approval_details.details for that approval
 
 
 def language(value: Any) -> str:
@@ -245,7 +248,14 @@ def _approval(ctx: Context, lang: str, now: datetime) -> str:
     text, words, number = _TEXT[lang], _WORDS[lang], approval.get("number")
     ref = number if number is not None else approval.get("id")
     who = f" · {ctx.task}" + (f" «{ctx.title}»" if lang == "es" and ctx.title else f" “{ctx.title}”" if ctx.title else "") if ctx.task else ""
-    lines = [text["decide"].format(emoji=EMOJI["APPROVAL_REQUIRED"]) + who, question.format(**fields), "", text["reply"],
+    lines = [text["decide"].format(emoji=EMOJI["APPROVAL_REQUIRED"]) + who, question.format(**fields)]
+    changes = (ctx.details or {}).get("changes") or []
+    if changes and approval.get("action") != "CREATE_CHILD":  # a module request already says what it creates
+        marks = {"+": "➕", "-": "➖", "~": "✏️", "!": "⚠️", "?": "❓"}
+        lines += ["", text["changes"]] + [f"{marks.get(c.get('kind'), '•')} {c['text'][:200]}" for c in changes[:3]]
+        if len(changes) > 3:
+            lines.append(text["more_changes"].format(count=len(changes) - 3))
+    lines += ["", text["reply"],
              f"✅ *{words['yes']} {ref}*: {yes.format(**fields)}", f"❌ *{words['no']} {ref}*: {no.format(**fields)}"]
     if ctx.task:
         lines.append(f"🔎 *{words['see']} {ctx.task}*: {text['see']}")

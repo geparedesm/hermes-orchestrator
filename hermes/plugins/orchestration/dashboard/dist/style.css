@@ -140,6 +140,20 @@
 .orch-approval-task { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .orch-approval-question { margin: 0; white-space: pre-wrap; line-height: 1.45; font-size: 0.97rem; }
 .orch-approval-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.orch-approval-details { display: flex; flex-direction: column; gap: 0.6rem; border-top: 1px solid var(--o-border); padding-top: 0.6rem; }
+.orch-approval-label { font-size: 0.74rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--o-muted); }
+.orch-changes { list-style: none; margin: 0.3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.orch-changes li { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.88rem; line-height: 1.4; }
+.orch-change-mark { flex: none; width: 1.15rem; height: 1.15rem; border-radius: 0.3rem; display: inline-flex; align-items: center;
+  justify-content: center; font-weight: 700; font-size: 0.8rem; }
+.orch-approval-why { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.88rem; }
+.orch-outcomes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+.orch-outcome { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.85rem; padding: 0.5rem 0.65rem; border-radius: 0.45rem; }
+.orch-outcome-yes { background: color-mix(in srgb, var(--o-good) 9%, transparent); }
+.orch-outcome-yes strong { color: var(--o-good); }
+.orch-outcome-no { background: color-mix(in srgb, var(--o-bad) 8%, transparent); }
+.orch-outcome-no strong { color: var(--o-bad); }
+.orch-approval-facts { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; font-size: 0.82rem; }
 .orch-approval-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: 0.85rem; }
 .orch-waiting { border: 1px solid var(--o-border); border-radius: var(--o-radius); padding: 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.4rem; background: var(--o-card); }
 .orch-waiting-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
@@ -321,5 +335,5 @@
   .orch-top-tools { width: 100%; }
   .orch-taskrow { flex-direction: column; align-items: stretch; }
   .orch-taskrow-side { width: 100%; align-items: stretch; }
-  .orch-approval-grid { grid-template-columns: minmax(0, 1fr); }
+  .orch-approval-grid, .orch-outcomes { grid-template-columns: minmax(0, 1fr); }
 }
