@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Install an Odoo module from /workspace into a throwaway database and run its tests (docs/design/child-projects.md).
+#
+#   ho-odoo-test <module>
+#
+# The repository keeps __manifest__.py at its root, while Odoo finds a module as <addons_path>/<module>: a temporary
+# addons directory holds only <module> -> /workspace. The database server is the project's test PostgreSQL service
+# (test_environment in .hermes/project.yaml): HO_ODOO_DB_HOST (default postgres), HO_ODOO_DB_USER and
+# HO_ODOO_DB_PASSWORD (default odoo, test-only values of that throwaway service).
+#
+# Fails when the module is not discovered, is not installed afterwards, no test ran, or any test failed.
+set -euo pipefail
+
+module="${1:-}"
+if [[ ! "$module" =~ ^[a-z][a-z0-9_]{1,40}$ ]]; then
+  echo "usage: ho-odoo-test <module> (lowercase letters, digits, underscores)" >&2
+  exit 2
+fi
+workspace="${HO_ODOO_WORKSPACE:-/workspace}"
+if [[ ! -f "$workspace/__manifest__.py" ]]; then
+  echo "ho-odoo-test: $workspace has no __manifest__.py; the module must be at the repository root" >&2
+  exit 2
+fi
+odoo_home="${HO_ODOO_HOME:-/opt/odoo}"
+host="${HO_ODOO_DB_HOST:-postgres}"
+user="${HO_ODOO_DB_USER:-odoo}"
+export PGPASSWORD="${HO_ODOO_DB_PASSWORD:-odoo}"
+database="ho_test_${module}_$(date +%s)_$RANDOM"
+
+work="$(mktemp -d)"
+cleanup() {
+  dropdb --if-exists -h "$host" -U "$user" "$database" >/dev/null 2>&1 || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
+mkdir "$work/addons"
+ln -s "$workspace" "$work/addons/$module"
+
+echo "ho-odoo-test: waiting for PostgreSQL at $host" >&2
+for _ in $(seq 1 60); do
+  pg_isready -q -h "$host" -U "$user" && break
+  sleep 2
+done
+pg_isready -q -h "$host" -U "$user" || { echo "ho-odoo-test: PostgreSQL at $host is not reachable" >&2; exit 1; }
+
+log="$work/odoo.log"
+set +e
+python "$odoo_home/odoo-bin" \
+  --addons-path="$odoo_home/odoo/addons,$work/addons" \
+  --data-dir="$work/data" \
+  --db_host="$host" --db_user="$user" --db_password="$PGPASSWORD" \
+  -d "$database" -i "$module" \
+  --test-enable --test-tags="/$module" \
+  --stop-after-init --http-port=0 --log-level=test 2>&1 | tee "$log"
+status=${PIPESTATUS[0]}
+set -e
+
+fail() { echo "ho-odoo-test: FAILED: $*" >&2; exit 1; }
+[[ $status -eq 0 ]] || fail "odoo exited with status $status"
+grep -q "invalid module names, ignored: $module\|module $module: not installable\|Some modules are not loaded" "$log" \
+  && fail "module $module was not discovered or could not be loaded"
+state="$(psql -h "$host" -U "$user" -d "$database" -tAc "SELECT state FROM ir_module_module WHERE name = '$module'" 2>/dev/null || true)"
+[[ "$state" == "installed" ]] || fail "module $module is '${state:-missing}' after the run, not installed"
+grep -Eq "(ERROR|CRITICAL) .*odoo\.(modules|tests|addons)" "$log" && fail "errors were logged while installing or testing $module"
+summary="$(grep -Eo "[0-9]+ failed, [0-9]+ error\(s\) of [0-9]+ tests" "$log" | tail -1 || true)"
+[[ -n "$summary" ]] || fail "no test of $module ran"
+[[ "$summary" =~ ^([0-9]+)\ failed,\ ([0-9]+)\ error\(s\)\ of\ ([0-9]+)\ tests$ ]] || fail "unreadable test summary: $summary"
+[[ "${BASH_REMATCH[3]}" -gt 0 ]] || fail "no test of $module ran"
+[[ "${BASH_REMATCH[1]}" -eq 0 && "${BASH_REMATCH[2]}" -eq 0 ]] || fail "$summary"
+echo "ho-odoo-test: $module installed; $summary" >&2

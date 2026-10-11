@@ -1,6 +1,6 @@
 # Child projects from a template (Odoo modules from odoo-base)
 
-Status: proposal. A parent project (odoo-base) creates child projects (custom Odoo modules) from a template it
+Status: built (child projects, CREATE_CHILD approval, odoo toolchain). A parent project (odoo-base) creates child projects (custom Odoo modules) from a template it
 versions. Each child is its own repository, GitHub repository, and platform project, like `job_finder` today.
 
 ## Data

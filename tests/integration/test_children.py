@@ -129,3 +129,8 @@ def test_a_project_without_children_cannot_create_them(api, projects_root):
     api.post(f"/v1/approvals/{approval}/decision", {"decision": "APPROVE"})
     response = api.post("/v1/projects/plain/children", {"name": "x_mod", "title": "X"})
     assert response.status_code == 409 and "declare `children`" in response.json()["message"]
+
+
+def test_titles_that_could_break_the_template_are_refused(api, parent):
+    response = api.post("/v1/projects/odoo-base/children", {"name": "job_alerts", "title": 'Job "alerts"', "description": ""})
+    assert response.status_code == 400 and "quotes" in response.json()["message"]

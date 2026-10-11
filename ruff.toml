@@ -1,5 +1,7 @@
 target-version = "py311"
 line-length = 130
+# An Odoo module fixture follows Odoo's conventions (manifest dicts, side-effect imports).
+extend-exclude = ["tests/fixtures/odoo_module"]
 
 [lint]
 select = ["F", "E9", "B"]

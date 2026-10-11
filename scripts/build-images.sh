@@ -5,19 +5,21 @@
 #
 # Toolchain profiles compose (MASTER_SPEC section 18): each profile layer is
 # built on top of the previous one, and each provider layer on top of that.
-#   HO_TOOLCHAINS="generic node python node,python"   (default: "generic node python")
+#   HO_TOOLCHAINS="generic node python node,python"   (default: "generic node python odoo")
 # builds, for every set S:  runner-S (tests), claude-S, and codex-S.
-# Profiles: generic node python php java flutter. Versions: workers/versions.env.
+# Profiles: generic node python php java flutter odoo. Versions: workers/versions.env.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION="${HO_VERSION:-dev}"
-TOOLCHAINS="${HO_TOOLCHAINS:-generic node python}"
+TOOLCHAINS="${HO_TOOLCHAINS:-generic node python odoo}"
 PROVIDERS="${HO_PROVIDERS:-claude codex}"
 # shellcheck source=../workers/versions.env
 source workers/versions.env
 BUILD_ARGS=(--build-arg "NODE_IMAGE=$NODE_IMAGE" --build-arg "CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION"
             --build-arg "CODEX_VERSION=$CODEX_VERSION" --build-arg "FLUTTER_VERSION=$FLUTTER_VERSION"
-            --build-arg "FLUTTER_COMMIT=$FLUTTER_COMMIT")
+            --build-arg "FLUTTER_COMMIT=$FLUTTER_COMMIT" --build-arg "ODOO_SERIES=$ODOO_SERIES"
+            --build-arg "ODOO_RELEASE=$ODOO_RELEASE" --build-arg "ODOO_SHA256=$ODOO_SHA256"
+            --build-arg "ODOO_EXTRA_PYTHON=$ODOO_EXTRA_PYTHON")
 
 declare -a LOCK=()
 build() {  # build <name> <dockerfile> <context> [build args...]

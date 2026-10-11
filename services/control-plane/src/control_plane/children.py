@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 
 _REPO = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+_UNSAFE = re.compile(r"[\"'\\{}<>&`]")
 LIVE = ("AWAITING_APPROVAL", "RUNNING", "NEEDS_RECOVERY")
 RETRY_AFTER = timedelta(minutes=2)  # a RUNNING creation untouched this long is resumed by the scheduler
 
@@ -86,6 +87,9 @@ class Children:
         title, description = _line(title, 120), _line(description, 500)
         if not title:
             raise BadRequest("a title is required")
+        if _UNSAFE.search(title + description):
+            # Values land inside Python strings, XML, and Markdown of the template.
+            raise BadRequest('title and description may not contain quotes, backslashes, braces, or < > &')
         github = settings["github"]
         repo = github["repo_name"].replace("{name}", name)
         if not _REPO.match(repo):

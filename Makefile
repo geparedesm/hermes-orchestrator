@@ -22,7 +22,7 @@ venv: ## Create the local Python 3.12 environment for development and tests
 secrets: ## Generate service passwords and tokens in ./secrets (idempotent)
 	./scripts/init-secrets.sh
 
-images: ## Build execution images and pin them in config/images.lock.yaml (HO_TOOLCHAINS="generic node python")
+images: ## Build execution images and pin them in config/images.lock.yaml (HO_TOOLCHAINS="generic node python odoo")
 	./scripts/build-images.sh
 
 up: secrets images ## Build and start the platform (needs .env)
