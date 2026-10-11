@@ -176,3 +176,20 @@ def test_a_foreign_repository_is_never_adopted(api, gh_state, tmp_path):
     response = remote(api, auth, commit_sha)
     assert response.status_code == 409 and response.json()["error"] == "unowned"
     assert not os.listdir(bare / "refs" / "heads")  # nothing was pushed
+
+
+def test_a_component_swapped_for_a_link_after_the_checks_cannot_redirect_writes(root, tmp_path):
+    from git_service import children
+    from git_service.repo_ops import Refused
+
+    parent = root / "odoo-base"
+    (parent / "custom-addons" / "nested").mkdir()
+    fd = children._open_anchored(parent, "custom-addons/nested")  # the checks passed: real directories
+    os.close(fd)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (parent / "custom-addons" / "nested").rmdir()
+    (parent / "custom-addons" / "nested").symlink_to(elsewhere)  # swapped afterwards
+    with pytest.raises(Refused):
+        children._open_anchored(parent, "custom-addons/nested")
+    assert not any(elsewhere.iterdir())

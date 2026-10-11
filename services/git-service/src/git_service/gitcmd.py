@@ -46,14 +46,22 @@ def _environment(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 def run(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...] = (), trusted: tuple[Path, ...] = (),
         env: dict[str, str] | None = None, timeout: int = GIT_TIMEOUT_SECONDS, input_text: str | None = None,
-        ok_codes: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
+        ok_codes: tuple[int, ...] = (0,), cwd_fd: int | None = None) -> subprocess.CompletedProcess[str]:
     """Run git with the hardening above. `protocols` names the transports this call may use
     ("never" for local-only work); `trusted` adds other exact safe.directory paths (for example
-    the untrusted clone a fetch reads from, which is never checked out or run here)."""
+    the untrusted clone a fetch reads from, which is never checked out or run here).
+
+    `cwd_fd` runs git in an already opened directory instead of resolving `repo` again (Linux: through
+    /proc/self/fd), so a path changed meanwhile cannot redirect it; safe.directory still names `repo`, so a moved
+    directory is refused by git itself."""
     command = command_for(repo, *args, protocols=protocols, config=config, trusted=trusted)
+    cwd, pass_fds = None, ()
+    if cwd_fd is not None and os.path.isdir("/proc/self/fd"):
+        command[command.index("-C") + 1] = "."
+        cwd, pass_fds = f"/proc/self/fd/{cwd_fd}", (cwd_fd,)
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=_environment(env),
-                                check=False, input=input_text)
+                                check=False, input=input_text, cwd=cwd, pass_fds=pass_fds)
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {args[0]} timed out") from exc
     if result.returncode not in ok_codes:

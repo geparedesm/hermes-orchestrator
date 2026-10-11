@@ -134,3 +134,24 @@ def test_a_project_without_children_cannot_create_them(api, projects_root):
 def test_titles_that_could_break_the_template_are_refused(api, parent):
     response = api.post("/v1/projects/odoo-base/children", {"name": "job_alerts", "title": 'Job "alerts"', "description": ""})
     assert response.status_code == 400 and "quotes" in response.json()["message"]
+
+
+def test_an_expired_request_can_be_asked_again_or_abandoned(api, services, parent):
+    request(api)
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE approvals SET expires_at = now() - interval '1 minute' WHERE action = 'CREATE_CHILD'")
+    services.scheduler.run_once()
+    assert creation(api)["approval_state"] == "EXPIRED"
+    [expired] = api.get("/v1/approvals?state=EXPIRED").json()["approvals"]
+    renewed = api.post(f"/v1/approvals/{expired['id']}/renew")
+    assert renewed.status_code in (200, 201), renewed.text
+    api.post(f"/v1/approvals/{renewed.json()['id']}/decision", {"decision": "APPROVE"})
+    assert creation(api)["state"] == "DONE"  # the creation followed the renewed approval
+
+    request(api, name="job_reports")
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE approvals SET expires_at = now() - interval '1 minute' WHERE action = 'CREATE_CHILD' AND state = 'PENDING'")
+    services.scheduler.run_once()
+    stale = creation(api)
+    assert api.post(f"/v1/projects/odoo-base/children/{stale['id']}/abandon").json()["state"] == "FAILED"
+    assert request(api, name="job_reports").status_code == 201  # the name is free again

@@ -48,6 +48,7 @@ class Children:
         self.projects = projects
         self.approvals = approvals
         approvals.register_handler(ApprovalAction.CREATE_CHILD, self._on_decision)
+        approvals.register_renewer(ApprovalAction.CREATE_CHILD, self._renew)
 
     # ------------------------------------------------------------------ queries
 
@@ -61,7 +62,8 @@ class Children:
 
     def list(self, uow: UnitOfWork, slug: str) -> list[dict[str, Any]]:
         parent = self.projects.get(uow, slug)
-        uow.cur.execute("SELECT c.*, p.slug AS child_slug, a.number AS approval_number FROM child_creations c "
+        uow.cur.execute("SELECT c.*, p.slug AS child_slug, a.number AS approval_number, a.state AS approval_state "
+                        "FROM child_creations c "
                         "LEFT JOIN projects p ON p.id = c.child_project_id LEFT JOIN approvals a ON a.id = c.approval_id "
                         "WHERE c.parent_id = %s ORDER BY c.created_at DESC LIMIT 50", (parent["id"],))
         return [self.view(r) for r in uow.cur.fetchall()]
@@ -71,7 +73,8 @@ class Children:
         params = row["subject"].get("params") or {}
         return {"id": str(row["id"]), "name": row["name"], "title": params.get("title"), "state": row["state"],
                 "step": row["step"], "destination": row["destination"], "github_repo": row["github_repo"],
-                "child": row.get("child_slug"), "approval_number": row.get("approval_number"), "error": row["error"],
+                "child": row.get("child_slug"), "approval_number": row.get("approval_number"),
+                "approval_state": row.get("approval_state"), "error": row["error"],
                 "requested_by": row["requested_by"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
     # ----------------------------------------------------------------- commands
@@ -144,7 +147,11 @@ class Children:
         """Give up a stopped creation. Nothing is deleted: what it made locally or on GitHub stays for a person."""
         self._human(principal)
         row = self._get(uow, slug, operation_id)
-        if row["state"] not in ("RUNNING", "NEEDS_RECOVERY"):
+        expired = False
+        if row["state"] == "AWAITING_APPROVAL":
+            uow.cur.execute("SELECT state FROM approvals WHERE id = %s", (row["approval_id"],))
+            expired = (uow.cur.fetchone() or {}).get("state") in ("EXPIRED", "INVALIDATED")
+        if row["state"] not in ("RUNNING", "NEEDS_RECOVERY") and not expired:
             raise Conflict(f"this creation is {row['state']}")
         uow.cur.execute("UPDATE child_creations SET state = 'FAILED', error = coalesce(error, 'abandoned'), updated_at = now() "
                         "WHERE id = %s RETURNING *", (row["id"],))
@@ -191,6 +198,19 @@ class Children:
             return
         uow.cur.execute("UPDATE child_creations SET state = 'RUNNING', updated_at = now() WHERE id = %s", (row["id"],))
         uow.after_commit.append(lambda: self.run(row["id"]))
+
+    def _renew(self, uow: UnitOfWork, expired: Row, principal: Principal) -> Row:
+        """An expired CREATE_CHILD asked again: same pinned subject, and the creation follows the new approval (its
+        decision checks the parent has not changed, as for the first one)."""
+        uow.cur.execute("SELECT * FROM child_creations WHERE approval_id = %s FOR UPDATE", (expired["id"],))
+        row = uow.cur.fetchone()
+        if row is None or row["state"] != "AWAITING_APPROVAL":
+            raise Conflict("this creation is no longer waiting for a decision: request the module again")
+        renewed = self.approvals.request(uow, action=ApprovalAction.CREATE_CHILD, project_id=expired["project_id"],
+                                         subject=expired["subject"], config_hash=expired["config_hash"],
+                                         summary=expired["summary"], requested_by=principal.value, risk=Risk(expired["risk"]))
+        uow.cur.execute("UPDATE child_creations SET approval_id = %s, updated_at = now() WHERE id = %s", (renewed["id"], row["id"]))
+        return renewed
 
     def _project(self, uow: UnitOfWork, project_id: UUID) -> Row:
         uow.cur.execute("SELECT * FROM projects WHERE id = %s", (project_id,))

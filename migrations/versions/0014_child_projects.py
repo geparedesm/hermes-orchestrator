@@ -53,7 +53,7 @@ def upgrade() -> None:
         updated_at       timestamptz NOT NULL DEFAULT now()
     );
     -- One live creation per destination and per GitHub repository; finished refusals free the name again.
-    CREATE UNIQUE INDEX child_creations_destination ON child_creations (destination)
+    CREATE UNIQUE INDEX child_creations_destination ON child_creations (parent_id, destination)
         WHERE state NOT IN ('REJECTED', 'INVALIDATED', 'FAILED');
     CREATE UNIQUE INDEX child_creations_repo ON child_creations (github_repo)
         WHERE state NOT IN ('REJECTED', 'INVALIDATED', 'FAILED');

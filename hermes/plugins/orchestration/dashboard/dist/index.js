@@ -486,13 +486,17 @@
         .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(null); });
     }
     return h("ul", { className: "orch-creations" }, live.map(function (c) {
-      const st = CREATION[c.state] || [c.state, "muted"];
+      const expired = c.state === "AWAITING_APPROVAL" && (c.approval_state === "EXPIRED" || c.approval_state === "INVALIDATED");
+      const st = expired ? ["Approval expired", "muted"] : CREATION[c.state] || [c.state, "muted"];
       return h("li", { key: c.id, className: "orch-creation" },
         h("div", { className: "orch-row" }, h("strong", null, c.name), c.title ? h("span", { className: "orch-muted" }, c.title) : null,
           h(Pill, { tone: st[1], className: "orch-right" }, st[0])),
         h("div", { className: "orch-muted orch-small" }, c.destination + " · " + c.github_repo +
-          (c.state === "AWAITING_APPROVAL" ? " · approve it in Needs you" + (c.approval_number ? " (#" + c.approval_number + ")" : "") : "")),
+          (c.state === "AWAITING_APPROVAL" && !expired ? " · approve it in Needs you" + (c.approval_number ? " (#" + c.approval_number + ")" : "") : "")),
         c.error ? h("div", { className: "orch-reason" }, c.error) : null,
+        expired ? h("div", { className: "orch-row" },
+          h("span", { className: "orch-small" }, "Request it again from Approvals › Expired, or abandon it to free the name."),
+          h(Button, { kind: "bad-outline", small: true, disabled: !!busy, onClick: function () { act(c, "abandon"); } }, "Abandon")) : null,
         c.state === "NEEDS_RECOVERY" ? h("div", { className: "orch-row" },
           h("span", { className: "orch-small" }, "Move or remove what is in the way, then retry. Nothing was deleted."),
           h(Button, { kind: "primary", small: true, icon: "retry", disabled: !!busy, onClick: function () { act(c, "retry"); } }, "Retry"),

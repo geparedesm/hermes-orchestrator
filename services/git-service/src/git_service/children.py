@@ -216,7 +216,7 @@ def publish(parent: Path, subject: dict[str, Any]) -> dict[str, Any]:
             return {"destination": relative, "commit": own, "reused": True}
         raise Unowned(f"{relative} already exists and was not created by this operation")
     files = render(parent, subject["template_tree"], _values(subject))
-    base_fd = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    base_fd = _open_anchored(parent, subject["children_path"])
     try:
         try:
             os.mkdir(subject["name"], mode=0o755, dir_fd=base_fd)  # exclusive: a concurrent directory wins
@@ -226,16 +226,47 @@ def publish(parent: Path, subject: dict[str, Any]) -> dict[str, Any]:
         try:
             for parts, content, executable in files:
                 _write_exclusive(root_fd, parts, content, executable)
+            message = subject["commit_message"].replace("{name}", subject["name"])
+            # Git works in the directory written above (its descriptor), never in whatever the path names now.
+            for args in (("init", "-q", "-b", "main"), ("add", "-A"),
+                         ("commit", "-q", "--no-verify", "-m", message, "-m", f"{TRAILER}: {subject['operation_id']}")):
+                _same_directory(destination, root_fd)
+                run(destination, *args, cwd_fd=root_fd)
+            commit = run(destination, "rev-parse", "--verify", "HEAD^{commit}", cwd_fd=root_fd).stdout.strip()
+            _same_directory(destination, root_fd)
         finally:
             os.close(root_fd)
     finally:
         os.close(base_fd)
-    message = subject["commit_message"].replace("{name}", subject["name"])
-    run(destination, "init", "-q", "-b", "main")
-    run(destination, "add", "-A")
-    run(destination, "commit", "-q", "--no-verify", "-m", message, "-m", f"{TRAILER}: {subject['operation_id']}")
-    commit = git(destination, "rev-parse", "--verify", "HEAD^{commit}")
     return {"destination": relative, "commit": commit, "reused": False}
+
+
+def _open_anchored(parent: Path, children_path: str) -> int:
+    """The children directory opened component by component from the parent, never following a link: a component
+    replaced by a link after the checks cannot redirect what is written."""
+    fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in _relative_parts(children_path, "children.path"):
+            try:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as exc:
+                raise Refused(f"{children_path}: {part} must be a directory, not a link or a file") from exc
+            os.close(fd)
+            fd = nxt
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _same_directory(path: Path, fd: int) -> None:
+    """Refuse when `path` no longer names the directory behind `fd` (where /proc is missing, git resolves the path)."""
+    try:
+        here, there = os.stat(path, follow_symlinks=False), os.fstat(fd)
+    except FileNotFoundError as exc:
+        raise Unowned(f"{path.name} was moved while it was being created") from exc
+    if (here.st_dev, here.st_ino) != (there.st_dev, there.st_ino) or stat.S_ISLNK(here.st_mode):
+        raise Unowned(f"{path.name} was replaced while it was being created")
 
 
 def _view(full_name: str) -> dict[str, Any] | None:
