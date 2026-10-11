@@ -32,7 +32,7 @@ def test_a_first_configuration_lists_what_the_project_sets(api, projects_root):
     assert ["Compared with", "the platform defaults (first configuration)"] in details["facts"]
 
 
-def test_an_updated_configuration_lists_only_what_changed(api, parent):
+def test_an_updated_configuration_lists_only_what_changed(api, parent):  # noqa: F811 (fixture)
     yaml = PARENT_YAML.replace('commands: {test: "python -m unittest"}', 'commands: {test: "ho-odoo-test odoo_base"}')
     yaml = yaml.replace("project: {name: odoo-base}", "project: {name: odoo-base}\ntoolchain: {profiles: [odoo]}")
     (parent / ".hermes/project.yaml").write_text(yaml)
@@ -46,7 +46,7 @@ def test_an_updated_configuration_lists_only_what_changed(api, parent):
     assert approval["details"]["if_no"] == "The configuration stays as it was."
 
 
-def test_a_module_request_says_exactly_what_will_be_created(api, parent):
+def test_a_module_request_says_exactly_what_will_be_created(api, parent):  # noqa: F811 (fixture)
     request(api)
     [approval] = pending(api, "CREATE_CHILD")
     changes = texts(approval)
