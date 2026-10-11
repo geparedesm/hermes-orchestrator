@@ -1,6 +1,6 @@
 # Clarifying questions and supervised plans
 
-Status: proposal.
+Status: built.
 
 During PLANNING, the orchestrator may ask the person a few multiple-choice questions when an answer would change
 what is built. Optionally, the plan is shown to the person for approval before any subtask starts.

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 EMOJI = {
+    "QUESTIONS_ASKED": "❓",
     "APPROVAL_REQUIRED": "🟡", "READY_FOR_MERGE": "🚀", "TASK_COMPLETED": "✅", "BLOCKED": "⛔", "TEST_FAILED": "❌",
     "TASK_FAILED": "❌", "AUTH_REQUIRED": "🔑", "PAUSED_BUDGET": "💰", "RECOVERY_FAILED": "⚠️", "PLATFORM_DEGRADED": "⚠️",
     "NOTIFICATION_TEST": "🧪", "DIGEST": "📋",
@@ -40,6 +41,10 @@ _TEXT: dict[str, dict[str, str]] = {
         "digest": "{emoji} *Progress* ({count})",
         "more": "… and {count} more (/orch tasks)",
         "changes": "*What changes:*", "more_changes": "… and {count} more in the Dashboard",
+        "questions": "{emoji} *{count} question(s) before planning*", "recommended": "recommended",
+        "your_words": "your own answer (write it after the colon)",
+        "answer_how": "Reply with one message, for example: *r {number} 1a 2b 3: only remote jobs*",
+        "answer_ok": "Or *r {number} ok* to use the recommended answers.",
         "days": "{n} days", "hours": "{n} hours", "minutes": "{n} minutes",
     },
     "es": {
@@ -60,6 +65,10 @@ _TEXT: dict[str, dict[str, str]] = {
         "digest": "{emoji} *Avances* ({count})",
         "more": "… y {count} más (/orch tasks)",
         "changes": "*Qué cambia:*", "more_changes": "… y {count} más en el Dashboard",
+        "questions": "{emoji} *{count} pregunta(s) antes de planificar*", "recommended": "recomendada",
+        "your_words": "tu propia respuesta (escríbela después de los dos puntos)",
+        "answer_how": "Responde con un solo mensaje, por ejemplo: *r {number} 1a 2b 3: solo empleos remotos*",
+        "answer_ok": "O *r {number} ok* para usar las respuestas recomendadas.",
         "days": "{n} días", "hours": "{n} horas", "minutes": "{n} minutos",
     },
 }
@@ -86,6 +95,8 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
                                   "no, keep the current one"),
         "ENVIRONMENT_ACCESS": ("{summary}. Allow it?", "yes, allow it", "no"),
         "UPDATE": ("Update the platform from *{from_version}* to *{to_version}*?", "yes, update", "no, not now"),
+        "PLAN": ("The plan for this task is ready ({plan_count} subtask(s)). Start the work with this plan?",
+                 "yes, start with this plan", "no, plan again"),
         "CREATE_CHILD": ("Create *{child}* ({child_title}) in project *{project}*: a new folder {child_path} and the "
                          "{visibility} GitHub repository *{child_repo}*, from the template at {parent_sha}?",
                          "yes, create it", "no, don't create it"),
@@ -112,6 +123,8 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
                                   "no, mantener la actual"),
         "ENVIRONMENT_ACCESS": ("{summary}. ¿Lo permito?", "sí, permitirlo", "no"),
         "UPDATE": ("¿Actualizo la plataforma de *{from_version}* a *{to_version}*?", "sí, actualizar", "ahora no"),
+        "PLAN": ("El plan de esta tarea está listo ({plan_count} subtarea(s)). ¿Empiezo el trabajo con este plan?",
+                 "sí, empieza con este plan", "no, planifica de nuevo"),
         "CREATE_CHILD": ("¿Creo *{child}* ({child_title}) en el proyecto *{project}*: una carpeta nueva {child_path} y el "
                          "repositorio {visibility_es} de GitHub *{child_repo}*, desde la plantilla en {parent_sha}?",
                          "sí, créalo", "no, no lo crees"),
@@ -161,6 +174,7 @@ class Context:
     project: str | None = None
     approval: dict[str, Any] | None = None  # the approval row for APPROVAL_REQUIRED
     details: dict[str, Any] | None = None  # approval_details.details for that approval
+    clarification: dict[str, Any] | None = None  # the question round for QUESTIONS_ASKED
 
 
 def language(value: Any) -> str:
@@ -175,6 +189,8 @@ def render(payload: dict[str, Any], ctx: Context, lang: str = "en", now: datetim
     task, title = ctx.task or "", ctx.title or ctx.task or summary
     if event == "APPROVAL_REQUIRED" and ctx.approval is not None:
         return _approval(ctx, lang, now or datetime.now(timezone.utc))
+    if event == "QUESTIONS_ASKED" and ctx.clarification is not None:
+        return questions(ctx, lang)
     simple = {"READY_FOR_MERGE": "ready", "TASK_COMPLETED": "completed", "TEST_FAILED": "test_failed",
               "TASK_FAILED": "task_failed", "AUTH_REQUIRED": "auth", "PAUSED_BUDGET": "budget",
               "RECOVERY_FAILED": "platform", "PLATFORM_DEGRADED": "platform", "NOTIFICATION_TEST": "test"}
@@ -238,6 +254,7 @@ def _approval_parts(approval: dict[str, Any], task: str | None, project: str | N
         "visibility": "private" if subject.get("private", True) else "public",
         "visibility_es": "privado" if subject.get("private", True) else "público",
         "parent_sha": str(subject.get("parent_sha") or "?")[:12],
+        "plan_count": len(subject.get("subtasks") or []),
     }
     return kind, question, yes, no, fields
 
@@ -262,6 +279,25 @@ def _approval(ctx: Context, lang: str, now: datetime) -> str:
     expires = approval.get("expires_at")
     if isinstance(expires, datetime):
         lines.append(text["expires"].format(left=_left(expires - now, text)))
+    return "\n".join(lines)
+
+
+def questions(ctx: Context, lang: str = "en") -> str:
+    """A round of questions with its options and how to answer it with one short reply."""
+    text, round_ = _TEXT[language(lang)], ctx.clarification or {}
+    number = round_.get("number")
+    who = f" · {ctx.task}" + (f" “{ctx.title}”" if ctx.title else "") if ctx.task else ""
+    lines = [text["questions"].format(emoji=EMOJI.get("QUESTIONS_ASKED", "❓"), count=len(round_.get("questions") or [])) + who, ""]
+    for n, q in enumerate(round_.get("questions") or [], start=1):
+        lines.append(f"*{n}. {q['text']}*")
+        if q.get("why"):
+            lines.append(f"_{q['why']}_")
+        for o in q["options"]:
+            lines.append(f"   {n}{o['key']}) {o['label']}" + (f" ⭐ {text['recommended']}" if o.get("recommended") else ""))
+        if q.get("allow_other"):
+            lines.append(f"   {n}: {text['your_words']}")
+        lines.append("")
+    lines += [text["answer_how"].format(number=number), text["answer_ok"].format(number=number)]
     return "\n".join(lines)
 
 

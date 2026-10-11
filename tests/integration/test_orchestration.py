@@ -84,7 +84,7 @@ def answer(services, agents, execution, structured, *, ok=True) -> None:
 def step(services, agents, task, *actions, summary="next step") -> dict:
     [execution] = active(services, task, "ORCHESTRATOR")
     full = [{"type": None, "text": None, "subtasks": None, "subtask": None, "role": None, "provider": None, "prompt": None,
-             "level": None, "reversible": None, "category": None, "anchors": None, **a} for a in actions]
+             "level": None, "reversible": None, "category": None, "anchors": None, "questions": None, **a} for a in actions]
     answer(services, agents, execution["id"], {"summary": summary, "actions": full})
     return execution
 

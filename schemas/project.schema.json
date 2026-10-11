@@ -306,6 +306,16 @@
         }
       }
     },
+    "planning": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Planning: clarifying questions and supervised plans (docs/design/clarifications.md).",
+      "properties": {
+        "questions": { "type": "boolean", "default": true, "description": "The orchestrator may ask the person questions when an answer changes what is built." },
+        "max_question_rounds": { "type": "integer", "minimum": 1, "maximum": 3, "default": 1, "description": "Rounds of questions per planning episode." },
+        "approve_plan": { "type": "boolean", "default": false, "description": "Every plan waits for a person's approval before any subtask starts." }
+      }
+    },
     "children": {
       "type": "object",
       "additionalProperties": false,

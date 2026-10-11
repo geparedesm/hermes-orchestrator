@@ -99,8 +99,10 @@ class TaskApi:
 
     def create(self, project: str, request: str, title: str | None = None, priority: str | None = None, *,
                budget: str | None = None, depends_on: list[str] | None = None, idempotency_key: str | None = None,
-               attachments: list[dict[str, str]] | None = None) -> Any:
+               attachments: list[dict[str, str]] | None = None, approve_plan: bool = False) -> Any:
         body: dict[str, Any] = {"project": project, "request": request}
+        if approve_plan:
+            body["approve_plan"] = True
         if title:
             body["title"] = title
         if priority:
@@ -161,6 +163,16 @@ class TaskApi:
 
     def approvals(self, include_decided: bool = False) -> Any:
         return self.call("GET", "/v1/approvals", params={"state": "" if include_decided else "PENDING"})
+
+    def answer(self, number: str, *, answers: dict[str, dict[str, str]] | None = None, use_recommended: bool = False) -> Any:
+        """Answers to a round of planning questions, named by its number (as notifications show it)."""
+        ref = str(number).lstrip("#")
+        if not ref.isdigit():
+            raise ApiError(400, f"question rounds are numbers, not {number!r}")
+        return self.call("POST", f"/v1/clarifications/{ref}/answer", {"answers": answers, "use_recommended": use_recommended})
+
+    def answer_task(self, key: str, reference: str, body: dict[str, Any]) -> Any:
+        return self.call("POST", f"/v1/tasks/{_key(key)}/clarifications/{urllib.parse.quote(reference, safe='')}/answer", body)
 
     def renew(self, approval_id: str) -> Any:
         # The shown reference may be "#12": strip the mark and encode, so it stays a path segment.

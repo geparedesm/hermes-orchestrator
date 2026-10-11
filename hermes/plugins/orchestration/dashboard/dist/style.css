@@ -154,6 +154,20 @@
 .orch-outcome-no { background: color-mix(in srgb, var(--o-bad) 8%, transparent); }
 .orch-outcome-no strong { color: var(--o-bad); }
 .orch-approval-facts { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; font-size: 0.82rem; }
+.orch-questions { border-color: color-mix(in srgb, var(--o-info) 45%, var(--o-border)); background: color-mix(in srgb, var(--o-info) 5%, var(--o-card)); }
+.orch-questions .orch-approval-icon { color: var(--o-info); }
+.orch-question-list { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.orch-question { display: flex; flex-direction: column; gap: 0.35rem; }
+.orch-question-text { font-weight: 600; }
+.orch-options { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.orch-option { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid var(--o-border); border-radius: 0.45rem;
+  padding: 0.35rem 0.6rem; cursor: pointer; font-size: 0.88rem; }
+.orch-option input { margin: 0; accent-color: var(--o-primary); }
+.orch-option-on { border-color: var(--o-primary); background: color-mix(in srgb, var(--o-primary) 10%, transparent); }
+.orch-other { font: inherit; color: var(--o-fg); background: var(--o-card); border: 1px solid var(--o-border); border-radius: 0.45rem; padding: 0.4rem 0.6rem; }
+.orch-other:focus { outline: none; border-color: var(--o-primary); }
+.orch-check-row { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 0.5rem; font-weight: 400 !important; }
+.orch-check-row input { margin-top: 0.2rem; accent-color: var(--o-primary); }
 .orch-approval-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: 0.85rem; }
 .orch-waiting { border: 1px solid var(--o-border); border-radius: var(--o-radius); padding: 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.4rem; background: var(--o-card); }
 .orch-waiting-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }

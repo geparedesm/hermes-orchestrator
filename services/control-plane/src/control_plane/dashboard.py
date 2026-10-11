@@ -51,6 +51,10 @@ def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]
                 "LEFT JOIN tasks t ON t.id = a.task_id LEFT JOIN projects p ON p.id = a.project_id "
                 "WHERE a.state = 'PENDING' ORDER BY a.requested_at")
     approvals = [_with_plain(r, uow, defaults) for r in cur.fetchall()]
+    cur.execute("SELECT c.id, c.number, c.questions, c.asked_at, t.key AS task, t.title AS task_title, p.slug AS project "
+                "FROM clarifications c JOIN tasks t ON t.id = c.task_id JOIN projects p ON p.id = t.project_id "
+                "WHERE c.state = 'PENDING' ORDER BY c.asked_at")
+    clarifications = cur.fetchall()
     cur.execute("SELECT t.key, t.title, t.state, t.state_reason, t.priority, t.updated_at, p.slug AS project FROM tasks t "
                 "JOIN projects p ON p.id = t.project_id WHERE t.state = ANY(%s) ORDER BY t.updated_at", (list(WAITING),))
     waiting = cur.fetchall()
@@ -97,7 +101,7 @@ def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]
     return {
         "generated_at": datetime.now(timezone.utc),
         "tasks_by_state": states,
-        "required_actions": {"approvals": approvals, "waiting_tasks": waiting},
+        "required_actions": {"approvals": approvals, "clarifications": clarifications, "waiting_tasks": waiting},
         "queue": queue,
         "running": running,
         "provider_usage": usage,
@@ -208,6 +212,9 @@ def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
     checkpoints = cur.fetchall()
     cur.execute("SELECT id, kind, sha256, generated_at FROM manifests WHERE task_id = %s ORDER BY generated_at DESC", (tid,))
     manifests = cur.fetchall()
+    cur.execute("SELECT id, number, questions, answers, state, cancel_reason, answered_by, asked_at, answered_at FROM clarifications "
+                "WHERE task_id = %s ORDER BY asked_at DESC", (tid,))
+    clarifications = cur.fetchall()
     cur.execute("SELECT id, name, media_type, size_bytes, sha256, added_by, created_at FROM task_attachments WHERE task_id = %s "
                 "ORDER BY position", (tid,))
     attachments = cur.fetchall()
@@ -215,7 +222,7 @@ def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
                     "subtasks": [{k: v for k, v in s.items() if k != "id"} for s in subtasks], "edges": edges},
             "approvals": approvals, "budget": budget, "quality_gate": gate, "reviews": reviews, "tests": tests,
             "executions": executions, "git": git, "timeline": timeline, "checkpoints": checkpoints, "manifests": manifests,
-            "attachments": attachments}
+            "attachments": attachments, "clarifications": clarifications}
 
 
 # ---------------------------------------------------------------- metrics

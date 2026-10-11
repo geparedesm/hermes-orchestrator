@@ -241,6 +241,28 @@ def _create_child(approval: Row) -> dict[str, Any]:
     }
 
 
+def _plan(approval: Row) -> dict[str, Any]:
+    s = approval["subject"] or {}
+    items = s.get("subtasks") or []
+    changes = []
+    for item in items:
+        deps = ", ".join(item.get("depends_on") or [])
+        files = ", ".join(((item.get("estimated_scope") or {}).get("files") or [])[:4])
+        changes.append({"kind": "+", "text": f"{item['local_key']}: {item['title']} — {str(item.get('kind') or '').lower().replace('_', ' ')}, "
+                                             f"risk {str(item.get('risk') or '').lower()}"
+                                             + (f", by {item['preferred_provider']}" if item.get("preferred_provider") else "")
+                                             + (f", after {deps}" if deps else "") + (f" · {files}" if files else "")})
+    return {
+        "changes": changes,
+        "why": "This task (or project) asks for your review of each plan before any subtask starts.",
+        "if_yes": "The agents start on the plan's ready subtasks.",
+        "if_no": "Nothing starts; the orchestrator writes a new plan (add a note to say what to change).",
+        "facts": [["Plan", f"version {s.get('plan_version')}"], ["Requirements", f"version {s.get('requirements_version') or '—'}"],
+                  ["Subtasks", str(len(items))]],
+        "links": [],
+    }
+
+
 def details(uow: UnitOfWork, approval: Row, defaults: dict[str, Any] | None = None) -> dict[str, Any]:
     action, subject = approval["action"], approval.get("subject") or {}
     try:
@@ -256,6 +278,8 @@ def details(uow: UnitOfWork, approval: Row, defaults: dict[str, Any] | None = No
             out = _waiting(uow, approval)
         elif action == "CREATE_CHILD":
             out = _create_child(approval)
+        elif action == "PLAN":
+            out = _plan(approval)
         elif action == "UPDATE":
             out = {"changes": [{"kind": "~", "text": f"platform {subject.get('from_version')} → {subject.get('to_version')}"}],
                    "why": "Platform updates need a person.", "if_yes": "The platform is updated (with a rollback point).",

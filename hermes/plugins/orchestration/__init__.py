@@ -30,6 +30,8 @@ HELP = """/orch commands:
   approvals                      pending approvals
   approve <id|number> | reject <id|number> [note]   (or reply "yes 12" / "no 12")
   renew <id>                     request an expired approval again
+  answer <number> 1a 2b 3: text  answer planning questions (or: answer <number> ok, for the recommended answers;
+                                 reply "r 21 1a 2b" in chat)
   pause|resume|cancel|retry <T-n>
   revise <T-n> <new requirements...>
   budget <T-n> [counter=N ...]   show, or request an increase
@@ -48,6 +50,7 @@ SHORT_REPLIES = [
     (re.compile(rf"^(?:si|yes|ok|aprobar|aprobado|approve)\s+{_NUMBER}$"), "/orch approve {0}"),
     (re.compile(rf"^(?:no|reject|rechazar|rechazado)\s+{_NUMBER}(?:\s+(.{{1,300}}))?$"), "/orch reject {0} {1}"),
     (re.compile(rf"^(?:renovar|renew)\s+{_NUMBER}$"), "/orch renew {0}"),
+    (re.compile(rf"^(?:r|resp|respuesta|answer)\s+{_NUMBER}\s+(.{{1,1500}})$", re.S), "/orch answer {0} {1}"),
     (re.compile(rf"^(?:ver|see|estado|status)\s+{_TASK}$"), "/orch status {0}"),
     (re.compile(rf"^(?:reintentar|retry)\s+{_TASK}$"), "/orch retry {0}"),
     (re.compile(rf"^(?:cancelar|cancel)\s+{_TASK}$"), "/orch cancel {0}"),
@@ -63,6 +66,10 @@ def short_reply_command(text: str) -> str | None:
         if match:
             groups = [g or "" for g in match.groups()] + [""]
             groups = [g.upper() if g.startswith("t-") else g for g in groups]
+            if template.startswith("/orch answer"):
+                # The answers as written (free text keeps its case and accents), as one argument.
+                parts = str(text).strip().strip("*_~` ").split(None, 2)
+                groups[1] = shlex.quote(parts[2].strip("*_~` ") if len(parts) == 3 else groups[1])
             if template.startswith("/orch reject") and groups[1]:
                 # The note as written (case, accents, punctuation), quoted so /orch's parser takes it literally.
                 parts = str(text).strip().strip("*_~` ").split(None, 2)
@@ -143,6 +150,13 @@ def run_verb(api: TaskApi, words: list[str], *, human: bool) -> str:
         if _LANG == "es":
             return f"🔁 Pedida de nuevo: {approval.get('summary') or approval['action']}\nResponde *si {ref}* para aprobarla o *no {ref}* para rechazarla."
         return f"🔁 Requested again: {approval.get('summary') or approval['action']}\nReply *yes {ref}* to approve or *no {ref}* to reject."
+    if verb == "answer":
+        _need(args, 2, "answer <number> 1a 2b 3: text   (or: answer <number> ok)")
+        recommended, answers = parse_answers(" ".join(args[1:]))
+        result = api.answer(args[0], answers=answers, use_recommended=recommended)
+        if _LANG == "es":
+            return f"✅ Respuestas guardadas para {result['task']}; vuelve a planificar con ellas."
+        return f"✅ Answers saved for {result['task']}; it plans again with them."
     if verb in ("pause", "resume", "cancel", "retry"):
         _need(args, 1, f"{verb} <T-n>")
         task = api.action(args[0], verb)
@@ -165,6 +179,23 @@ def run_verb(api: TaskApi, words: list[str], *, human: bool) -> str:
         budget = api.budget(args[0])
         return f"{args[0].upper()} budget {budget.get('state')}: consumed {json.dumps(budget.get('consumed'))}"
     raise ApiError(400, f"unknown command '{verb}'\n\n{HELP}")
+
+
+_ANSWER = re.compile(r"(\d)\s*(?:([a-dA-D])(?![^\s\d])|:\s*(.+?))(?=\s+\d\s*(?:[a-dA-D](?![^\s\d])|:)|$)", re.S)
+
+
+def parse_answers(spec: str) -> tuple[bool, dict[str, dict[str, str]]]:
+    """`1a 2b 3: only remote jobs` -> answers; `ok` (or si/yes) -> the recommended answers."""
+    text = spec.strip()
+    if text.lower() in ("ok", "si", "sí", "yes", "recommended", "recomendadas"):
+        return True, {}
+    answers: dict[str, dict[str, str]] = {}
+    for match in _ANSWER.finditer(text):
+        number, option, free = match.groups()
+        answers[f"q{number}"] = {"option": option.lower()} if option else {"text": free.strip()}
+    if not answers:
+        raise ApiError(400, "answers look like: 1a 2b 3: your own words (or ok for the recommended ones)")
+    return False, answers
 
 
 def _need(args: list[str], count: int, usage: str) -> None:

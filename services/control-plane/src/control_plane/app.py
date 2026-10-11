@@ -128,6 +128,11 @@ class RegisterProject(BaseModel):
     slug: str | None = None
 
 
+class AnswerQuestions(BaseModel):
+    answers: dict[str, dict[str, str]] | None = Field(default=None, description="{q1: {option: 'b'} | {text: '...'}}")
+    use_recommended: bool = False
+
+
 class NewChild(BaseModel):
     name: str = Field(min_length=2, max_length=41, pattern=r"^[a-z][a-z0-9_]{1,40}$")
     title: str = Field(min_length=1, max_length=120)
@@ -591,6 +596,27 @@ def create_app(services: Services) -> FastAPI:
         def command(uow: UnitOfWork):
             return 200, orchestrator().revise(uow, key, body.text, principal=who)
         return idempotent(idempotency_key, who, {"op": "revise", "task": key, **body.model_dump()}, command)
+
+    @app.post("/v1/tasks/{key}/clarifications/{reference}/answer")
+    def answer_questions(key: str, reference: str, body: AnswerQuestions, who: Principal = Depends(principal),
+                         idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            return 200, jsonable(orchestrator().answer_questions(uow, key, reference, principal=who, answers=body.answers,
+                                                                 use_recommended=body.use_recommended))
+        return idempotent(idempotency_key, who, {"op": "answer", "task": key, "ref": reference, **body.model_dump()}, command)
+
+    @app.post("/v1/clarifications/{number}/answer")
+    def answer_by_number(number: int, body: AnswerQuestions, who: Principal = Depends(principal),
+                         idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        """Chat answers name the round by its number only (`r 21 1a 2b`)."""
+        def command(uow: UnitOfWork):
+            uow.cur.execute("SELECT t.key FROM clarifications c JOIN tasks t ON t.id = c.task_id WHERE c.number = %s", (number,))
+            row = uow.cur.fetchone()
+            if row is None:
+                raise NotFound(f"no questions #{number}")
+            return 200, jsonable(orchestrator().answer_questions(uow, row["key"], str(number), principal=who, answers=body.answers,
+                                                                 use_recommended=body.use_recommended))
+        return idempotent(idempotency_key, who, {"op": "answer-number", "number": number, **body.model_dump()}, command)
 
     @app.get("/v1/tasks/{key}/budget")
     def task_budget(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:

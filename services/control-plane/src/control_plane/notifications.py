@@ -106,6 +106,10 @@ class Outbox:
             projects = {r["id"]: r["slug"] for r in uow.cur.fetchall()}
             uow.cur.execute("SELECT * FROM approvals WHERE id::text = ANY(%s)", (approval_ids,))
             approvals = {str(r["id"]): r for r in uow.cur.fetchall()}
+            round_ids = [str((r["payload"].get("data") or {}).get("clarification_id")) for r in rows
+                         if r["payload"].get("type") == "QUESTIONS_ASKED" and (r["payload"].get("data") or {}).get("clarification_id")]
+            uow.cur.execute("SELECT id::text AS id, number, questions FROM clarifications WHERE id::text = ANY(%s)", (round_ids,))
+            rounds = {r["id"]: r for r in uow.cur.fetchall()}
             # What each pending decision changes (its first lines go into the message).
             details = {key: approval_details.details(uow, row, self.ctx.platform.get("project_defaults") or {})
                        for key, row in approvals.items() if row["state"] == "PENDING"}
@@ -117,7 +121,8 @@ class Outbox:
             out[str(row["id"])] = notify_text.Context(
                 task=task["key"] if task else None, title=task["title"] if task else None,
                 project=task["slug"] if task else projects.get(payload.get("project_id") or ""),
-                approval=approvals.get(approval_id), details=details.get(approval_id))
+                approval=approvals.get(approval_id), details=details.get(approval_id),
+                clarification=rounds.get(str((payload.get("data") or {}).get("clarification_id") or "")))
         return out
 
     def _send(self, rows: list[Row], request_id: str, body: Any) -> tuple[str | None, list[Row]]:

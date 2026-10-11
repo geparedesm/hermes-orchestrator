@@ -133,12 +133,13 @@ class Tasks:
         uow.cur.execute(
             """
             INSERT INTO tasks (id, key, project_id, title, original_request_artifact_id, requested_by, priority, state,
-                               autonomy, budget_profile, expansion_profile, labels, idempotency_key)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'BACKLOG', %s, %s, %s, %s, %s)
+                               autonomy, budget_profile, expansion_profile, labels, idempotency_key, approve_plan)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'BACKLOG', %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (task_id, key, project["id"], title, artifact.id, principal.value, body.get("priority", "NORMAL"),
-             autonomy, budget_profile, body.get("expansion_profile"), body.get("labels", []), body["idempotency_key"]),
+             autonomy, budget_profile, body.get("expansion_profile"), body.get("labels", []), body["idempotency_key"],
+             bool(body.get("approve_plan"))),
         )
         task = uow.cur.fetchone()
         assert task is not None

@@ -58,6 +58,8 @@ class NewTaskBody(BaseModel):
     # Generated once per form by the page, so a repeated click or a retried request creates one task.
     idempotency_key: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
     attachments: list[AttachmentBody] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
+    # Review the plan before work starts (only adds supervision to the project's setting).
+    approve_plan: bool = False
 
 
 class NewChildBody(BaseModel):
@@ -162,7 +164,7 @@ async def create_task(request: Request) -> Any:
         files = [a.model_dump() for a in body.attachments]
         return await run_in_threadpool(_call, lambda: _api().create(
             body.project, body.request.strip(), (body.title or "").strip() or None, body.priority, budget=body.budget,
-            depends_on=keys, idempotency_key=body.idempotency_key, attachments=files))
+            depends_on=keys, idempotency_key=body.idempotency_key, attachments=files, approve_plan=body.approve_plan))
 
 
 @router.get("/tasks/{key}/attachments/{attachment_id}")
@@ -203,6 +205,17 @@ def child_action(slug: str, operation_id: UUID, verb: Literal["retry", "abandon"
     if not re.match(_SLUG, slug):
         raise HTTPException(status_code=404, detail="unknown project")
     return _call(_api().child_action, slug, str(operation_id), verb)
+
+
+class AnswersBody(BaseModel):
+    answers: dict[str, dict[str, str]] | None = None
+    use_recommended: bool = False
+
+
+@router.post("/tasks/{key}/clarifications/{reference}/answer")
+def answer_questions(key: str, reference: UUID, body: AnswersBody) -> Any:
+    """The operator's answers to a round of planning questions (the control plane checks they are a person's)."""
+    return _call(_api().answer_task, key, str(reference), body.model_dump())
 
 
 @router.post("/approvals/{approval_id}/renew")
