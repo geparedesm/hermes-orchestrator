@@ -35,6 +35,10 @@ def dashboard(monkeypatch):
             calls.append((self.principal, args, kwargs))
             return {"key": "T-7", "state": "BACKLOG"}
 
+        def board(self):
+            calls.append((self.principal, "board", {}))
+            return {"tasks": [{"key": "T-7", "subtasks": 3, "subtasks_done": 1}]}
+
     monkeypatch.setattr(module._client, "TaskApi", FakeApi)
     app = FastAPI()
     app.include_router(module.router)
@@ -131,3 +135,10 @@ def test_renew_and_expired_listing_routes(dashboard, monkeypatch):
     assert client.get("/approvals", params={"state": "EXPIRED"}).json() == {"approvals": []}
     assert client.post("/approvals/not-a-uuid/renew").status_code == 422
     assert seen == [("renew", "dashboard:operator", "0190a3e8-0000-7000-8000-000000000001"), ("expired", "dashboard:operator")]
+
+
+def test_the_board_comes_from_the_dashboard_read_model(dashboard):
+    client, calls = dashboard
+    response = client.get("/board")
+    assert response.status_code == 200 and response.json()["tasks"][0]["subtasks_done"] == 1
+    assert calls == [("dashboard:operator", "board", {})]

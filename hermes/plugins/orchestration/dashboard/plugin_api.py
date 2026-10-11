@@ -90,8 +90,8 @@ def summary() -> Any:
 
 
 @router.get("/board")
-def board() -> dict[str, Any]:
-    return {"tasks": _call(_api().tasks, None, None, True).get("tasks", [])}
+def board() -> Any:
+    return _call(_api().board)
 
 
 @router.get("/projects")

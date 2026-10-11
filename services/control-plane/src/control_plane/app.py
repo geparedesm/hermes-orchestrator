@@ -738,6 +738,11 @@ def create_app(services: Services) -> FastAPI:
             health = services.recovery.health.summary(uow) if services.recovery else {}
             return jsonable(dashboard.summary(uow, queue, health))
 
+    @app.get("/v1/dashboard/board")
+    def dashboard_board(_: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return jsonable({"tasks": dashboard.board(uow)})
+
     @app.get("/v1/dashboard/tasks/{key}")
     def dashboard_task(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
