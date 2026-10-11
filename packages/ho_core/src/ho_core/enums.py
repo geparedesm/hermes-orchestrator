@@ -102,6 +102,7 @@ class ApprovalAction(StrEnum):
     ASSUMPTION = "ASSUMPTION"
     UPDATE = "UPDATE"
     PROJECT_READY = "PROJECT_READY"
+    CREATE_CHILD = "CREATE_CHILD"
 
 
 class ApprovalState(StrEnum):

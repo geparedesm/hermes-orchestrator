@@ -44,6 +44,37 @@ def view(pr: dict) -> dict:
             "mergeStateStatus": "CLEAN" if clean else "DIRTY"}
 
 
+def repo(state: dict, command: str, rest: list[str]) -> int:
+    """`gh repo create|view` over local bare repositories next to the state file (child projects)."""
+    repos = state.setdefault("repos", {})
+    name = rest[0]
+    if command == "create":
+        if name in repos:
+            print("GraphQL: Name already exists on this account (createRepository)", file=sys.stderr)
+            return 1
+        path = STATE.parent / "remotes" / (name.replace("/", "__") + ".git")
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(path)], check=True)
+        repos[name] = {"path": str(path), "private": "--private" in rest, "description": option(rest, "--description", "")}
+        save(state)
+        if state.get("lose_create_answer"):  # the repository exists, but the answer is lost
+            state["lose_create_answer"] = False
+            save(state)
+            print("connection reset", file=sys.stderr)
+            return 1
+        print(f"https://github.com/{name}")
+        return 0
+    if command == "view":
+        found = repos.get(name)
+        if found is None:
+            print(f"GraphQL: Could not resolve to a Repository with the name '{name}'. (repository)", file=sys.stderr)
+            return 1
+        heads = subprocess.run(["git", "-C", found["path"], "for-each-ref", "refs/heads"], capture_output=True, text=True).stdout
+        print(json.dumps({"nameWithOwner": name, "description": found["description"], "isEmpty": not heads.strip(),
+                          "isPrivate": found["private"], "url": found["path"], "defaultBranchRef": {"name": "main"}}))
+        return 0
+    return 2
+
+
 def main(args: list[str]) -> int:
     state = load()
     state["calls"].append(args)
@@ -51,6 +82,8 @@ def main(args: list[str]) -> int:
     if args[:2] == ["auth", "status"]:
         print("Logged in to github.com" if state["logged_in"] else "not logged in", file=sys.stderr)
         return 0 if state["logged_in"] else 1
+    if args[0] == "repo":
+        return repo(state, args[1], args[2:])
     if args[0] != "pr":
         print(f"unsupported: {args}", file=sys.stderr)
         return 2

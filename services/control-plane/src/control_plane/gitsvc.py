@@ -9,6 +9,10 @@ import httpx
 from .errors import ApiError, BadRequest, Conflict, Forbidden, NotFound, UpstreamError
 
 
+class Unowned(Conflict):
+    """Something exists where a child creation would write, without that operation's evidence."""
+
+
 class GitServiceClient:
     def __init__(self, base_url: str, token: str, *, client: httpx.Client | None = None) -> None:
         self._client = client or httpx.Client(base_url=base_url, timeout=300)
@@ -20,9 +24,10 @@ class GitServiceClient:
         except httpx.HTTPError as exc:
             raise UpstreamError(f"git-service unavailable: {exc}") from exc
         try:
-            message = response.json().get("message", "")
-        except ValueError:
-            message = response.text[:300]
+            payload = response.json()
+            message, error = payload.get("message", ""), payload.get("error")
+        except (ValueError, AttributeError):
+            message, error = response.text[:300], None
         if response.status_code == 404:
             raise NotFound(message or "not found")
         if response.status_code in (400, 422):
@@ -30,7 +35,7 @@ class GitServiceClient:
         if response.status_code == 403:
             raise Forbidden(f"git-service refused: {message}")
         if response.status_code == 409:
-            raise Conflict(message)
+            raise Unowned(message) if error == "unowned" else Conflict(message)
         if response.status_code >= 400:
             raise UpstreamError(f"git-service error {response.status_code}: {message}")
         return response.json()
@@ -72,6 +77,15 @@ class GitServiceClient:
 
     def refs(self, path: str, refs: list[str]) -> dict[str, Any]:
         return self._post("/v1/refs", {"path": path, "refs": refs})
+
+    def child_plan(self, path: str, *, template: str, children_path: str, name: str) -> dict[str, Any]:
+        return self._post("/v1/children/plan", {"path": path, "template": template, "children_path": children_path, "name": name})
+
+    def child_publish(self, path: str, authorization: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v1/children/publish", {"path": path, "authorization": authorization})
+
+    def child_remote(self, path: str, authorization: dict[str, Any], commit: str) -> dict[str, Any]:
+        return self._post("/v1/children/remote", {"path": path, "authorization": authorization, "commit": commit})
 
     def merge(self, path: str, task: str, authorization: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v1/merge", {"path": path, "task": task, "authorization": authorization})

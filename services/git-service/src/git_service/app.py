@@ -19,11 +19,11 @@ import yaml
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from ho_core.detect import MAX_FILE_BYTES, detect
-from ho_core.gitpolicy import GitPolicyError, protected_branches, verify_merge
+from ho_core.gitpolicy import GitPolicyError, protected_branches, verify_child, verify_merge
 from ho_core.paths import PathOutsideRoot, resolve_inside
 from pydantic import BaseModel, Field
 
-from . import github, gitcmd, repo_ops
+from . import children, github, gitcmd, repo_ops
 
 
 class ProjectPath(BaseModel):
@@ -88,6 +88,20 @@ class MergeBody(ProjectPath):
     authorization: dict[str, Any]
 
 
+class ChildPlanBody(ProjectPath):
+    template: str = Field(min_length=1, max_length=500)
+    children_path: str = Field(min_length=1, max_length=500)
+    name: str = Field(min_length=1, max_length=64)
+
+
+class ChildBody(ProjectPath):
+    authorization: dict[str, Any]
+
+
+class ChildRemoteBody(ChildBody):
+    commit: str = Field(min_length=40, max_length=64)
+
+
 class BranchPolicy(ProjectPath):
     prefix: str = Field(min_length=1, max_length=32)
     protected: list[str] = Field(default_factory=list, max_length=100)
@@ -150,6 +164,10 @@ def create_app(projects_root: Path, token: str, merge_key: bytes = b"") -> FastA
     @app.exception_handler(repo_ops.Refused)
     async def refused(_: Request, exc: repo_ops.Refused) -> JSONResponse:
         return JSONResponse({"error": "refused", "message": str(exc)}, status_code=409)
+
+    @app.exception_handler(children.Unowned)
+    async def unowned(_: Request, exc: children.Unowned) -> JSONResponse:
+        return JSONResponse({"error": "unowned", "message": str(exc)}, status_code=409)
 
     @app.exception_handler(GitPolicyError)
     async def policy(_: Request, exc: GitPolicyError) -> JSONResponse:
@@ -293,6 +311,33 @@ def create_app(projects_root: Path, token: str, merge_key: bytes = b"") -> FastA
                                         target_branch=subject["target_branch"], target_sha=subject["target_sha"],
                                         head_sha=subject["head_sha"], method=subject["method"])
         return locked(repo, run_merge)
+
+    # ---------------------------------------------------------------- child projects
+
+    @app.post("/v1/children/plan", dependencies=[Depends(authorized)])
+    def child_plan(body: ChildPlanBody) -> dict[str, Any]:
+        """Pin the parent's HEAD and template tree and check the destination; writes nothing."""
+        parent = git_repository(body.path)
+        return locked(parent, lambda: children.plan(parent, template_path=body.template, children_path=body.children_path,
+                                                    name=body.name))
+
+    def child_subject(body: ChildBody) -> tuple[Path, dict[str, Any]]:
+        subject = verify_child(merge_key, body.authorization)
+        if subject["parent"] != body.path:
+            raise GitPolicyError("the child-project authorization is for another parent")
+        return git_repository(body.path), subject
+
+    @app.post("/v1/children/publish", dependencies=[Depends(authorized)])
+    def child_publish(body: ChildBody) -> dict[str, Any]:
+        """Approved creation, step 1: the template rendered into a new directory and its first commit."""
+        parent, subject = child_subject(body)
+        return locked(parent, lambda: children.publish(parent, subject))
+
+    @app.post("/v1/children/remote", dependencies=[Depends(authorized)])
+    def child_remote(body: ChildRemoteBody) -> dict[str, Any]:
+        """Approved creation, step 2: the GitHub repository created (or adopted with evidence) and main pushed."""
+        parent, subject = child_subject(body)
+        return locked(parent, lambda: children.remote(parent, subject, body.commit))
 
     # ---------------------------------------------------------------- GitHub
 
