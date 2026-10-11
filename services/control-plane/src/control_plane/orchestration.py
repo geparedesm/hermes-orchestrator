@@ -52,6 +52,7 @@ MAX_ACTIONS = 30
 FAILBACK_HOLD = timedelta(minutes=10)
 MAX_REVIEW_RETRIES = 2
 # Only these events make the orchestrator think again (design change 2).
+RESOLVE_ATTEMPTS = 5  # agent-assisted conflict resolutions per task
 TRIGGERS = ("ORCHESTRATOR_INPUT", "REQUIREMENTS_REVISED", "APPROVAL_DECIDED", "BUDGET_RAISED")
 STEP_STATES = (S.PLANNING, S.QUEUED, S.RUNNING, S.FIX_REQUIRED)
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -1139,12 +1140,16 @@ class Orchestration:
                 self._input(uow, task, f"integration failed: {exc}")
 
     def _resolve_conflict(self, uow: UnitOfWork, task: Row, result: dict[str, Any]) -> None:
-        """One agent-assisted resolution attempt by the developer of the conflicting work, then the orchestrator decides."""
-        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE'", (task["id"],))
-        if int(uow.cur.fetchone()["n"]) >= 1:  # type: ignore[index]
+        """One agent-assisted resolution attempt per conflicting workspace (several subtasks may each conflict with
+        the target), at most RESOLVE_ATTEMPTS per task, then the orchestrator decides."""
+        ref = result["conflicting_ref"]
+        uow.cur.execute("SELECT count(*) AS n, count(*) FILTER (WHERE spec->'purpose'->>'ref' = %s) AS same FROM executions "
+                        "WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE'", (ref, task["id"]))
+        attempts = uow.cur.fetchone()
+        if int(attempts["same"]) or int(attempts["n"]) >= RESOLVE_ATTEMPTS:  # type: ignore[index]
             self._input(uow, task, f"integration conflict in {', '.join(result['conflicts'][:5])} after a resolution attempt")
             return
-        name = result["conflicting_ref"].rsplit("/", 1)[-1]
+        name = ref.rsplit("/", 1)[-1]
         uow.cur.execute("SELECT s.developer_provider FROM subtasks s JOIN workspaces w ON w.id = s.workspace_id WHERE w.name = %s",
                         (name,))
         row = uow.cur.fetchone()
@@ -1152,7 +1157,7 @@ class Orchestration:
         try:
             resolved = self.git.resolve_conflicts(uow, task["key"], provider=provider, principal=ORCHESTRATOR)
             uow.cur.execute("UPDATE executions SET spec = jsonb_set(spec, '{purpose}', %s) WHERE id = %s",
-                            (jsonb({"kind": "RESOLVE"}), resolved["execution"]))
+                            (jsonb({"kind": "RESOLVE", "ref": ref}), resolved["execution"]))
         except ApiError as exc:
             self._input(uow, task, f"integration conflict could not be handed to an agent: {exc}")
 

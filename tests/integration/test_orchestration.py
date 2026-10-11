@@ -643,3 +643,33 @@ def test_a_revision_is_planned_before_an_accepted_plan_is_integrated(api, servic
     api.post(f"/v1/tasks/{task}/retry")
     services.scheduler.run_once()
     assert state(api, task) == "PLANNING" and active(services, task, "ORCHESTRATOR")  # the revision is planned first
+
+
+def test_each_conflicting_workspace_gets_one_resolution_attempt(api, services, agents, repo, task, monkeypatch):
+    orchestration = services.orchestration
+    [step] = active(services, task, "ORCHESTRATOR")
+    handed = []
+
+    def resolve(uow, task_key, *, provider, principal):
+        handed.append(task_key)
+        return {"execution": str(step["id"])}  # stand-in for the DEVELOPER execution Git Service would start
+
+    monkeypatch.setattr(orchestration.git, "resolve_conflicts", resolve)
+
+    def conflict(ref):
+        with services.ctx.unit_of_work() as uow:
+            orchestration._resolve_conflict(uow, services.tasks.get(uow, task, lock=True),
+                                            {"conflicting_ref": f"refs/hermes/workspaces/{ref}", "conflicts": ["tests/test_x.py"]})
+
+    def inputs():
+        return q(services, "SELECT count(*) AS n FROM events e JOIN tasks t ON t.id = e.task_id WHERE t.key = %s "
+                 "AND e.type = 'ORCHESTRATOR_INPUT' AND e.summary LIKE '%%after a resolution attempt'", task)[0]["n"]
+
+    conflict("t-1-7a1")
+    assert len(handed) == 1 and inputs() == 0
+    q(services, "UPDATE executions SET spec = jsonb_set(spec, '{purpose}', %s::jsonb) WHERE id = %s",
+      json.dumps({"kind": "RESOLVE", "ref": "refs/hermes/workspaces/t-1-7a1"}), step["id"])
+    conflict("t-1-7a1")  # the same workspace again: the orchestrator decides
+    assert len(handed) == 1 and inputs() == 1
+    conflict("t-1-8a1")  # another subtask's workspace conflicting too gets its own attempt
+    assert len(handed) == 2 and inputs() == 1
