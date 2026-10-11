@@ -232,6 +232,10 @@ class Approvals:
                          task_id=approval["task_id"], summary=f"{approval['action']} approval applied",
                          data={"approval_id": str(approval["id"])}, pending=uow.events)
 
+    def invalidate(self, uow: UnitOfWork, row: Row, reason: str) -> None:
+        """An open approval (locked by the caller) that no longer applies."""
+        self._set_terminal(uow, row, ApprovalState.INVALIDATED, reason)
+
     def invalidate_open(self, uow: UnitOfWork, *, project_id: UUID, task_id: UUID | None, action: ApprovalAction | None, reason: str) -> int:
         query = "SELECT * FROM approvals WHERE project_id = %s AND task_id IS NOT DISTINCT FROM %s AND state IN ('PENDING', 'APPROVED')"
         params: list[Any] = [project_id, task_id]

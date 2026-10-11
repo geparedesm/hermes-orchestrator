@@ -625,6 +625,11 @@ class QualityGate:
             return "PENDING"
         if existing and existing["state"] == "REJECTED":
             return "REJECTED"
+        # An exception still open for an earlier commit or other reasons no longer applies (one open per action).
+        uow.cur.execute("SELECT * FROM approvals WHERE task_id = %s AND action = 'HIGH_RISK_OPERATION' "
+                        "AND state IN ('PENDING', 'APPROVED') AND subject->>'kind' = %s FOR UPDATE", (task["id"], GATE_EXCEPTION))
+        for stale in uow.cur.fetchall():
+            self.approvals.invalidate(uow, stale, "the change under the Quality Gate changed")
         self.approvals.request(uow, action=ApprovalAction.HIGH_RISK_OPERATION, project_id=project["id"], task_id=task["id"],
                                subject=subject, config_hash=config["_hash"], risk=Risk.CRITICAL,
                                summary=f"{task['key']}: Quality Gate exception needed: {'; '.join(reasons)}",

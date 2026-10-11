@@ -222,6 +222,32 @@ def test_policy_violations_need_an_approval(api, services, repo, agents, task):
     assert api.get(f"/v1/tasks/{task}").json()["state"] == "APPROVAL_REQUIRED"
 
 
+def test_an_exception_for_an_earlier_commit_is_replaced(api, services, repo, agents, task):
+    integrate(api, services, repo, task, {"app.py": "x = 2\n", "tests/test_app.py": "x\n"})
+    finish_verification(services, agents, task)
+    review(api, services, agents, task)
+    with services.ctx.db.transaction() as cur:  # policy violations stay with the task across integrations
+        cur.execute("INSERT INTO events (task_id, project_id, type, actor, summary, data, audit) "
+                    "SELECT id, project_id, 'COMMAND_HIGH_RISK', 'agent-manager', '1 high-risk command(s) observed', '{}', false "
+                    "FROM tasks WHERE key = %s", (task,))
+    gate(api, services, task)
+    first = next(a for a in api.get("/v1/approvals").json()["approvals"] if a["action"] == "HIGH_RISK_OPERATION")
+    api.post(f"/v1/approvals/{first['id']}/decision", {"decision": "APPROVE"})
+    assert api.get(f"/v1/tasks/{task}").json()["state"] == "READY_FOR_MERGE"
+    # Integrated again (the target moved): the approved exception, never consumed, was bound to the old commit.
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE git_changes SET integration_sha = %s WHERE task_id = (SELECT id FROM tasks WHERE key = %s)",
+                    ("f" * 40, task))
+    set_state(services, task, "QUALITY_GATE")
+    response = api.post(f"/v1/tasks/{task}/quality-gate")
+    assert response.status_code == 200, response.text
+    with services.ctx.db.transaction() as cur:
+        cur.execute("SELECT state, subject->>'commit' AS commit FROM approvals WHERE action = 'HIGH_RISK_OPERATION' "
+                    "ORDER BY requested_at")
+        rows = cur.fetchall()
+    assert [r["state"] for r in rows] == ["INVALIDATED", "PENDING"] and rows[1]["commit"] == "f" * 40
+
+
 def test_flaky_tests_are_reported(api, services, repo, agents, task):
     integrate(api, services, repo, task, {"app.py": "x = 2\n", "tests/test_app.py": "x\n"})
     services.scheduler.run_once()
