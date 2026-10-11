@@ -224,6 +224,15 @@
 .orch-project-facts { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.84rem; align-items: center; }
 .orch-project-facts > span { display: inline-flex; align-items: center; }
 
+.orch-children { border-top: 1px solid var(--o-border); padding-top: 0.6rem; display: flex; flex-direction: column; gap: 0.45rem; }
+.orch-children-title { text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.orch-project-parent { grid-column: 1 / -1; }
+.orch-child-list, .orch-creations { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: 0.45rem; }
+.orch-child { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.55rem; border-radius: 0.45rem; background: var(--o-soft); }
+.orch-child-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.orch-creation { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.55rem 0.65rem; border-radius: 0.45rem;
+  border: 1px dashed var(--o-border); }
+
 /* ---- system ---- */
 .orch-capacity { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1rem; }
 .orch-big { font-size: 1.3rem; font-weight: 700; margin: 0.15rem 0 0.35rem; }

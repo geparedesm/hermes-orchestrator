@@ -142,3 +142,24 @@ def test_the_board_comes_from_the_dashboard_read_model(dashboard):
     response = client.get("/board")
     assert response.status_code == 200 and response.json()["tasks"][0]["subtasks_done"] == 1
     assert calls == [("dashboard:operator", "board", {})]
+
+
+def test_a_module_is_requested_from_the_dashboard_as_the_operator(dashboard, monkeypatch):
+    client, calls = dashboard
+    module = sys.modules["orchestration_dashboard_api_test"]
+
+    class FakeApi:
+        def __init__(self, principal):
+            self.principal = principal
+
+        def create_child(self, slug, name, title, description, *, idempotency_key=None):
+            calls.append((self.principal, slug, name, title, description, idempotency_key))
+            return {"state": "AWAITING_APPROVAL"}
+
+    monkeypatch.setattr(module._client, "TaskApi", FakeApi)
+    response = client.post("/projects/odoo-base/children", json={"name": "job_alerts", "title": " Job alerts ",
+                                                                  "description": "", "idempotency_key": KEY})
+    assert response.status_code == 200 and response.json()["state"] == "AWAITING_APPROVAL"
+    assert calls == [("dashboard:operator", "odoo-base", "job_alerts", "Job alerts", "", KEY)]
+    assert client.post("/projects/odoo-base/children", json={"name": "Bad-Name", "title": "x", "idempotency_key": KEY}).status_code == 422
+    assert client.post("/projects/../children", json={"name": "ok_name", "title": "x", "idempotency_key": KEY}).status_code == 404
