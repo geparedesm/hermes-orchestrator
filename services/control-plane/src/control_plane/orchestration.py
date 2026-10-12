@@ -600,7 +600,8 @@ class Orchestration:
             uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0 WHERE id = %s", (task_id,))
             return  # something is in flight; its result will trigger the next step
         self._event(uow, task, "STEP_STALLED", "your last step left nothing running" + (" (some actions were rejected)" if rejected
-                    else "") + ": start READY subtasks with REQUEST_EXECUTION, fix the plan, or REPORT_BLOCKED")
+                    else "") + ": start READY and FIX_REQUIRED subtasks with REQUEST_EXECUTION (a subtask sent back with REJECT_SUBTASK "
+                    "needs it too), fix the plan, or REPORT_BLOCKED")
         uow.cur.execute("UPDATE tasks SET orchestrator_failures = orchestrator_failures + 1 WHERE id = %s "
                         "RETURNING orchestrator_failures", (task["id"],))
         failures = int(uow.cur.fetchone()["orchestrator_failures"])  # type: ignore[index]

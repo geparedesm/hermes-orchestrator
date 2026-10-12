@@ -45,7 +45,7 @@ pg_isready -q -h "$host" -U "$user" || { echo "ho-odoo-test: PostgreSQL at $host
 
 log="$work/odoo.log"
 set +e
-python "$odoo_home/odoo-bin" \
+"$odoo_home/venv/bin/python" "$odoo_home/odoo-bin" \
   --addons-path="$odoo_home/odoo/addons,$work/addons" \
   --data-dir="$work/data" \
   --db_host="$host" --db_user="$user" --db_password="$PGPASSWORD" \

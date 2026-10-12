@@ -17,7 +17,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 # Exactly the approved release: the archive is checked against its SHA-256 before anything is extracted.
 RUN test -n "$ODOO_SERIES" -a -n "$ODOO_RELEASE" -a -n "$ODOO_SHA256" \
- && curl -fsSL -o /tmp/odoo.tgz "https://nightly.odoo.com/${ODOO_SERIES}/nightly/tgz/odoo_${ODOO_SERIES}.${ODOO_RELEASE}.tar.gz" \
+ && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o /tmp/odoo.tgz "https://nightly.odoo.com/${ODOO_SERIES}/nightly/tgz/odoo_${ODOO_SERIES}.${ODOO_RELEASE}.tar.gz" \
  && echo "${ODOO_SHA256}  /tmp/odoo.tgz" | sha256sum -c - \
  && mkdir -p /opt/odoo \
  && tar -xzf /tmp/odoo.tgz -C /opt/odoo --strip-components=1 \
@@ -28,6 +28,8 @@ RUN test -n "$ODOO_SERIES" -a -n "$ODOO_RELEASE" -a -n "$ODOO_SHA256" \
  && if [ -n "$ODOO_EXTRA_PYTHON" ]; then /opt/odoo/venv/bin/pip install --no-cache-dir --disable-pip-version-check $ODOO_EXTRA_PYTHON; fi \
  && /opt/odoo/venv/bin/python /opt/odoo/odoo-bin --version
 COPY --chmod=755 ho-odoo-test /opt/ho/bin/ho-odoo-test
+# Login shells reset PATH (agent-base's /etc/ho-path brings these back); the test runner is also on the default PATH.
+RUN printf '%s\n' /opt/odoo/venv/bin >> /etc/ho-path && ln -s /opt/ho/bin/ho-odoo-test /usr/local/bin/ho-odoo-test
 # Test runs never write bytecode into the workspace.
 ENV PYTHONDONTWRITEBYTECODE=1 HO_ODOO_HOME=/opt/odoo PATH=/opt/odoo/venv/bin:/opt/ho/bin:$PATH
 LABEL org.hermes-orchestrator.toolchain.odoo="${ODOO_SERIES}.${ODOO_RELEASE}"

@@ -84,3 +84,15 @@ def test_a_workspace_without_a_module_is_refused(database, tmp_path):
     workspace.mkdir()
     status, logs = run(database, workspace, "ho_sample")
     assert status == 2 and "no __manifest__.py" in logs, logs[-3000:]
+
+
+def test_login_shells_find_the_test_runner():
+    """T-50: agents run commands in login shells, whose /etc/profile resets PATH; ho-odoo-test must still be found."""
+    client = docker.from_env()
+    container = client.containers.run(_image(), ["bash", "-lc", "command -v ho-odoo-test && echo found"], detach=True,
+                                      user="10001:10001")
+    try:
+        assert container.wait(timeout=120)["StatusCode"] == 0
+        assert "found" in container.logs().decode()
+    finally:
+        container.remove(force=True)

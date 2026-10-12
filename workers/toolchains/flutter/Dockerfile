@@ -26,7 +26,8 @@ RUN HOME=/tmp/flutter-home flutter config --no-analytics >/dev/null \
 USER root
 RUN mv /opt/flutter/bin/cache /opt/flutter-cache && ln -s /tmp/flutter-cache /opt/flutter/bin/cache
 COPY --chmod=755 flutter-wrapper /opt/ho/toolchain-bin/flutter
-RUN ln -s flutter /opt/ho/toolchain-bin/dart
+RUN ln -s flutter /opt/ho/toolchain-bin/dart \
+ && printf '%s\n' /opt/flutter/bin /opt/ho/toolchain-bin >> /etc/ho-path  # login shells reset PATH (agent-base)
 ENV PATH=/opt/ho/toolchain-bin:$PATH
 USER 10001:10001
 RUN flutter --version >/dev/null
