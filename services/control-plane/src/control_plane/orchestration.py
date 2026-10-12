@@ -54,6 +54,8 @@ MAX_REVIEW_RETRIES = 2
 # Only these events make the orchestrator think again (design change 2).
 RESOLVE_ATTEMPTS = 5  # agent-assisted conflict resolutions per task
 REQUIREMENTS_LIMIT = 50_000  # characters of one requirements version
+PLAN_CHURN_LIMIT = 4  # plan versions within PLAN_CHURN_WINDOW without a developer start stop the task
+PLAN_CHURN_WINDOW = timedelta(minutes=60)
 TRIGGERS = ("ORCHESTRATOR_INPUT", "REQUIREMENTS_REVISED", "APPROVAL_DECIDED", "BUDGET_RAISED")
 STEP_STATES = (S.PLANNING, S.QUEUED, S.RUNNING, S.FIX_REQUIRED)
 OTHER = {"claude": "codex", "codex": "claude"}
@@ -425,7 +427,11 @@ class Orchestration:
                  "job — when every subtask is accepted, use SUBMIT_FOR_QUALITY_GATE, also after a merge was refused for a moved",
                  "target. Plan small, independent subtasks with accurate `files`; request DEVELOPER executions only for READY",
                  "subtasks; use WAIT when nothing needs deciding. Every subtask kind, TEST_AUTHORING included, runs with role DEVELOPER. Record assumptions instead of guessing silently; HIGH or",
-                 "irreversible ambiguity needs RECORD_ASSUMPTION with level HIGH (a human decides).", "",
+                 "irreversible ambiguity needs RECORD_ASSUMPTION with level HIGH (a human decides).",
+                 "Follow the project's own rules (AGENTS.md, CLAUDE.md in the project files). When they require tests with every",
+                 "feature, each IMPLEMENT subtask writes and runs its own tests: never tell a developer not to write or touch tests,",
+                 "and use TEST_AUTHORING subtasks only for extra coverage. An assignment that contradicts the project's rules makes",
+                 "the developer stop (BLOCKED).", "",
                  "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], "",
                  "## Project files", "", f"The tracked files of the project's main branch are mounted read-only at /projects/{self._slug(uow, task)} "
                  "(no Git metadata; files the project ignores, such as local secrets, are not there). Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
@@ -491,6 +497,15 @@ class Orchestration:
                              f"{' deps ' + ','.join(deps) if deps else ''}: {s['title']}"
                              f"{' — ' + s['state_reason'] if s['state_reason'] else ''}")
             lines.append("")
+            blocked = [s for s in subtasks if s["state"] == "BLOCKED"]
+            if blocked:
+                lines += ["## Blocked subtasks: how to continue", "",
+                          f"Blocked: {', '.join(s['local_key'] for s in blocked)}. A blocked subtask never runs again on its own, and "
+                          "resubmitting an unchanged plan does nothing (it is refused). Choose one, per subtask:",
+                          "- SET_PLAN with that subtask's description (or title) revised so it resolves the reason: it becomes ready "
+                          "for a new attempt (a supervised plan asks the person first);",
+                          "- REJECT_SUBTASK with `text` = the guidance that resolves it: it goes to FIX_REQUIRED, then REQUEST_EXECUTION;",
+                          "- REPORT_BLOCKED when only the person can resolve it.", ""]
         uow.cur.execute("SELECT type, summary FROM events WHERE task_id = %s AND seq > %s AND type NOT IN "
                         "('GRANT_ISSUED', 'GRANT_REVOKED', 'WORKER_CREATED', 'AGENT_ASSIGNED') "
                         "ORDER BY seq DESC LIMIT 40", (task["id"], task["orchestrator_cursor_seq"]))
@@ -721,6 +736,15 @@ class Orchestration:
                 raise ValueError(f"{key} depends on unknown subtasks {unknown}")
         _check_acyclic(graph)
         current = {s["local_key"]: s for s in self._subtasks(uow, task)}
+        if task["current_plan_version"] and self._same_plan(uow, current, keys, items, graph):
+            blocked = [s["local_key"] for s in current.values() if s["state"] == "BLOCKED"]
+            raise ValueError("the plan is unchanged, so nothing happens"
+                             + (f"; {', '.join(blocked)} stays BLOCKED: revise its description in the plan, REJECT_SUBTASK it with "
+                                "guidance, or REPORT_BLOCKED" if blocked else ""))
+        churn = self._plan_churn(uow, task)
+        if churn is not None:
+            self._move(uow, task, S.BLOCKED, reason=churn)
+            return churn
         busy = [s["key"] for s in current.values() if s["state"] in ("IN_PROGRESS", "IN_REVIEW") and s["local_key"] not in graph]
         if busy:
             raise Conflict(f"the new plan drops subtasks that are running ({', '.join(busy)}); revise them instead")
@@ -737,6 +761,11 @@ class Orchestration:
         for key, item in zip(keys, items, strict=True):
             existing = current.get(key)
             if existing is not None:
+                title, description = item.get("title", existing["title"])[:200], (item.get("description") or existing["description"])[:8000]
+                if existing["state"] == "BLOCKED" and (title != existing["title"] or description != existing["description"]):
+                    # A revised assignment is a new attempt: the subtask becomes ready again once its dependencies are met.
+                    self._set_subtask(uow, existing, "PENDING", None)
+                    self._event(uow, task, "SUBTASK_UNBLOCKED", f"{existing['key']}: its assignment changed in the new plan; ready for a new attempt")
                 uow.cur.execute("UPDATE subtasks SET plan_version = %s, title = %s, description = %s, estimated_scope = %s, "
                                 "risk = %s, preferred_provider = %s, updated_at = now() WHERE id = %s",
                                 (version, item.get("title", existing["title"])[:200], (item.get("description") or existing["description"])[:8000],
@@ -985,6 +1014,37 @@ class Orchestration:
         uow.cur.execute("UPDATE tasks SET plan_approval_state = NULL, plan_approval_version = NULL "
                         "WHERE id = %s AND plan_approval_state IN ('PENDING', 'APPROVED')", (task["id"],))
         return waited
+
+    def _same_plan(self, uow: UnitOfWork, current: dict[str, Row], keys: list[str], items: list[dict[str, Any]],
+                   graph: dict[str, list[str]]) -> bool:
+        """Whether a submitted plan is the current one again (same subtasks, assignments, dependencies, and scope)."""
+        live = {k: s for k, s in current.items() if s["state"] != "CANCELLED"}
+        if set(live) != set(keys):
+            return False
+        for key, item in zip(keys, items, strict=True):
+            s = live[key]
+            uow.cur.execute("SELECT x.local_key FROM subtask_dependencies d JOIN subtasks x ON x.id = d.depends_on_subtask_id "
+                            "WHERE d.subtask_id = %s", (s["id"],))
+            deps = sorted(r["local_key"] for r in uow.cur.fetchall())
+            if (str(item.get("title") or key)[:200] != s["title"] or str(item.get("description") or "")[:8000] != s["description"]
+                    or (item.get("kind") or "IMPLEMENT") != s["kind"] or (item.get("risk") or "MEDIUM") != s["risk"]
+                    or item.get("preferred_provider") != s["preferred_provider"] or sorted(graph[key]) != deps
+                    or list(item.get("files") or [])[:100] != list((s["estimated_scope"] or {}).get("files") or [])):
+                return False
+        return True
+
+    def _plan_churn(self, uow: UnitOfWork, task: Row) -> str | None:
+        """A safety stop: several plan versions in a short time since the last developer start means the plan is going
+        in circles (each one may also ask the person for an approval)."""
+        uow.cur.execute(
+            "SELECT count(*) AS n FROM events WHERE task_id = %s AND type = 'PLAN_VERSIONED' AND occurred_at > now() - %s "
+            "AND occurred_at > coalesce((SELECT max(created_at) FROM executions WHERE task_id = %s AND role = 'DEVELOPER'), '-infinity')",
+            (task["id"], PLAN_CHURN_WINDOW, task["id"]))
+        count = int(uow.cur.fetchone()["n"])  # type: ignore[index]
+        if count < PLAN_CHURN_LIMIT:
+            return None
+        return (f"{count} plan versions in a row without any work starting: the plan is going in circles. "
+                "Look at the blocked subtasks and the plan, then retry the task or revise the request")
 
     def _expansion_approved(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], added: int, limit: int) -> bool:
         """A plan beyond the expansion profile needs a human approval bound to that exact plan (design change)."""
