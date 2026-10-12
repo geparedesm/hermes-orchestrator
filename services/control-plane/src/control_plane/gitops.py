@@ -95,8 +95,25 @@ class GitChanges:
 
     # ------------------------------------------------------------- workspaces
 
+    def _prepare(self, uow: UnitOfWork, task: Row, project: Row, name: str, branch: str, base_ref: str, pin: str | None) -> dict[str, Any]:
+        try:
+            return self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
+        except Conflict as exc:
+            # A clone with this name but no record is what a rolled-back launch leaves behind (Git Service prepared it,
+            # the transaction that would have recorded it did not commit). The task row is locked, so no concurrent
+            # creation can own it: remove it and prepare again. A recorded workspace is never touched.
+            uow.cur.execute("SELECT 1 FROM workspaces WHERE project_id = %s AND name = %s", (project["id"], name))
+            if "already exists" not in str(exc) or uow.cur.fetchone() is not None:
+                raise
+            self.ctx.git.remove_workspace(project["relative_path"], name)
+            self._event(uow, task, "WORKSPACE_RECLAIMED", f"removed {name}, left by an earlier attempt that was rolled back",
+                        {"workspace": name})
+            return self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
+
     def workspace(self, uow: UnitOfWork, task_key: str, *, principal: Principal, suffix: str | None = None,
-                  kind: str = "DEVELOPMENT", base_ref: str | None = None) -> Row:
+                  kind: str = "DEVELOPMENT", base_ref: str | None = None, incoming_ref: str | None = None) -> Row:
+        """A task workspace at `base_ref`. With `incoming_ref`, that ref is merged into it with its conflicts left in
+        place, for the developer to reconcile first (dependencies whose accepted work conflicts)."""
         task, project, config = self._context(uow, task_key, lock=True)
         if kind == "DEVELOPMENT" and S(task["state"]) not in ACTIVE_STATES:
             raise Conflict(f"{task_key} is {task['state']}; workspaces are created for active tasks")
@@ -112,19 +129,13 @@ class GitChanges:
                 base_ref = f"refs/hermes/tasks/{task_key}/base"
             else:
                 base_ref, pin = target, f"refs/hermes/tasks/{task_key}/base"
-        try:
-            prepared = self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
-        except Conflict as exc:
-            # A clone with this name but no record is what a rolled-back launch leaves behind (Git Service prepared it,
-            # the transaction that would have recorded it did not commit). The task row is locked, so no concurrent
-            # creation can own it: remove it and prepare again. A recorded workspace is never touched.
-            uow.cur.execute("SELECT 1 FROM workspaces WHERE project_id = %s AND name = %s", (project["id"], name))
-            if "already exists" not in str(exc) or uow.cur.fetchone() is not None:
-                raise
-            self.ctx.git.remove_workspace(project["relative_path"], name)
-            self._event(uow, task, "WORKSPACE_RECLAIMED", f"removed {name}, left by an earlier attempt that was rolled back",
-                        {"workspace": name})
-            prepared = self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
+        if incoming_ref is not None:
+            prepared = self.ctx.git.conflict_workspace(project["relative_path"], name, branch, target, incoming_ref, base_ref=base_ref)
+            self._event(uow, task, "WORKSPACE_CONFLICTS", f"{name}: the accepted work it builds on conflicts in "
+                        f"{', '.join(prepared.get('conflicts', [])[:6])}; its developer reconciles it first",
+                        {"workspace": name, "conflicts": prepared.get("conflicts", [])})
+        else:
+            prepared = self._prepare(uow, task, project, name, branch, base_ref, pin)
         if not task["base_commit"]:
             uow.cur.execute("UPDATE tasks SET base_commit = %s, target_branch = %s WHERE id = %s",
                             (prepared["base_sha"], target, task["id"]))

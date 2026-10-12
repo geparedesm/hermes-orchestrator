@@ -431,7 +431,9 @@ class Orchestration:
                  "Follow the project's own rules (AGENTS.md, CLAUDE.md in the project files). When they require tests with every",
                  "feature, each IMPLEMENT subtask writes and runs its own tests: never tell a developer not to write or touch tests,",
                  "and use TEST_AUTHORING subtasks only for extra coverage. An assignment that contradicts the project's rules makes",
-                 "the developer stop (BLOCKED).", "",
+                 "the developer stop (BLOCKED).",
+                 "Subtasks that edit the same shared files (an Odoo module's __manifest__.py, models/__init__.py, security CSV,",
+                 "menus, README) must not run in parallel: chain them with depends_on, or group them into one subtask.", "",
                  "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], "",
                  "## Project files", "", f"The tracked files of the project's main branch are mounted read-only at /projects/{self._slug(uow, task)} "
                  "(no Git metadata; files the project ignores, such as local secrets, are not there). Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
@@ -1129,9 +1131,16 @@ class Orchestration:
         if workspace is None:
             self._retire_workspace(uow, subtask)
             attempt = int(subtask["attempts"]) + 1
+            base, incoming, conflicts = self._dependency_base(uow, task, subtask)
             workspace = self.git.workspace(uow, task["key"], principal=CONTROL_PLANE,
                                            suffix=f"{subtask['key'].split('-')[-1]}a{attempt}".lower(),
-                                           base_ref=self._dependency_base(uow, task, subtask))
+                                           base_ref=base, incoming_ref=incoming)
+            if incoming:
+                extra = ("FIRST, before your assignment: /workspace holds an unfinished merge of the accepted work this "
+                         f"subtask depends on, with conflicts in: {', '.join(conflicts[:12])}. Both sides were accepted: "
+                         "keep both (for example both models in models/__init__.py, both entries in the manifest's data, "
+                         "the access lines of both). Run the project's tests, then commit the merge with "
+                         "`git commit --no-edit`. Then do the assignment below.\n\n" + extra)
             uow.cur.execute("UPDATE subtasks SET workspace_id = %s, attempts = %s WHERE id = %s",
                             (workspace["id"], attempt, subtask["id"]))
         knowledge = self._knowledge_for(uow, task, list((subtask["estimated_scope"] or {}).get("files") or []))
@@ -1157,22 +1166,31 @@ class Orchestration:
                         (provider, subtask["id"]))
         return self.launch(uow, task, kind, request, subtask=subtask)
 
-    def _dependency_base(self, uow: UnitOfWork, task: Row, subtask: Row) -> str | None:
-        """A dependent subtask starts from the accepted work it depends on, not from the bare task base."""
+    def _dependency_base(self, uow: UnitOfWork, task: Row, subtask: Row) -> tuple[str | None, str | None, list[str]]:
+        """Where a dependent subtask starts: the accepted work it depends on, merged. When that work conflicts, the base
+        is the rest of it and the conflicting dependency is returned as incoming (its developer reconciles it first)."""
         uow.cur.execute("SELECT w.name FROM subtask_dependencies d JOIN subtasks x ON x.id = d.depends_on_subtask_id "
                         "JOIN workspaces w ON w.id = x.workspace_id WHERE d.subtask_id = %s AND w.collected_at IS NOT NULL "
                         "ORDER BY x.key", (subtask["id"],))
         heads = [f"refs/hermes/workspaces/{r['name']}" for r in uow.cur.fetchall()]
         if not heads:
-            return None
+            return None, None, []
         if len(heads) == 1:
-            return heads[0]
+            return heads[0], None, []
         _, project, _ = self.git._context(uow, task["key"])
-        merged = self.ctx.git.integrate(project["relative_path"], task["key"], task["target_branch"] or project["default_branch"]
-                                        or "main", heads)
-        if not merged.get("ok"):
-            raise Conflict(f"the dependencies of {subtask['key']} conflict: {', '.join(merged.get('conflicts') or [])}")
-        return merged["integration_ref"]
+        target = task["target_branch"] or project["default_branch"] or "main"
+        merged = self.ctx.git.integrate(project["relative_path"], task["key"], target, heads)
+        if merged.get("ok"):
+            return merged["integration_ref"], None, []
+        incoming = merged["conflicting_ref"]
+        rest = [h for h in heads if h != incoming]
+        if len(rest) == 1:
+            return rest[0], incoming, list(merged.get("conflicts") or [])
+        partial = self.ctx.git.integrate(project["relative_path"], task["key"], target, rest)
+        if not partial.get("ok"):
+            raise Conflict(f"the dependencies of {subtask['key']} conflict among themselves in more than one place: "
+                           f"{', '.join(partial.get('conflicts') or [])}; make them depend on each other in the plan")
+        return partial["integration_ref"], incoming, list(merged.get("conflicts") or [])
 
     def _retire_workspace(self, uow: UnitOfWork, subtask: Row) -> None:
         if subtask["workspace_id"]:

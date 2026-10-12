@@ -53,9 +53,11 @@ class GitServiceClient:
     def collect(self, path: str, name: str, branch: str, base_sha: str) -> dict[str, Any]:
         return self._post("/v1/workspaces/collect", {"path": path, "name": name, "branch": branch, "base_sha": base_sha})
 
-    def conflict_workspace(self, path: str, name: str, branch: str, target_branch: str, incoming_ref: str) -> dict[str, Any]:
+    def conflict_workspace(self, path: str, name: str, branch: str, target_branch: str, incoming_ref: str,
+                           base_ref: str | None = None) -> dict[str, Any]:
         return self._post("/v1/workspaces/conflict", {"path": path, "name": name, "branch": branch,
-                                                      "target_branch": target_branch, "incoming_ref": incoming_ref})
+                                                      "target_branch": target_branch, "incoming_ref": incoming_ref,
+                                                      "base_ref": base_ref})
 
     def read_view(self, path: str, branch: str) -> dict[str, Any]:
         return self._post("/v1/read-views", {"path": path, "branch": branch})

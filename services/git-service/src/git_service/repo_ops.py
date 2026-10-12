@@ -380,8 +380,16 @@ def integrate(repo: Path, *, task: str, target_branch: str, heads: list[str], ta
     target_sha = resolve_commit(repo, target_ref or f"refs/heads/{target_branch}")
     current = target_sha
     merged = []
+    shas = {ref: resolve_commit(repo, ref) for ref in heads}
+    # A head another head already contains (a dependent subtask that merged, and possibly reconciled, the work it
+    # depends on) is integrated through that head, never on its own: merging it separately would redo the conflict.
+    contained = {ref for ref, sha in shas.items()
+                 if any(other != ref and sha != osha and _is_ancestor(repo, sha, osha) for other, osha in shas.items())}
     for ref in heads:
-        head = resolve_commit(repo, ref)
+        if ref in contained:
+            merged.append({"ref": ref, "sha": shas[ref], "result": "contained in another head"})
+            continue
+        head = shas[ref]
         if _is_ancestor(repo, head, current):
             merged.append({"ref": ref, "sha": head, "result": "already included"})
             continue
