@@ -188,7 +188,8 @@ def merge_pr(repo: Path, *, approval_id: str, number: int, target_branch: str, t
     record = f"refs/hermes/merges/{approval_id}"
     done = try_git(repo, "rev-parse", "--verify", "--quiet", record)
     if done:
-        return {"merge_sha": done, "target_branch": target_branch, "method": method, "already_merged": True, "pr": number}
+        return {"merge_sha": done, "target_branch": target_branch, "method": method, "already_merged": True, "pr": number,
+                "local": update_local(repo, target_branch, done)}
     info = _github(repo)
     pr = pr_view(repo, number)
     if pr["state"] == "MERGED":
@@ -217,4 +218,31 @@ def merge_pr(repo: Path, *, approval_id: str, number: int, target_branch: str, t
     # The record points at the merged target, which post-merge verification checks out.
     run(repo, "update-ref", record, tip)
     return {"merge_sha": merge_sha if merge_sha and valid_sha(merge_sha) else tip, "target_branch": target_branch,
-            "method": method, "already_merged": False, "pr": number}
+            "method": method, "already_merged": False, "pr": number, "local": update_local(repo, target_branch, tip)}
+
+
+def update_local(repo: Path, branch: str, tip: str) -> dict[str, str]:
+    """Bring the local branch to what GitHub merged, only when that is a fast-forward Git applies safely: never over the
+    person's own commits, and, when the branch is checked out, never over uncommitted changes (Git refuses those)."""
+    local = try_git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+    if local is None:
+        return {"result": "skipped", "reason": f"there is no local {branch}"}
+    if local == tip:
+        return {"result": "up to date"}
+    if run(repo, "merge-base", "--is-ancestor", local, tip, ok_codes=(0, 1)).returncode != 0:
+        return {"result": "skipped", "reason": f"the local {branch} has commits that are not on GitHub"}
+    # A linked worktree of the person's with the branch checked out would be left with its files behind its HEAD.
+    here = str(repo.resolve())
+    listing = run(repo, "worktree", "list", "--porcelain").stdout
+    for entry in listing.split("\n\n"):
+        fields = dict(line.split(" ", 1) for line in entry.splitlines() if " " in line)
+        if fields.get("branch") == f"refs/heads/{branch}" and str(Path(fields.get("worktree", "")).resolve()) != here:
+            return {"result": "skipped", "reason": f"{branch} is checked out in another worktree ({fields['worktree']})"}
+    if try_git(repo, "symbolic-ref", "--quiet", "HEAD") == f"refs/heads/{branch}":
+        try:
+            run(repo, "merge", "--ff-only", "--no-edit", tip, timeout=_GH_TIMEOUT)
+        except GitError:
+            return {"result": "skipped", "reason": f"the checkout of {branch} has uncommitted changes the update would overwrite"}
+    else:
+        run(repo, "update-ref", "-m", "fast-forward to the merged pull request", f"refs/heads/{branch}", tip, local)
+    return {"result": "fast-forwarded", "from": local, "to": tip}

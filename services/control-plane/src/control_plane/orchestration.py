@@ -29,7 +29,7 @@ from ho_core.ids import uuid7
 from ho_core.routing import ProviderStats, route
 from ho_core.statemachine import WAITING_STATES, Trigger
 
-from . import budgets, manifests, recovery
+from . import budgets, manifests, recovery, testenv
 from .approvals import Approvals
 from .auth import Principal
 from .budgets import BudgetExhausted
@@ -1140,10 +1140,15 @@ class Orchestration:
                             *(["", "## Project knowledge for these files"] + [f"- [{k['trust']}] {k['title']}: {k['body'][:300]}"
                                                                              for k in knowledge] if knowledge else []), "",
                             "Work only on this subtask. Run the relevant tests, fix failures, and commit locally when done."])
+        capabilities = {"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE", "egress": "STANDARD"}
+        services = testenv.request_body(self.git._context(uow, task["key"])[1], self._config(uow, task), workspace["path"])
+        if services:
+            capabilities["test_services"] = True  # the project's tests may need them (an Odoo module's PostgreSQL)
         request = {"role": "DEVELOPER", "provider": provider, "prompt": prompt, "workspace": workspace["path"],
-                   "capabilities": {"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE", "egress": "STANDARD"},
+                   "capabilities": capabilities,
                    "subtask_id": str(subtask["id"]), "lease_epoch": epoch,
-                   "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry}}
+                   "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry,
+                               **({"test_environment": services} if services else {})}}
         if task["state"] == S.QUEUED:
             task = self._move(uow, task, S.RUNNING, reason="subtask work started")
         elif task["state"] == S.FIX_REQUIRED:

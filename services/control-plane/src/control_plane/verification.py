@@ -42,6 +42,7 @@ from .db import Row, jsonb
 from .errors import BadRequest, Conflict
 from .events import record_event
 from .executions import TERMINAL, ExecutionRequest, Executions
+from . import testenv
 from .gitops import CONTROL_PLANE, GitChanges
 from .tasks import Tasks
 
@@ -365,6 +366,8 @@ class Reviews:
         uow.cur.execute("SELECT count(*) AS n FROM workspaces WHERE task_id = %s AND kind = 'VERIFICATION'", (task["id"],))
         suffix = f"review{uow.cur.fetchone()['n'] + 1}"  # type: ignore[index]
         ws = self.git.workspace(uow, task["key"], principal=CONTROL_PLANE, suffix=suffix, kind="VERIFICATION", base_ref=ref)
+        _, project, config = self.git._context(uow, task["key"])
+        services = testenv.request_body(project, config, ws["path"])
         prompt = "\n".join([
             f"Review {scope}.",
             f"The change is `git diff {base}...HEAD` in /workspace (commit {commit[:12]}).",
@@ -377,10 +380,11 @@ class Reviews:
         ])
         return self.executions.request(uow, principal=principal, task_key=task["key"], req=ExecutionRequest(
             role="REVIEWER", provider=provider, prompt=prompt, workspace=ws["path"], result_schema="review-result",
-            capabilities={"workspace": "READ", "git": "READ", "tests": "EXECUTE"},
+            capabilities={"workspace": "READ", "git": "READ", "tests": "EXECUTE", **({"test_services": True} if services else {})},
             subtask_id=subtask["id"] if subtask else None, lease_epoch=lease_epoch,
             purpose={"review": True, "commit": commit, "developers": developers,
-                     "subtask": str(subtask["id"]) if subtask else None}))
+                     "subtask": str(subtask["id"]) if subtask else None,
+                     **({"test_environment": services} if services else {})}))
 
     def _answers(self, uow: UnitOfWork, task: Row) -> list[str]:
         """The person's answers to planning questions in the current episode: part of what was asked."""

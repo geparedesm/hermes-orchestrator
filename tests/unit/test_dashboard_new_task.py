@@ -163,3 +163,24 @@ def test_a_module_is_requested_from_the_dashboard_as_the_operator(dashboard, mon
     assert calls == [("dashboard:operator", "odoo-base", "job_alerts", "Job alerts", "", KEY)]
     assert client.post("/projects/odoo-base/children", json={"name": "Bad-Name", "title": "x", "idempotency_key": KEY}).status_code == 422
     assert client.post("/projects/../children", json={"name": "ok_name", "title": "x", "idempotency_key": KEY}).status_code == 404
+
+
+def test_a_budget_increase_is_requested_as_the_operator(dashboard, monkeypatch):
+    client, calls = dashboard
+    module = sys.modules["orchestration_dashboard_api_test"]
+
+    class FakeApi:
+        def __init__(self, principal):
+            self.principal = principal
+
+        def budget(self, key, add=None):
+            calls.append((self.principal, key, add))
+            return {"id": "a1", "action": "BUDGET_INCREASE"}
+
+    monkeypatch.setattr(module._client, "TaskApi", FakeApi)
+    assert client.post("/tasks/T-49/budget", json={"add": {"agent_launches": 20}}).status_code == 200
+    assert calls == [("dashboard:operator", "T-49", {"agent_launches": 20})]
+    assert client.post("/tasks/T-49/budget", json={"add": {"agent_launches": -5}}).status_code == 400
+    assert client.post("/tasks/T-49/budget", json={"add": {"provider_usage_units": 2_000_000}}).status_code == 200  # tokens
+    assert client.post("/tasks/T-49/budget", json={"add": {"unlimited": 1}}).status_code == 422
+    assert client.post("/tasks/../budget", json={"add": {"agent_launches": 1}}).status_code == 404

@@ -381,6 +381,39 @@ def test_pull_request_checks_and_approved_merge(api, root, origin, tmp_path):
     merge_call = next(c for c in calls if c[:2] == ["pr", "merge"])
     assert "--match-head-commit" in merge_call and "--admin" not in merge_call and "--auto" not in merge_call
     assert sh(repo, "rev-parse", "refs/remotes/origin/main") == result["merge_sha"]
+    # The person's local main, checked out and clean, follows what GitHub merged (their own tools run it).
+    assert result["local"]["result"] == "fast-forwarded" and sh(repo, "rev-parse", "main") == result["merge_sha"]
+
+
+def _merge_pr(api, root, origin, tmp_path, approval_id, before_merge=None):
+    head = integrated(api, root)
+    api("/v1/github/push", branch_policy(ref="refs/hermes/tasks/T-1/integration", branch="hermes/t-1"))
+    api("/v1/github/pr", branch_policy(branch="hermes/t-1", base="main", title="T-1", body=""))
+    if before_merge:
+        before_merge()
+    remote_main = subprocess.run(["git", "-C", str(origin), "rev-parse", "main"], capture_output=True, text=True).stdout.strip()
+    token = sign_merge(KEY, approval_id=approval_id, expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                       subject={"project": "app", "target_branch": "main", "target_sha": remote_main, "head_sha": head,
+                                "method": "merge", "pr_number": 1})
+    return api("/v1/merge", {"path": "app", "task": "T-1", "authorization": token}).json()
+
+
+def test_a_local_main_with_the_persons_commits_is_left_alone(api, root, origin, tmp_path):
+    repo = root / "app"
+    mine = {}
+    result = _merge_pr(api, root, origin, tmp_path, "gh-local-1",
+                       before_merge=lambda: mine.update(sha=commit(repo, "my local work", {"notes.md": "mine\n"})))
+    assert result["local"] == {"result": "skipped", "reason": "the local main has commits that are not on GitHub"}
+    assert sh(repo, "rev-parse", "main") == mine["sha"]
+
+
+def test_uncommitted_changes_in_the_checkout_are_never_overwritten(api, root, origin, tmp_path):
+    repo = root / "app"
+    result = _merge_pr(api, root, origin, tmp_path, "gh-local-2",
+                       before_merge=lambda: write(repo, "app.py", "edited by the person, not committed\n"))
+    if result["local"]["result"] == "skipped":
+        assert "uncommitted changes" in result["local"]["reason"]
+    assert (repo / "app.py").read_text() == "edited by the person, not committed\n"
 
 
 def test_pr_merge_refuses_a_changed_head(api, root, origin, tmp_path):
@@ -536,3 +569,16 @@ def test_github_projects_integrate_onto_the_target_as_github_has_it(api, root, o
     merged = api("/v1/merge", {"path": "app", "task": "T-1", "authorization": token})
     assert merged.status_code == 200, merged.text
     assert sh(repo, "rev-parse", "main") != remote_main  # the user's local branch was not touched by integration
+
+
+def test_a_branch_open_in_another_worktree_is_left_alone(api, root, origin, tmp_path):
+    repo = root / "app"
+    other = tmp_path / "other-checkout"
+
+    def open_main_elsewhere():
+        sh(repo, "checkout", "-q", "-b", "side")  # this checkout moves to another branch
+        sh(repo, "worktree", "add", "-q", str(other), "main")  # the person's main lives in a linked worktree
+    before = sh(repo, "rev-parse", "main")
+    result = _merge_pr(api, root, origin, tmp_path, "gh-local-3", before_merge=open_main_elsewhere)
+    assert result["local"]["result"] == "skipped" and "another worktree" in result["local"]["reason"]
+    assert sh(repo, "rev-parse", "main") == before

@@ -122,3 +122,19 @@ def test_a_retry_starts_the_circle_count_again(api, services, agents, task):
     services.scheduler.run_once()
     step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("a", description="after the retry")]})
     assert actions(services, task)[-1][:2] == ("SET_PLAN", "ACCEPTED") and state(api, task) != "BLOCKED"
+
+
+TEST_SERVICES = "test_environment: {compose_files: [.hermes/test-services.yaml], services: [postgres]}\n"
+
+
+def test_developers_get_the_projects_test_services(api, services, agents, projects_root):
+    """T-50: a module's rules require `ho-odoo-test` before finishing, and it needs the test PostgreSQL."""
+    from test_git import PROJECT_YAML  # type: ignore[import-not-found]
+
+    task = make_task(api, services, projects_root, yaml=PROJECT_YAML + TEST_SERVICES)
+    step(services, agents, task, {"type": "SET_REQUIREMENTS", "text": "Contracts."}, {"type": "SET_PLAN", "subtasks": [plan_item("a")]},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "a", "provider": "codex"})
+    [dev] = active(services, task, "DEVELOPER")
+    assert agents.environments[task]["services"] == ["postgres"]  # started before the developer's worker
+    assert agents.environments[task]["workspace"].endswith(dev["workspace"])
+    assert agents.specs[str(dev["id"])]["grant"]["capabilities"]["network"]["test_services"] is True  # joined to their network

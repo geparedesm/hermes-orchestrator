@@ -403,21 +403,87 @@
     switch (t.state) {
       case "BLOCKED": return "The agents could not continue. Read the reason, then retry it (or revise the request from chat).";
       case "PAUSED": return "Paused by a person. Resume it when you are ready.";
-      case "PAUSED_BUDGET": return "It used up its budget. Raise it from chat (/orch budget " + t.key + " agent_launches=10), then resume.";
+      case "PAUSED_BUDGET": return "It used up its budget. Raise it here (Raise budget), then approve the increase: the task resumes on its own.";
       case "AUTH_REQUIRED": return "A provider login expired. On your Mac run make auth-claude or make auth-codex.";
       case "FAILED": return "It failed. Retry it to start again from where it stopped.";
       default: return null;
     }
   }
+  // More budget for a task that ran out: the exhausted counters, with their limit as the suggested increase. The
+  // request becomes a decision card (shown here) that you approve like any other.
+  function RaiseBudget(props) {
+    const view = usePoll("/tasks/" + props.task);
+    const [amounts, setAmounts] = useState(null);
+    const [approval, setApproval] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const budget = view.data && view.data.budget;
+    useEffect(function () {
+      if (!budget || amounts) return;
+      const out = {};
+      // The counter the pause names first ("would exceed its <counter> budget"), then any at or past its limit
+      // counting what running launches reserved.
+      const named = /exceed its ([a-z_]+) budget/.exec((view.data.task && view.data.task.state_reason) || "");
+      const blockers = named && budget.limits[named[1]] !== undefined ? [named[1]] : [];
+      Object.keys(budget.limits).forEach(function (k) {
+        const limit = budget.limits[k];
+        const used = (budget.consumed[k] || 0) + ((budget.reserved || {})[k] || 0);
+        if (limit !== null && limit !== undefined && used >= limit && blockers.indexOf(k) < 0) blockers.push(k);
+      });
+      blockers.forEach(function (k) { out[k] = String(Math.max(1, budget.limits[k] || 1)); });
+      if (!Object.keys(out).length) out.agent_launches = String(Math.max(1, budget.limits.agent_launches || 10));
+      setAmounts(out);
+    }, [budget]);
+    if (approval) return h(ApprovalCard, { approval: approval, done: props.done });
+    if (!budget || !amounts) return h(Loading, { error: view.error });
+    function submit() {
+      const add = {};
+      Object.keys(amounts).forEach(function (k) { const n = parseInt(amounts[k], 10); if (n > 0) add[k] = n; });
+      if (!Object.keys(add).length) { setError("Enter at least one increase."); return; }
+      setBusy(true);
+      setError(null);
+      post("/tasks/" + props.task + "/budget", { add: add })
+        .then(function () { return api("/summary"); })
+        .then(function (s) {
+          const found = s.required_actions.approvals.find(function (a) { return a.task === props.task && a.action === "BUDGET_INCREASE"; });
+          if (found) setApproval(found); else props.done();
+        })
+        .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(false); });
+    }
+    return h("div", { className: "orch-raise" },
+      h("div", { className: "orch-approval-label" }, "Raise the budget"),
+      h("ul", { className: "orch-budget" }, Object.keys(amounts).map(function (k) {
+        return h("li", { key: k }, h("div", { className: "orch-row" }, h("span", null, COUNTERS[k] || k),
+          h("span", { className: "orch-muted orch-small orch-right" }, count(Math.round(budget.consumed[k] || 0)) + " / " + count(budget.limits[k]) + " used"),
+          h("span", { className: "orch-small" }, "add"),
+          h("input", { className: "orch-other orch-number", type: "number", min: 1, value: amounts[k],
+            onChange: function (e) { const v = e.target.value; setAmounts(function (a) { const n = Object.assign({}, a); n[k] = v; return n; }); } })));
+      })),
+      Object.keys(budget.limits).some(function (k) { return amounts[k] === undefined && budget.limits[k] !== null; })
+        ? h("select", { className: "orch-other", value: "", onChange: function (e) { const k = e.target.value; if (k) setAmounts(function (a) {
+            const n = Object.assign({}, a); n[k] = String(Math.max(1, budget.limits[k] || 1)); return n; }); } },
+          h("option", { value: "" }, "+ Another counter…"),
+          Object.keys(budget.limits).filter(function (k) { return amounts[k] === undefined && budget.limits[k] !== null; })
+            .map(function (k) { return h("option", { key: k, value: k }, COUNTERS[k] || k); })) : null,
+      error ? h("div", { className: "orch-alert" }, error) : null,
+      h("div", { className: "orch-approval-actions" },
+        h(Button, { kind: "primary", small: true, icon: "plus", disabled: busy, onClick: submit }, busy ? "Requesting…" : "Request the increase"),
+        h(Button, { small: true, disabled: busy, onClick: props.cancel }, "Cancel")));
+  }
+
   function WaitingCard(props) {
     const t = props.task;
+    const [raising, setRaising] = useState(false);
     return h("article", { className: "orch-waiting orch-tone-border-" + tone(t.state) },
       h("div", { className: "orch-waiting-head" }, h(TaskLink, { task: t.key, open: props.open }), h(StatusPill, { state: t.state }),
         h("span", { className: "orch-muted orch-right" }, ago(t.updated_at))),
       h("div", { className: "orch-waiting-title" }, t.title),
       t.state_reason ? h("p", { className: "orch-reason" }, t.state_reason) : null,
       nextStep(t) ? h("p", { className: "orch-next" }, nextStep(t)) : null,
-      h("div", { className: "orch-row" }, h(Actions, { task: t, compact: true, small: true, done: props.done }),
+      raising ? h(RaiseBudget, { task: t.key, done: function () { setRaising(false); props.done(); }, cancel: function () { setRaising(false); } }) : null,
+      h("div", { className: "orch-row" },
+        t.state === "PAUSED_BUDGET" && !raising ? h(Button, { kind: "primary", small: true, icon: "plus", onClick: function () { setRaising(true); } }, "Raise budget") : null,
+        h(Actions, { task: t, compact: true, small: true, done: props.done }),
         h(Button, { small: true, onClick: function () { props.open(t.key); } }, "Open")));
   }
 
@@ -909,6 +975,7 @@
           });
         }))) : null,
       WAITING.indexOf(t.state) >= 0 && nextStep(t) ? h("div", { className: "orch-callout orch-tone-border-" + tone(t.state) }, nextStep(t)) : null,
+      t.state === "PAUSED_BUDGET" ? h(Card, null, h(RaiseBudget, { task: t.key, done: props.reload, cancel: props.reload })) : null,
       h(Card, { title: "About" }, h("ul", { className: "orch-facts" },
         h("li", null, h("span", null, "Project"), h("strong", null, t.project)),
         h("li", null, h("span", null, "Priority"), h("span", null, String(t.priority).toLowerCase())),

@@ -540,10 +540,17 @@ class DockerOps:
                               input=input_text, timeout=timeout, env=env, check=False)
 
     def start_environment(self, *, task: str, project: str, project_path: str, workspace: str, compose_files: list[str],
-                          services: list[str], startup_timeout: int, projects_root: Path, projects_root_host: str) -> dict[str, Any]:
-        """Start the project's test services on the task's private network (sections 51-52)."""
+                          services: list[str], startup_timeout: int, projects_root: Path, projects_root_host: str,
+                          reuse: bool = False) -> dict[str, Any]:
+        """Start the project's test services on the task's private network (sections 51-52). With `reuse`, services
+        already running and healthy for the task are returned as they are (agents of the task share them)."""
         if not re.match(r"^T-[0-9]+$", task):
             raise Rejected("invalid task key")
+        if reuse:
+            running = self.environment_status(task)
+            if running and all(s["state"] == "running" and s["health"] in (None, "healthy") for s in running):
+                return {"project": compose.project_name(task, project), "network": f"ho-t-{stack.task_slug(task)}-svc",
+                        "services": running, "reused": True}
         relative, resolved = resolve_workspace(project_path, workspace, projects_root)
         files = []
         for name in compose_files or ["compose.yaml"]:
