@@ -511,8 +511,14 @@ class GitChanges:
                 "UPDATE git_changes SET merge_commit_sha = %s, merged_at = now(), merged_by_approval_id = %s, updated_at = now() "
                 "WHERE task_id = %s", (result["merge_sha"], changes["merge_approval_id"], task["id"]))
             self._intent(uow, task, "CONFIRMED", None)
+            local = result.get("local") or {}
             self._event(uow, task, "MERGE_COMPLETED", f"merged into {result['target_branch']} as {result['merge_sha'][:12]} "
-                        f"({result['method']})", {"merge_sha": result["merge_sha"], "approval_id": str(changes["merge_approval_id"])})
+                        f"({result['method']})" + (f"; local {result['target_branch']} {local['result']}" if local else ""),
+                        {"merge_sha": result["merge_sha"], "approval_id": str(changes["merge_approval_id"]), "local": local})
+            if local.get("result") == "skipped":
+                # Merged on GitHub, but the person's local copy (which their own tools run) still lacks it.
+                self._event(uow, task, "LOCAL_NOT_UPDATED", f"your local {result['target_branch']} in {project['host_path']} was "
+                            f"not updated ({local.get('reason')}): run git pull there", {"reason": local.get("reason")})
             task = self.tasks.transition(uow, task, S.VERIFYING, trigger=Trigger.SYSTEM, actor="git-service",
                                          reason="merge confirmed; post-merge verification")
             uow.cur.execute("UPDATE git_changes SET post_merge_status = 'RUNNING' WHERE task_id = %s", (task["id"],))

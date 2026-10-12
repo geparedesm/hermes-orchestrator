@@ -183,6 +183,21 @@ def generate_manifest(key: str) -> Any:
     return _call(_api().generate_manifest, key)
 
 
+class BudgetBody(BaseModel):
+    add: dict[Literal["runtime_minutes", "agent_launches", "retries", "review_cycles", "subtasks", "provider_usage_units"],
+              int] = Field(min_length=1)
+
+
+@router.post("/tasks/{key}/budget")
+def raise_budget(key: str, body: BudgetBody) -> Any:
+    """Ask for more budget for a task. It becomes a BUDGET_INCREASE decision, decided like any other."""
+    if not re.match(r"^T-[0-9]+$", key):
+        raise HTTPException(status_code=404, detail="unknown task")
+    if any(v <= 0 or v > 100_000 for v in body.add.values()):
+        raise HTTPException(status_code=400, detail="increases are positive whole numbers")
+    return _call(_api().budget, key, dict(body.add))
+
+
 @router.post("/tasks/{key}/{verb}")
 def task_action(key: str, verb: str) -> Any:
     if verb not in TASK_ACTIONS:

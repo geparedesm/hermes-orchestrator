@@ -20,6 +20,7 @@ ATTENTION_EVENTS = frozenset(
     {
         "APPROVAL_REQUIRED",
         "QUESTIONS_ASKED",
+        "LOCAL_NOT_UPDATED",
         "AUTH_REQUIRED",
         "BLOCKED",
         "PAUSED_BUDGET",
