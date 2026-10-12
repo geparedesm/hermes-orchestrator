@@ -694,3 +694,24 @@ def test_a_subtask_whose_dependencies_conflict_reconciles_them_first(api, servic
     [row] = q(services, "SELECT spec->'assignment'->>'prompt' AS prompt FROM executions WHERE id = %s", dev_c["id"])
     assert row["prompt"].startswith("Subtask") and "FIRST, before your assignment" in row["prompt"] and "models.py" in row["prompt"]
     assert q(services, "SELECT 1 FROM events WHERE type = 'WORKSPACE_CONFLICTS'")
+
+
+def test_a_conflict_workspace_left_by_a_rolled_back_launch_is_reclaimed(api, services, agents, repo, task):
+    step(services, agents, task, {"type": "SET_REQUIREMENTS", "text": "Two models and a wizard."},
+         {"type": "SET_PLAN", "subtasks": [plan_item("a"), plan_item("b"), plan_item("c", depends_on=["a", "b"])]},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "a", "provider": "codex"},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "b", "provider": "claude"})
+    dev_a, dev_b = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev_a, {"models.py": "import a\n"})
+    develop(services, agents, repo, dev_b, {"models.py": "import b\n"})
+    for reviewer in active(services, task, "REVIEWER"):
+        review_verdict(services, agents, reviewer)
+    # A launch that prepared the clone and then rolled back leaves it on disk without a record.
+    orphan = repo / ".hermes" / "worktrees" / f"{task.lower()}-3a1"
+    services.ctx.git.conflict_workspace("demo", orphan.name, f"hermes/{task.lower()}/3a1", "main",
+                                        f"refs/hermes/workspaces/{Path(dev_b['workspace']).name}",
+                                        base_ref=f"refs/hermes/workspaces/{Path(dev_a['workspace']).name}")
+    assert orphan.is_dir()
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "c", "provider": "codex"})
+    assert actions(services, task)[-1][:2] == ("REQUEST_EXECUTION", "ACCEPTED")
+    assert q(services, "SELECT 1 FROM events WHERE type = 'WORKSPACE_RECLAIMED'")

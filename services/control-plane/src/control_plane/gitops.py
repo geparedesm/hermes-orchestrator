@@ -95,9 +95,10 @@ class GitChanges:
 
     # ------------------------------------------------------------- workspaces
 
-    def _prepare(self, uow: UnitOfWork, task: Row, project: Row, name: str, branch: str, base_ref: str, pin: str | None) -> dict[str, Any]:
+    def _prepare(self, uow: UnitOfWork, task: Row, project: Row, name: str, create: Any) -> dict[str, Any]:
+        """Run `create` (Git Service prepares the clone); a clone left by a rolled-back attempt is reclaimed first."""
         try:
-            return self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
+            return create()
         except Conflict as exc:
             # A clone with this name but no record is what a rolled-back launch leaves behind (Git Service prepared it,
             # the transaction that would have recorded it did not commit). The task row is locked, so no concurrent
@@ -108,7 +109,7 @@ class GitChanges:
             self.ctx.git.remove_workspace(project["relative_path"], name)
             self._event(uow, task, "WORKSPACE_RECLAIMED", f"removed {name}, left by an earlier attempt that was rolled back",
                         {"workspace": name})
-            return self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin)
+            return create()
 
     def workspace(self, uow: UnitOfWork, task_key: str, *, principal: Principal, suffix: str | None = None,
                   kind: str = "DEVELOPMENT", base_ref: str | None = None, incoming_ref: str | None = None) -> Row:
@@ -130,12 +131,14 @@ class GitChanges:
             else:
                 base_ref, pin = target, f"refs/hermes/tasks/{task_key}/base"
         if incoming_ref is not None:
-            prepared = self.ctx.git.conflict_workspace(project["relative_path"], name, branch, target, incoming_ref, base_ref=base_ref)
+            prepared = self._prepare(uow, task, project, name, lambda: self.ctx.git.conflict_workspace(
+                project["relative_path"], name, branch, target, incoming_ref, base_ref=base_ref))
             self._event(uow, task, "WORKSPACE_CONFLICTS", f"{name}: the accepted work it builds on conflicts in "
                         f"{', '.join(prepared.get('conflicts', [])[:6])}; its developer reconciles it first",
                         {"workspace": name, "conflicts": prepared.get("conflicts", [])})
         else:
-            prepared = self._prepare(uow, task, project, name, branch, base_ref, pin)
+            prepared = self._prepare(uow, task, project, name,
+                                     lambda: self.ctx.git.prepare_workspace(project["relative_path"], name, branch, base_ref, pin))
         if not task["base_commit"]:
             uow.cur.execute("UPDATE tasks SET base_commit = %s, target_branch = %s WHERE id = %s",
                             (prepared["base_sha"], target, task["id"]))
