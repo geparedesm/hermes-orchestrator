@@ -715,3 +715,41 @@ def test_a_conflict_workspace_left_by_a_rolled_back_launch_is_reclaimed(api, ser
     step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "c", "provider": "codex"})
     assert actions(services, task)[-1][:2] == ("REQUEST_EXECUTION", "ACCEPTED")
     assert q(services, "SELECT 1 FROM events WHERE type = 'WORKSPACE_RECLAIMED'")
+
+
+def _to_integration_review(services, agents, repo, task) -> dict:
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "print('hello')\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    finish_verification(services, agents, task)
+    [integration_review] = active(services, task, "REVIEWER")
+    assert integration_review["subtask_id"] is None
+    return integration_review
+
+
+def test_a_failed_integration_review_is_retried_then_blocks_with_the_reason(api, services, agents, repo, task):
+    """T-53: the integration reviewer failed (structured output) and the task waited in REVIEW for hours."""
+    review = _to_integration_review(services, agents, repo, task)
+    for _ in range(2):
+        answer(services, agents, review["id"], {}, ok=False)
+        assert state(api, task) == "REVIEW"
+        [review] = active(services, task, "REVIEWER")  # requested again
+        assert review["subtask_id"] is None
+    answer(services, agents, review["id"], {}, ok=False)
+    assert state(api, task) == "BLOCKED"
+    [row] = q(services, "SELECT state_reason FROM tasks WHERE key = %s", task)
+    assert "integration review by claude failed" in row["state_reason"] and "failed 3 times" in row["state_reason"]
+
+
+def test_a_lost_integration_review_is_requested_again(api, services, agents, repo, task):
+    review = _to_integration_review(services, agents, repo, task)
+    with services.ctx.db.transaction() as cur:  # stand-in: the review was lost (the platform never saw it finish)
+        cur.execute("UPDATE executions SET state = 'FAILED', ended_at = now() WHERE id = %s", (review["id"],))
+        cur.execute("UPDATE tasks SET updated_at = now() - interval '5 minutes' WHERE key = %s", (task,))
+    services.orchestration.heal_reviews()
+    [again] = active(services, task, "REVIEWER")
+    assert again["id"] != review["id"] and again["subtask_id"] is None and state(api, task) == "REVIEW"
+    services.orchestration._integration_review_later(task, again["provider"])  # a concurrent path asks again
+    services.orchestration.heal_reviews()
+    assert [r["id"] for r in active(services, task, "REVIEWER")] == [again["id"]]  # still one reviewer

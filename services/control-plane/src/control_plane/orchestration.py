@@ -1220,6 +1220,11 @@ class Orchestration:
                 self._subtask_review_failed(uow, execution["task_id"], UUID(purpose["subtask"]),
                                             f"review by {execution['provider']} {state.lower()}")
             return
+        if purpose.get("review"):
+            if state != "SUCCEEDED":
+                reason = f"integration review by {execution['provider']} {state.lower()}" + (f": {failure}" if failure else "")
+                self._integration_review_failed(uow, execution["task_id"], execution["provider"], reason[:300])
+            return
         if not (purpose.get("orchestrator_step") or purpose.get("kind")):
             return
         uow.cur.execute("SELECT * FROM executions WHERE id = %s", (execution["id"],))
@@ -1374,6 +1379,24 @@ class Orchestration:
         self._event(uow, task, "RETRY_SCHEDULED", f"{subtask['key']}: {reason}; reviewing again")
         self._request_subtask_review(uow, task, subtask, subtask["developer_provider"], workspace, workspace["head_sha"])
 
+    def _integration_review_failed(self, uow: UnitOfWork, task_id: UUID, provider: str, reason: str) -> None:
+        """An integration review that failed or was lost is requested again (bounded); then the task blocks with the
+        reason instead of waiting in REVIEW for a verdict that will never come (T-53)."""
+        task = self._task(uow, task_id)
+        if task["state"] != S.REVIEW:
+            return
+        uow.cur.execute("SELECT integration_sha FROM git_changes WHERE task_id = %s", (task["id"],))
+        commit = (uow.cur.fetchone() or {}).get("integration_sha")
+        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE task_id = %s AND role = 'REVIEWER' AND subtask_id IS NULL "
+                        "AND provider = %s AND spec->'purpose'->>'commit' = %s AND state <> 'SUCCEEDED' AND state <> ALL(%s)",
+                        (task["id"], provider, commit, list(ACTIVE)))
+        failed = int(uow.cur.fetchone()["n"])  # type: ignore[index]
+        if failed > MAX_REVIEW_RETRIES:
+            self._move(uow, task, S.BLOCKED, reason=f"{reason}; the integration review failed {failed} times (retry the task)")
+            return
+        self._event(uow, task, "RETRY_SCHEDULED", f"{reason}; reviewing the integrated change again")
+        uow.after_commit.append(lambda key=task["key"], p=provider: self._integration_review_later(key, p))
+
     def heal_reviews(self) -> int:
         """Subtasks waiting for a review that nothing is running or queued for (a review lost before this
         control plane could react) get their review requested again."""
@@ -1387,7 +1410,30 @@ class Orchestration:
         for row in stuck:
             with self.ctx.unit_of_work() as uow:
                 self._subtask_review_failed(uow, row["task_id"], row["id"], "no review was running")
-        return len(stuck)
+        # Tasks in REVIEW with a required integration review that nothing is running, queued, or recorded for.
+        with self.ctx.unit_of_work() as uow:
+            uow.cur.execute(
+                "SELECT t.id FROM tasks t JOIN git_changes g ON g.task_id = t.id WHERE t.state = 'REVIEW' "
+                "AND t.updated_at < now() - interval '2 minutes' AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = t.id "
+                "AND e.role = 'REVIEWER' AND e.subtask_id IS NULL AND e.state = ANY(%s)) "
+                "AND NOT EXISTS (SELECT 1 FROM pending_launches p WHERE p.task_id = t.id AND p.kind = 'INTEGRATION_REVIEW')", (list(ACTIVE),))
+            waiting = [r["id"] for r in uow.cur.fetchall()]
+        for task_id in waiting:
+            with self.ctx.unit_of_work() as uow:
+                task = self._task(uow, task_id)  # locked: recheck what a concurrent finish or heal may have started
+                if task["state"] != S.REVIEW or self._integration_review_pending(uow, task_id):
+                    continue
+                uow.cur.execute("SELECT integration_sha FROM git_changes WHERE task_id = %s", (task_id,))
+                commit = uow.cur.fetchone()["integration_sha"]  # type: ignore[index]
+                uow.cur.execute("SELECT DISTINCT reviewer_provider FROM reviews WHERE task_id = %s AND commit_sha = %s "
+                                "AND subtask_id IS NULL", (task_id, commit))
+                done = {r["reviewer_provider"] for r in uow.cur.fetchall()}
+                needed = required_reviewer_set(self.reviews.developer_providers(uow, task))
+                if not needed and not done:  # no agent developed the change: the fallback reviewer, as in _on_verification
+                    needed = {self._route(uow, task, "IMPLEMENT") or "claude"}
+                for provider in sorted(needed - done):
+                    self._integration_review_failed(uow, task_id, provider, f"no integration review by {provider} was running")
+        return len(stuck) + len(waiting)
 
     def _launch_review(self, uow: UnitOfWork, task: Row, subtask: Row, request: dict[str, Any]) -> Row:
         # Review the subtask's own changes: from where its workspace started (its dependencies' work, if any).
@@ -1538,9 +1584,19 @@ class Orchestration:
         for provider in sorted(required_reviewer_set(developers) or {self._route(uow, task, "IMPLEMENT") or "claude"}):
             uow.after_commit.append(lambda key=task["key"], p=provider: self._integration_review_later(key, p))
 
+    def _integration_review_pending(self, uow: UnitOfWork, task_id: UUID, provider: str | None = None) -> bool:
+        uow.cur.execute("SELECT (EXISTS (SELECT 1 FROM executions WHERE task_id = %s AND role = 'REVIEWER' AND subtask_id IS NULL "
+                        "AND state = ANY(%s) AND (%s::text IS NULL OR provider = %s)) OR EXISTS (SELECT 1 FROM pending_launches "
+                        "WHERE task_id = %s AND kind = 'INTEGRATION_REVIEW')) AS busy",
+                        (task_id, list(ACTIVE), provider, provider, task_id))
+        return bool(uow.cur.fetchone()["busy"])  # type: ignore[index]
+
     def _integration_review_later(self, task_key: str, provider: str) -> None:
         try:
             with self.ctx.unit_of_work() as uow:
+                task = self.tasks.get(uow, task_key, lock=True)  # one request per provider, however many paths ask
+                if task["state"] != S.REVIEW or self._integration_review_pending(uow, task["id"], provider):
+                    return
                 self.reviews.request(uow, task_key, provider=provider, principal=ORCHESTRATOR)
         except ApiError as exc:
             with self.ctx.unit_of_work() as uow:
