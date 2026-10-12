@@ -249,10 +249,14 @@
     const d = a.details;
     const [busy, setBusy] = useState(null);
     const [error, setError] = useState(null);
+    const [rejecting, setRejecting] = useState(false);
+    const [note, setNote] = useState("");
     function decide(decision) {
       setBusy(decision);
       setError(null);
-      post("/approvals/" + a.id, { decision: decision }).then(props.done)
+      const body = { decision: decision };
+      if (decision === "REJECT" && note.trim()) body.note = note.trim();
+      post("/approvals/" + a.id, body).then(props.done)
         .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(null); });
     }
     const expires = left(a.expires_at);
@@ -272,10 +276,18 @@
       h(ApprovalDetails, { details: d }),
       who || (d && d.requested_at) ? h("div", { className: "orch-muted orch-small" },
         "Asked" + (who ? " by " + who : "") + (d && d.requested_at ? " · " + ago(d.requested_at) : "")) : null,
-      h("div", { className: "orch-approval-actions" },
-        h(Button, { kind: "good", icon: "check", disabled: !!busy, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : capital(plain.yes)),
-        h(Button, { kind: "bad-outline", icon: "x", disabled: !!busy, onClick: function () { decide("REJECT"); } }, busy === "REJECT" ? "Saving…" : capital(plain.no)),
-        a.task && props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Open task") : null),
+      rejecting ? h("div", { className: "orch-reject" },
+        h("label", { className: "orch-reject-label" }, "Why? (optional — the agents read it and act on it)",
+          h("textarea", { value: note, rows: 3, maxLength: 1000, autoFocus: true,
+            placeholder: "For example: each implementation subtask must write its own tests",
+            onChange: function (e) { setNote(e.target.value); } })),
+        h("div", { className: "orch-approval-actions" },
+          h(Button, { kind: "bad", icon: "x", disabled: !!busy, onClick: function () { decide("REJECT"); } }, busy === "REJECT" ? "Saving…" : capital(plain.no)),
+          h(Button, { disabled: !!busy, onClick: function () { setRejecting(false); setNote(""); } }, "Back")))
+        : h("div", { className: "orch-approval-actions" },
+          h(Button, { kind: "good", icon: "check", disabled: !!busy, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : capital(plain.yes)),
+          h(Button, { kind: "bad-outline", icon: "x", disabled: !!busy, onClick: function () { setRejecting(true); } }, capital(plain.no) + "…"),
+          a.task && props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Open task") : null),
       error ? h("div", { className: "orch-alert" }, error) : null);
   }
 
