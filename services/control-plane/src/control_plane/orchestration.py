@@ -737,6 +737,13 @@ class Orchestration:
         _check_acyclic(graph)
         current = {s["local_key"]: s for s in self._subtasks(uow, task)}
         if task["current_plan_version"] and self._same_plan(uow, current, keys, items, graph):
+            # Only an approval that was cleared (a revision, a stale consumption) is asked for again: a rejected plan resent
+            # unchanged is refused like any unchanged plan, so a rejection never comes back as the same question.
+            if self._supervised(uow, task) and task.get("plan_approval_state") is None:
+                # The same plan, whose approval no longer holds (the requirements were revised): ask again, same version.
+                self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.PLAN,
+                                               reason="asked again")
+                return self._request_plan_approval(uow, task, items, int(task["current_plan_version"]))
             blocked = [s["local_key"] for s in current.values() if s["state"] == "BLOCKED"]
             raise ValueError("the plan is unchanged, so nothing happens"
                              + (f"; {', '.join(blocked)} stays BLOCKED: revise its description in the plan, REJECT_SUBTASK it with "
@@ -1038,8 +1045,11 @@ class Orchestration:
         in circles (each one may also ask the person for an approval)."""
         uow.cur.execute(
             "SELECT count(*) AS n FROM events WHERE task_id = %s AND type = 'PLAN_VERSIONED' AND occurred_at > now() - %s "
-            "AND occurred_at > coalesce((SELECT max(created_at) FROM executions WHERE task_id = %s AND role = 'DEVELOPER'), '-infinity')",
-            (task["id"], PLAN_CHURN_WINDOW, task["id"]))
+            "AND occurred_at > coalesce((SELECT max(created_at) FROM executions WHERE task_id = %s AND role = 'DEVELOPER'), '-infinity') "
+            # A person's retry or revision starts the count again.
+            "AND occurred_at > coalesce((SELECT max(occurred_at) FROM events WHERE task_id = %s AND (type = 'REQUIREMENTS_REVISED' "
+            "OR (type = 'TASK_STATE_CHANGED' AND data->>'trigger' = 'USER'))), '-infinity')",
+            (task["id"], PLAN_CHURN_WINDOW, task["id"], task["id"]))
         count = int(uow.cur.fetchone()["n"])  # type: ignore[index]
         if count < PLAN_CHURN_LIMIT:
             return None
