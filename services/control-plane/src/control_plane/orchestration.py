@@ -433,7 +433,10 @@ class Orchestration:
                  "and use TEST_AUTHORING subtasks only for extra coverage. An assignment that contradicts the project's rules makes",
                  "the developer stop (BLOCKED).",
                  "Subtasks that edit the same shared files (an Odoo module's __manifest__.py, models/__init__.py, security CSV,",
-                 "menus, README) must not run in parallel: chain them with depends_on, or group them into one subtask.", "",
+                 "menus, README) must not run in parallel: chain them with depends_on, or group them into one subtask.",
+                 "Accepted subtask work lives in its workspace until integration, so the mounted main branch does not show it:",
+                 "that is normal. Start READY subtasks with REQUEST_EXECUTION; the platform prepares each one's base from the",
+                 "accepted work it depends on, and when those dependencies conflict its developer reconciles them first.", "",
                  "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], "",
                  "## Project files", "", f"The tracked files of the project's main branch are mounted read-only at /projects/{self._slug(uow, task)} "
                  "(no Git metadata; files the project ignores, such as local secrets, are not there). Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
@@ -670,9 +673,23 @@ class Orchestration:
         if kind == "SUBMIT_FOR_QUALITY_GATE":
             return self._integrate_if_ready(uow, task, explicit=True)
         if kind == "REPORT_BLOCKED":
+            ready = [x["local_key"] for x in self._subtasks(uow, task) if x["state"] == "READY"]
+            if ready and not self._start_refused_since_retry(uow, task):
+                # T-50: blocked on a conflict the platform now reconciles, without ever asking to start the work.
+                raise ValueError(f"{', '.join(ready)} {'is' if len(ready) == 1 else 'are'} READY: request the execution first. "
+                                 "The platform prepares its base from the accepted work it depends on, reconciling conflicts "
+                                 "between those dependencies through its developer; report blocked only if that request fails")
             self._move(uow, task, S.BLOCKED, reason=(action.get("text") or "reported blocked by the orchestrator")[:300])
             return None
         raise ValueError(f"unknown action {kind!r}")
+
+    def _start_refused_since_retry(self, uow: UnitOfWork, task: Row) -> bool:
+        """Whether a REQUEST_EXECUTION was refused since the person last retried or resumed the task (or ever)."""
+        uow.cur.execute(
+            "SELECT 1 FROM orchestrator_actions WHERE task_id = %s AND type = 'REQUEST_EXECUTION' AND outcome = 'REJECTED' "
+            "AND created_at > coalesce((SELECT max(occurred_at) FROM events WHERE task_id = %s AND type = 'TASK_STATE_CHANGED' "
+            "AND data->>'trigger' = 'USER'), '-infinity') LIMIT 1", (task["id"], task["id"]))
+        return uow.cur.fetchone() is not None
 
     def _set_requirements(self, uow: UnitOfWork, task: Row, text: str, *, source: str, reason: str) -> str:
         if not text.strip():
