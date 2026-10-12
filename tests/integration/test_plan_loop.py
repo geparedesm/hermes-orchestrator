@@ -138,3 +138,13 @@ def test_developers_get_the_projects_test_services(api, services, agents, projec
     assert agents.environments[task]["services"] == ["postgres"]  # started before the developer's worker
     assert agents.environments[task]["workspace"].endswith(dev["workspace"])
     assert agents.specs[str(dev["id"])]["grant"]["capabilities"]["network"]["test_services"] is True  # joined to their network
+
+
+def test_ready_work_is_requested_before_reporting_blocked(api, services, agents, task):
+    """T-50 after the fix: the orchestrator reported blocked from history, never asking to start the READY subtask."""
+    step(services, agents, task, {"type": "SET_REQUIREMENTS", "text": "Tenant CRUD."}, {"type": "SET_PLAN", "subtasks": [plan_item("a")]},
+         {"type": "REPORT_BLOCKED", "text": "the dependencies conflict; integration is the platform's job"})
+    kind, outcome, reason = actions(services, task)[-1]
+    assert (kind, outcome) == ("REPORT_BLOCKED", "REJECTED") and "a is READY: request the execution first" in reason
+    assert state(api, task) != "BLOCKED"
+    assert "Start READY subtasks with REQUEST_EXECUTION" in bundle(services, task)
