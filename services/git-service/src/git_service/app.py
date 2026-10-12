@@ -58,6 +58,8 @@ class ConflictBody(WorkspaceBody):
     branch: str = Field(min_length=1, max_length=200)
     target_branch: str = Field(min_length=1, max_length=200)
     incoming_ref: str = Field(min_length=1, max_length=200)
+    # Start from this ref (a dependency's workspace or their partial merge) instead of the target.
+    base_ref: str | None = Field(default=None, max_length=200)
 
 
 class DivergenceBody(ProjectPath):
@@ -260,7 +262,7 @@ def create_app(projects_root: Path, token: str, merge_key: bytes = b"") -> FastA
         repo = git_repository(body.path)
         return locked(repo, lambda: repo_ops.prepare_conflict_workspace(
             repo, name=body.name, branch=body.branch, target_branch=body.target_branch, incoming_ref=body.incoming_ref,
-            target_ref=github.fresh_target(repo, body.target_branch)))
+            target_ref=body.base_ref or github.fresh_target(repo, body.target_branch)))
 
     @app.post("/v1/workspaces/remove", dependencies=[Depends(authorized)])
     def remove(body: WorkspaceBody) -> dict[str, Any]:

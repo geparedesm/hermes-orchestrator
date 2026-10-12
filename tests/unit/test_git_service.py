@@ -582,3 +582,32 @@ def test_a_branch_open_in_another_worktree_is_left_alone(api, root, origin, tmp_
     result = _merge_pr(api, root, origin, tmp_path, "gh-local-3", before_merge=open_main_elsewhere)
     assert result["local"]["result"] == "skipped" and "another worktree" in result["local"]["reason"]
     assert sh(repo, "rev-parse", "main") == before
+
+
+def test_dependencies_that_conflict_are_reconciled_once_in_the_dependent_workspace(api, root):
+    """T-50: two parallel subtasks both register their model in the same files; the subtask depending on both starts
+    from one with the other merged in and the conflicts left to reconcile, and integration takes the reconciled head."""
+    a, b = prepare(api, "a1", "hermes/t-1/a1"), prepare(api, "b1", "hermes/t-1/b1")
+    work(root, "a1", {"models.py": "from . import property\n"})
+    work(root, "b1", {"models.py": "from . import contract\n"})
+    collect(api, a, "a1")
+    collect(api, b, "b1")
+    heads = ["refs/hermes/workspaces/a1", "refs/hermes/workspaces/b1"]
+    clash = api("/v1/integrate", {"path": "app", "task": "T-1", "target_branch": "main", "heads": heads}).json()
+    assert not clash["ok"] and clash["conflicts"] == ["models.py"]
+    response = api("/v1/workspaces/conflict", {"path": "app", "name": "c1", "branch": "hermes/t-1/c1", "target_branch": "main",
+                                               "incoming_ref": "refs/hermes/workspaces/b1", "base_ref": "refs/hermes/workspaces/a1"})
+    assert response.status_code == 200, response.text
+    assert response.json()["conflicts"] == ["models.py"]
+    c = root / "app" / ".hermes" / "worktrees" / "c1"
+    assert "<<<<<<<" in (c / "models.py").read_text()
+    (c / "models.py").write_text("from . import property\nfrom . import contract\n")  # the developer keeps both
+    sh(c, "add", "-A")
+    sh(c, "commit", "-q", "--no-edit")
+    commit(c, "its own assignment", {"wizard.py": "x = 1\n"})
+    collect(api, response.json(), "c1")
+    result = api("/v1/integrate", {"path": "app", "task": "T-1", "target_branch": "main",
+                                   "heads": heads + ["refs/hermes/workspaces/c1"]}).json()
+    assert result["ok"], result
+    assert [m["result"] for m in result["merged"]][:2] == ["contained in another head", "contained in another head"]
+    assert sh(root / "app", "show", f"{result['integration_sha']}:models.py") == "from . import property\nfrom . import contract"

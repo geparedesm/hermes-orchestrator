@@ -673,3 +673,45 @@ def test_each_conflicting_workspace_gets_one_resolution_attempt(api, services, a
     assert len(handed) == 1 and inputs() == 1
     conflict("t-1-8a1")  # another subtask's workspace conflicting too gets its own attempt
     assert len(handed) == 2 and inputs() == 1
+
+
+def test_a_subtask_whose_dependencies_conflict_reconciles_them_first(api, services, agents, repo, task):
+    """T-50: parallel subtasks both registered their model in the same file; the one depending on both must not stall."""
+    step(services, agents, task, {"type": "SET_REQUIREMENTS", "text": "Two models and a wizard."},
+         {"type": "SET_PLAN", "subtasks": [plan_item("a"), plan_item("b"), plan_item("c", depends_on=["a", "b"])]},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "a", "provider": "codex"},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "b", "provider": "claude"})
+    dev_a, dev_b = active(services, task, "DEVELOPER")  # in creation order: a, then b
+    develop(services, agents, repo, dev_a, {"models.py": "import a\n"})
+    develop(services, agents, repo, dev_b, {"models.py": "import b\n"})
+    for reviewer in active(services, task, "REVIEWER"):
+        review_verdict(services, agents, reviewer)
+    assert {k: v["state"] for k, v in subtasks(services, task).items()} == {"a": "ACCEPTED", "b": "ACCEPTED", "c": "READY"}
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "c", "provider": "codex"})
+    assert actions(services, task)[-1][:2] == ("REQUEST_EXECUTION", "ACCEPTED")
+    [dev_c] = active(services, task, "DEVELOPER")
+    assert "<<<<<<<" in (repo.parent / dev_c["workspace"] / "models.py").read_text()  # the conflict is there to reconcile
+    [row] = q(services, "SELECT spec->'assignment'->>'prompt' AS prompt FROM executions WHERE id = %s", dev_c["id"])
+    assert row["prompt"].startswith("Subtask") and "FIRST, before your assignment" in row["prompt"] and "models.py" in row["prompt"]
+    assert q(services, "SELECT 1 FROM events WHERE type = 'WORKSPACE_CONFLICTS'")
+
+
+def test_a_conflict_workspace_left_by_a_rolled_back_launch_is_reclaimed(api, services, agents, repo, task):
+    step(services, agents, task, {"type": "SET_REQUIREMENTS", "text": "Two models and a wizard."},
+         {"type": "SET_PLAN", "subtasks": [plan_item("a"), plan_item("b"), plan_item("c", depends_on=["a", "b"])]},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "a", "provider": "codex"},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "b", "provider": "claude"})
+    dev_a, dev_b = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev_a, {"models.py": "import a\n"})
+    develop(services, agents, repo, dev_b, {"models.py": "import b\n"})
+    for reviewer in active(services, task, "REVIEWER"):
+        review_verdict(services, agents, reviewer)
+    # A launch that prepared the clone and then rolled back leaves it on disk without a record.
+    orphan = repo / ".hermes" / "worktrees" / f"{task.lower()}-3a1"
+    services.ctx.git.conflict_workspace("demo", orphan.name, f"hermes/{task.lower()}/3a1", "main",
+                                        f"refs/hermes/workspaces/{Path(dev_b['workspace']).name}",
+                                        base_ref=f"refs/hermes/workspaces/{Path(dev_a['workspace']).name}")
+    assert orphan.is_dir()
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "c", "provider": "codex"})
+    assert actions(services, task)[-1][:2] == ("REQUEST_EXECUTION", "ACCEPTED")
+    assert q(services, "SELECT 1 FROM events WHERE type = 'WORKSPACE_RECLAIMED'")
