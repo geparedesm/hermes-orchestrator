@@ -231,6 +231,13 @@ def update_local(repo: Path, branch: str, tip: str) -> dict[str, str]:
         return {"result": "up to date"}
     if run(repo, "merge-base", "--is-ancestor", local, tip, ok_codes=(0, 1)).returncode != 0:
         return {"result": "skipped", "reason": f"the local {branch} has commits that are not on GitHub"}
+    # A linked worktree of the person's with the branch checked out would be left with its files behind its HEAD.
+    here = str(repo.resolve())
+    listing = run(repo, "worktree", "list", "--porcelain").stdout
+    for entry in listing.split("\n\n"):
+        fields = dict(line.split(" ", 1) for line in entry.splitlines() if " " in line)
+        if fields.get("branch") == f"refs/heads/{branch}" and str(Path(fields.get("worktree", "")).resolve()) != here:
+            return {"result": "skipped", "reason": f"{branch} is checked out in another worktree ({fields['worktree']})"}
     if try_git(repo, "symbolic-ref", "--quiet", "HEAD") == f"refs/heads/{branch}":
         try:
             run(repo, "merge", "--ff-only", "--no-edit", tip, timeout=_GH_TIMEOUT)

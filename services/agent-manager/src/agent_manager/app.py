@@ -39,6 +39,8 @@ class EnvironmentRequest(BaseModel):
     compose_files: list[str] = Field(default_factory=list, max_length=10)
     services: list[str] = Field(default_factory=list, max_length=50)
     startup_timeout: int = Field(default=180, ge=10, le=1800)
+    # Developers and reviewers reuse running services instead of reconfiguring them under another agent's tests.
+    reuse: bool = False
 
 
 def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root_host: str, reap_seconds: float = 15) -> FastAPI:
@@ -140,7 +142,7 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
             result = ops.start_environment(task=task, project=body.project, project_path=body.project_path,
                                            workspace=body.workspace, compose_files=body.compose_files, services=body.services,
                                            startup_timeout=body.startup_timeout, projects_root=projects_root,
-                                           projects_root_host=projects_root_host)
+                                           projects_root_host=projects_root_host, reuse=body.reuse)
         except EnvironmentFailed as exc:
             return error(502, "environment_failed", str(exc))
         return JSONResponse(result, status_code=201)

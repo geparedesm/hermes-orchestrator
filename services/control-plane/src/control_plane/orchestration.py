@@ -1141,13 +1141,14 @@ class Orchestration:
                                                                              for k in knowledge] if knowledge else []), "",
                             "Work only on this subtask. Run the relevant tests, fix failures, and commit locally when done."])
         capabilities = {"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE", "egress": "STANDARD"}
-        project = self.git._context(uow, task["key"])[1]
-        if testenv.ensure_before_dispatch(self.ctx, uow, task, project, self._config(uow, task), workspace["path"]):
+        services = testenv.request_body(self.git._context(uow, task["key"])[1], self._config(uow, task), workspace["path"])
+        if services:
             capabilities["test_services"] = True  # the project's tests may need them (an Odoo module's PostgreSQL)
         request = {"role": "DEVELOPER", "provider": provider, "prompt": prompt, "workspace": workspace["path"],
                    "capabilities": capabilities,
                    "subtask_id": str(subtask["id"]), "lease_epoch": epoch,
-                   "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry}}
+                   "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry,
+                               **({"test_environment": services} if services else {})}}
         if task["state"] == S.QUEUED:
             task = self._move(uow, task, S.RUNNING, reason="subtask work started")
         elif task["state"] == S.FIX_REQUIRED:

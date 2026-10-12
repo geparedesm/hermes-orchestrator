@@ -30,6 +30,7 @@ from ho_core.redact import redact
 from ho_core.statemachine import ACTIVE_STATES, TERMINAL_STATES, Trigger
 
 from . import budgets
+from . import testenv
 from .agentmgr import AgentManagerError
 from .auth import Principal
 from .context import Context, UnitOfWork
@@ -419,7 +420,13 @@ class Executions:
             uow.cur.execute("UPDATE executions SET dispatch_attempts = dispatch_attempts + 1, updated_at = now() WHERE id = %s",
                             (row["id"],))
             spec, attempts = row["spec"], row["dispatch_attempts"] + 1
+            uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (row["task_id"],))
+            task_key = uow.cur.fetchone()["key"]  # type: ignore[index]
         try:
+            # The project's test services first (persisted in the spec, so a dispatch after a restart starts them too).
+            services = (spec.get("purpose") or {}).get("test_environment")
+            if services:
+                testenv.start_for_dispatch(self.ctx, task_key, services)
             status = self._send(spec, attempts)
         except AttachmentUnavailable as exc:
             # Lost or altered on the artifact volume: nothing can be sent; say which file, do not retry blindly.

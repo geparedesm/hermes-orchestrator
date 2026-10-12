@@ -569,3 +569,16 @@ def test_github_projects_integrate_onto_the_target_as_github_has_it(api, root, o
     merged = api("/v1/merge", {"path": "app", "task": "T-1", "authorization": token})
     assert merged.status_code == 200, merged.text
     assert sh(repo, "rev-parse", "main") != remote_main  # the user's local branch was not touched by integration
+
+
+def test_a_branch_open_in_another_worktree_is_left_alone(api, root, origin, tmp_path):
+    repo = root / "app"
+    other = tmp_path / "other-checkout"
+
+    def open_main_elsewhere():
+        sh(repo, "checkout", "-q", "-b", "side")  # this checkout moves to another branch
+        sh(repo, "worktree", "add", "-q", str(other), "main")  # the person's main lives in a linked worktree
+    before = sh(repo, "rev-parse", "main")
+    result = _merge_pr(api, root, origin, tmp_path, "gh-local-3", before_merge=open_main_elsewhere)
+    assert result["local"]["result"] == "skipped" and "another worktree" in result["local"]["reason"]
+    assert sh(repo, "rev-parse", "main") == before
