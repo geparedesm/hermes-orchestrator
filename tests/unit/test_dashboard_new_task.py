@@ -181,5 +181,6 @@ def test_a_budget_increase_is_requested_as_the_operator(dashboard, monkeypatch):
     assert client.post("/tasks/T-49/budget", json={"add": {"agent_launches": 20}}).status_code == 200
     assert calls == [("dashboard:operator", "T-49", {"agent_launches": 20})]
     assert client.post("/tasks/T-49/budget", json={"add": {"agent_launches": -5}}).status_code == 400
+    assert client.post("/tasks/T-49/budget", json={"add": {"provider_usage_units": 2_000_000}}).status_code == 200  # tokens
     assert client.post("/tasks/T-49/budget", json={"add": {"unlimited": 1}}).status_code == 422
     assert client.post("/tasks/../budget", json={"add": {"agent_launches": 1}}).status_code == 404

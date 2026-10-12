@@ -193,8 +193,9 @@ def raise_budget(key: str, body: BudgetBody) -> Any:
     """Ask for more budget for a task. It becomes a BUDGET_INCREASE decision, decided like any other."""
     if not re.match(r"^T-[0-9]+$", key):
         raise HTTPException(status_code=404, detail="unknown task")
-    if any(v <= 0 or v > 100_000 for v in body.add.values()):
-        raise HTTPException(status_code=400, detail="increases are positive whole numbers")
+    # Positive whole numbers; provider usage is counted in tokens (one agent run reserves 200,000), so its bound is larger.
+    if any(v <= 0 or v > (10**10 if counter == "provider_usage_units" else 100_000) for counter, v in body.add.items()):
+        raise HTTPException(status_code=400, detail="increases are positive whole numbers within the counter's range")
     return _call(_api().budget, key, dict(body.add))
 
 

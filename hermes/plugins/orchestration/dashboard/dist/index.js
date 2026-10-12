@@ -421,10 +421,16 @@
     useEffect(function () {
       if (!budget || amounts) return;
       const out = {};
+      // The counter the pause names first ("would exceed its <counter> budget"), then any at or past its limit
+      // counting what running launches reserved.
+      const named = /exceed its ([a-z_]+) budget/.exec((view.data.task && view.data.task.state_reason) || "");
+      const blockers = named && budget.limits[named[1]] !== undefined ? [named[1]] : [];
       Object.keys(budget.limits).forEach(function (k) {
         const limit = budget.limits[k];
-        if (limit !== null && limit !== undefined && (budget.consumed[k] || 0) >= limit) out[k] = String(Math.max(1, limit));
+        const used = (budget.consumed[k] || 0) + ((budget.reserved || {})[k] || 0);
+        if (limit !== null && limit !== undefined && used >= limit && blockers.indexOf(k) < 0) blockers.push(k);
       });
+      blockers.forEach(function (k) { out[k] = String(Math.max(1, budget.limits[k] || 1)); });
       if (!Object.keys(out).length) out.agent_launches = String(Math.max(1, budget.limits.agent_launches || 10));
       setAmounts(out);
     }, [budget]);
@@ -453,6 +459,12 @@
           h("input", { className: "orch-other orch-number", type: "number", min: 1, value: amounts[k],
             onChange: function (e) { const v = e.target.value; setAmounts(function (a) { const n = Object.assign({}, a); n[k] = v; return n; }); } })));
       })),
+      Object.keys(budget.limits).some(function (k) { return amounts[k] === undefined && budget.limits[k] !== null; })
+        ? h("select", { className: "orch-other", value: "", onChange: function (e) { const k = e.target.value; if (k) setAmounts(function (a) {
+            const n = Object.assign({}, a); n[k] = String(Math.max(1, budget.limits[k] || 1)); return n; }); } },
+          h("option", { value: "" }, "+ Another counter…"),
+          Object.keys(budget.limits).filter(function (k) { return amounts[k] === undefined && budget.limits[k] !== null; })
+            .map(function (k) { return h("option", { key: k, value: k }, COUNTERS[k] || k); })) : null,
       error ? h("div", { className: "orch-alert" }, error) : null,
       h("div", { className: "orch-approval-actions" },
         h(Button, { kind: "primary", small: true, icon: "plus", disabled: busy, onClick: submit }, busy ? "Requesting…" : "Request the increase"),
