@@ -49,7 +49,8 @@ are never Hermes LLM tools (AD-10).
 - tasks it leads wait until it is resumed. The pause itself never moves a lead (that would invalidate queued
   launches), and failback leaves a paused lead alone. The existing recovery paths still apply as for an exhausted
   quota: a failed step or an orphaned lease may hand the lead to the other agent;
-- renewing its login still works: the login becomes READY, and its interrupted work waits for the resume;
+- renewing its login still works: the login becomes READY, and the continuation of its interrupted work is recorded and
+  held (unstarted) until the resume;
 - an integration review it should give is not prepared (no Git work) until it is resumed.
 and running work finishes.
 

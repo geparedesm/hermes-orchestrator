@@ -133,7 +133,8 @@ class Executions:
     # ----------------------------------------------------------------- request
 
     def request(self, uow: UnitOfWork, *, principal: Principal, task_key: str, req: ExecutionRequest,
-                replacing: UUID | None = None, retry_of: UUID | None = None, allow_waiting: bool = False) -> Row:
+                replacing: UUID | None = None, retry_of: UUID | None = None, allow_waiting: bool = False,
+                hold_if_paused: bool = False) -> Row:
         if self.ctx.agents is None:
             raise UpstreamError("agent-manager is not configured")
         task = self.tasks.get(uow, task_key, lock=True)
@@ -163,8 +164,9 @@ class Executions:
         provider = req.provider if role in AGENT_ROLES else None
         if provider:
             from .agents import paused  # a person paused this agent in the Dashboard: no new execution (launches queue)
-            if provider in paused(uow, self.ctx.provider_identity):
+            if provider in paused(uow, self.ctx.provider_identity) and not hold_if_paused:
                 raise Conflict(f"{provider} is paused; the work waits until it is resumed or another agent takes it")
+            # hold_if_paused: the execution is recorded and dispatch holds it (unstarted) until the agent is resumed
         if bool(req.prompt) == bool(req.command):
             raise BadRequest("give either a prompt (agent roles) or a command")
         if req.prompt and role not in AGENT_ROLES:
@@ -549,9 +551,6 @@ class Executions:
             return None
         if ((row["spec"] or {}).get("purpose") or {}).get("orchestrator_step"):
             return None  # orchestration asks for a fresh step instead (its context and epoch would be stale)
-        from .agents import paused
-        if row["provider"] in paused(uow, row["provider_identity"] or self.ctx.provider_identity):
-            return None  # the login is renewed either way; the agent's work waits until a person resumes it
         uow.cur.execute("SELECT requested FROM capability_grants WHERE execution_id = %s", (row["id"],))
         requested = uow.cur.fetchone()["requested"]  # type: ignore[index]
         uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (row["task_id"],))
@@ -576,8 +575,9 @@ class Executions:
             purpose=spec.get("purpose") or {},
             subtask_id=row["subtask_id"],
         )
+        # The continuation is recorded even while a person has paused the agent: dispatch holds it until the resume.
         return self.request(uow, principal=Principal("control-plane", "auth-resume"), task_key=task_key, req=req,
-                            retry_of=None if row["provider_session_id"] else row["id"])
+                            retry_of=None if row["provider_session_id"] else row["id"], hold_if_paused=True)
 
     def _send_stop(self, execution_id: str) -> None:
         try:

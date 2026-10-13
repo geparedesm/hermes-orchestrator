@@ -305,3 +305,20 @@ def test_an_execution_waiting_for_dispatch_does_not_start_once_its_agent_is_paus
     api.post("/v1/agents/codex/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
     services.executions.dispatch(execution)
     assert api.get(f"/v1/executions/{execution}").json()["state"] != "REQUESTED"
+
+
+def test_renewing_a_paused_agents_login_holds_its_interrupted_work_until_resume(api, services, agents, task):
+    """Codex review: the continuation must not be lost when the login is renewed while the agent is paused."""
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+
+    execution = run_agent(api, task, provider="claude").json()["id"]
+    agents.finish_agent(execution, (FIXTURES / "claude-auth-failure.jsonl").read_bytes(), exit_code=1)
+    services.scheduler.run_once()
+    assert api.post("/v1/agents/claude/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 200
+    body = api.post("/v1/credentials/claude/default/ready").json()
+    assert credential(api, "claude")["status"] == "READY" and body["tasks_resumed"] == [task]
+    new = body["executions_continued"][0]["continued_by"]
+    assert api.get(f"/v1/executions/{new}").json()["state"] == "REQUESTED" and new not in agents.containers  # held
+    api.post("/v1/agents/claude/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    services.executions.dispatch(new)
+    assert api.get(f"/v1/executions/{new}").json()["state"] != "REQUESTED"
