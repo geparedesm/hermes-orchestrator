@@ -83,7 +83,7 @@ def test_riskiest_segment_wins():
     for command in ("xargs docker rm", "/usr/bin/docker ps", "sh -c 'docker ps'", "nohup kubectl apply -f x", "docker-compose up",
                     'bash -lc "docker ps"', "env DOCKER_HOST=tcp://host:2375 docker ps", "xargs -I {} docker inspect {}",
                     "timeout 5 docker ps", "sudo -u root docker ps", 'bash -lc "exec docker ps"', 'bash -lc "env X=1 docker ps"',
-                    "ls && bash -c 'ls; docker ps'"):
+                    "ls && bash -c 'ls; docker ps'", "if docker ps; then echo yes; fi", "for x in a; do docker ps; done"):
         assert classify(command).command_class == CommandClass.HIGH_RISK, command
     for command in ("git log --all --oneline | grep -i docker", "find . -iname 'docker-compose*' | head"):
         assert classify(command).rule_id != "CMD-H07", command  # the word in an argument is not container control
@@ -198,12 +198,13 @@ def test_only_commands_needing_absent_capabilities_are_provably_blocked():
     """T-55, Codex review: a flagged command is "blocked" only when it needs a tool no worker has."""
     from ho_core.policy.commands import provably_blocked
 
-    for command in ("sudo -u postgres psql -c '\\l'", "pg_isready; sudo service postgresql status", "docker ps -a",
-                    'bash -lc "docker ps"', "cat /var/run/docker.sock"):
+    for command in ("sudo -u postgres psql -c '\\l'", "ls; sudo service postgresql status 2>&1", "docker ps -a",
+                    "docker ps -a 2>/dev/null | head -5", "env X=1 docker ps"):
         assert provably_blocked(command), command
     for command in ("chmod 777 /workspace/run.sh", "su - postgres", "git push --force", "psql -c 'DROP TABLE x'",
                     "ls -la", "docker ps; chmod 777 x", "docker ps $(chmod 777 /workspace/run.sh)", "sudo ls > /workspace/x",
-                    "sudo ls & chmod 777 x", "docker ps `chmod 777 x`"):
+                    "sudo ls & chmod 777 x", "docker ps `chmod 777 x`", "cat /run/ho-credentials/codex/auth.json /var/run/docker.sock",
+                    "chmod 777 /workspace/docker.sock", "pg_isready; sudo -u postgres psql", 'bash -lc "chmod 777 x; docker ps"'):
         assert not provably_blocked(command), command
 
 

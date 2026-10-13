@@ -267,11 +267,11 @@ def _approval(ctx: Context, lang: str, now: datetime) -> str:
     text, words, number = _TEXT[lang], _WORDS[lang], approval.get("number")
     ref = number if number is not None else approval.get("id")
     who = f" · {ctx.task}" + (f" «{ctx.title}»" if lang == "es" and ctx.title else f" “{ctx.title}”" if ctx.title else "") if ctx.task else ""
-    lines = [text["decide"].format(emoji=EMOJI["APPROVAL_REQUIRED"]) + who, question.format(**fields)]
+    # The plain one-sentence headline (English, like the Dashboard) where the chat speaks English.
+    asked = details_headline if lang == "en" and (details_headline := (ctx.details or {}).get("headline")) else question.format(**fields)
+    lines = [text["decide"].format(emoji=EMOJI["APPROVAL_REQUIRED"]) + who, asked]
     details = ctx.details or {}
-    changes = details.get("changes") or []
-    if details.get("commands"):  # a short message: the commands themselves are in the Dashboard's technical details
-        changes = []
+    changes = details.get("changes") or []  # the flagged commands are not among them: they stay in the Dashboard
     if changes and approval.get("action") != "CREATE_CHILD":  # a module request already says what it creates
         marks = {"+": "➕", "-": "➖", "~": "✏️", "!": "⚠️", "?": "❓"}
         lines += ["", text["changes"]] + [f"{marks.get(c.get('kind'), '•')} {c['text'][:200]}" for c in changes[:3]]

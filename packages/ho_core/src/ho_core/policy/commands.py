@@ -76,6 +76,7 @@ _WRAPPERS = frozenset({"env", "xargs", "exec", "nohup", "sudo", "watch", "timeou
                        "ionice", "setsid", "chroot", "doas", "unbuffer", "parallel"})
 _OPTION_ARGS = frozenset({"-I", "-i", "-n", "-P", "-L", "-s", "-d", "-u", "-g", "-E", "-C", "-k", "-a", "--replace"})
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
+_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "fi", "done"})
 
 
 _COMMAND_BREAKS = frozenset({";", "&&", "||", "|", "&", "\n", "(", ")", "|&", ";;"})
@@ -105,6 +106,9 @@ def _executables(text: str, depth: int = 0) -> list[str]:
         i = 0
         while i < len(tokens):
             name = tokens[i].rsplit("/", 1)[-1]
+            if name in _KEYWORDS:  # `if docker ps; then`, `do docker ps; done`: the program comes after the keyword
+                i += 1
+                continue
             found.append(name)
             if name in _SHELLS and depth < 3:
                 for j in range(i + 1, len(tokens) - 1):
@@ -150,22 +154,23 @@ def classify(command: str) -> Classification:
 
 
 def provably_blocked(command: str) -> bool:
-    """Whether every high-risk part of a command needs something absent from every worker image (AD-14): a container
-    tool or its socket (not installed, never mounted), or sudo (not installed; workers run unprivileged). Anything
-    else flagged high-risk (chmod, su, git push --force, ...) may have had an effect, so it is not provably blocked."""
-    # Substitutions, background jobs, redirections, and eval run (or write) before a missing program fails.
-    if re.search(r"\$\(|`|<\(|>\(|>|(?<!&)&(?!&)|\beval\b|\bsource\b", command):
+    """Whether a flagged command can have had no effect: each of its simple commands either runs a program absent from
+    every worker image (a container tool, or sudo: AD-14) or is a read-only inspection. Anything else in the line
+    (chmod, su, a database client, an unknown program, a substitution, a redirection to a file, a background job)
+    may have had an effect, so the command is not provably blocked (T-55, Codex review)."""
+    text = re.sub(r"\s[12]?>&[12]|\s[12]?>\s*/dev/null", " ", command)  # harmless redirections
+    if re.search(r"\$\(|`|<\(|>\(|>|<|(?<!&)&(?!&)|\beval\b|\bsource\b", text):
         return False
-    risky = [s for s in _SEPARATORS.split(command.strip()) if s and _classify_segment(_strip_prefix(s)).command_class == H]
-    if not risky:
-        return False
-    for segment in risky:
-        rule = _classify_segment(_strip_prefix(segment)).rule_id
-        programs = _executables(_strip_prefix(segment))
-        if rule == "CMD-H07" or (rule == "CMD-H09" and programs and programs[0] == "sudo"):  # tool absent / not mounted
+    absent = False
+    for tokens in _commands(text):
+        # Through wrappers (`env X=1 docker`, `timeout 5 sudo …`): the first program that is absent fails the command.
+        runs = next((p for p in _executables(shlex.join(tokens)) if p not in _WRAPPERS - {"sudo"}), None)
+        if runs in CONTAINER_TOOLS | {"sudo"}:
+            absent = True
             continue
-        return False
-    return True
+        if _classify_segment(_strip_prefix(shlex.join(tokens))).command_class != S:
+            return False
+    return absent
 
 
 def _strip_prefix(segment: str) -> str:

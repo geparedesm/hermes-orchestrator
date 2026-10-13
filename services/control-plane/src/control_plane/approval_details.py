@@ -138,12 +138,16 @@ def _recommend(action: str, text: str) -> dict[str, str]:
     return {"action": action, "text": text}
 
 
-def _checks(uow: UnitOfWork, task_id: Any) -> tuple[str | None, list[Row]]:
-    """The latest verification state and the latest integration reviews of a task."""
-    uow.cur.execute("SELECT state FROM verifications WHERE task_id = %s ORDER BY created_at DESC LIMIT 1", (task_id,))
+def _checks(uow: UnitOfWork, task_id: Any, commit: str | None) -> tuple[str | None, list[Row]]:
+    """The integration verification and the latest review per provider of this exact commit (as the Quality Gate
+    reads them): checks of an earlier commit never back a recommendation."""
+    if not commit:
+        return None, []
+    uow.cur.execute("SELECT state FROM verifications WHERE task_id = %s AND purpose = 'INTEGRATION' AND commit_sha = %s "
+                    "ORDER BY created_at DESC LIMIT 1", (task_id, commit))
     tests = (uow.cur.fetchone() or {}).get("state")
-    uow.cur.execute("SELECT reviewer_provider, outcome FROM reviews WHERE task_id = %s AND subtask_id IS NULL "
-                    "ORDER BY created_at DESC LIMIT 2", (task_id,))
+    uow.cur.execute("SELECT DISTINCT ON (reviewer_provider) reviewer_provider, outcome FROM reviews WHERE task_id = %s "
+                    "AND commit_sha = %s AND subtask_id IS NULL ORDER BY reviewer_provider, created_at DESC", (task_id, commit))
     return tests, uow.cur.fetchall()
 
 
@@ -163,7 +167,8 @@ def _merge(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     included = [{"kind": "+", "text": f"{r['local_key']}: {r['title']}"} for r in uow.cur.fetchall()]
     uow.cur.execute("SELECT summary FROM events WHERE task_id = %s AND type = 'INTEGRATION_COMPLETED' ORDER BY seq DESC LIMIT 1", (tid,))
     integrated = (uow.cur.fetchone() or {}).get("summary")
-    tests, review_rows = _checks(uow, tid)
+    # The merge's own commit: the integrated change (the pull request head is the same commit, checked when requested).
+    tests, review_rows = _checks(uow, tid, git.get("integration_sha") or subject.get("head_sha"))
     reviews = ", ".join(f"{r['outcome'].lower()} by {r['reviewer_provider']}" for r in review_rows) or "—"
     branch = subject.get("target_branch") or "main"
     pr = subject.get("pr_number")
@@ -229,7 +234,7 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     reasons = list(subject.get("reasons") or [])
     other = [r for r in reasons if not r.startswith("policy violations")]
     blocked = bool(count or denied) and unproven == 0  # policy denials were refused, so had no effect
-    tests, review_rows = _checks(uow, tid)
+    tests, review_rows = _checks(uow, tid, subject.get("commit"))
     checked = tests == "PASSED" and bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
     words = sorted({c["meaning"] for c in commands})
     example = f" (for example, {words[0]})" if words else ""
@@ -390,6 +395,6 @@ def details(uow: UnitOfWork, approval: Row, defaults: dict[str, Any] | None = No
         log.exception("details of approval %s failed", approval.get("id"))
         out = {"changes": [], "why": approval["summary"], "if_yes": "", "if_no": "", "facts": [], "links": []}
     risk = str(approval.get("risk") or "MEDIUM").lower()
-    return {"highlights": [], "recommendation": None, **out, "headline": out.get("headline") or approval["summary"],
+    return {"highlights": [], "recommendation": None, **out, "headline": out.get("headline"),  # None: the plain question stands
             "risk": out.pop("display_risk", None) or risk, "requested_by": approval.get("requested_by"),
             "requested_at": approval.get("requested_at")}
