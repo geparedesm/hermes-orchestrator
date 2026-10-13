@@ -282,6 +282,8 @@ def test_the_dashboard_shows_each_agents_plan_usage_and_a_person_can_pause_it(ap
 
     with services.ctx.unit_of_work() as uow:  # what routing (Orchestration._available) skips: new work goes elsewhere
         assert paused_providers(uow, services.ctx.provider_identity) == {"codex"}
+    refused = run_agent(api, task, provider="codex")  # every launch path goes through here: nothing new starts
+    assert refused.status_code == 409 and "paused" in refused.text
     api.post("/v1/agents/codex/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
     with services.ctx.unit_of_work() as uow:
         assert paused_providers(uow, services.ctx.provider_identity) == set()

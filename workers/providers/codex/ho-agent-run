@@ -40,7 +40,7 @@ if [[ -n $thread ]]; then
     tail -n "+$(( ${skip:-0} + 1 ))" "$rollout" | grep '"type":"turn_context"' \
       | awk 'match($0, /"model":"[A-Za-z0-9._:\/@-]+"/) { print substr($0, RSTART + 9, RLENGTH - 10) }' > "$OUT/models.txt" || true
     # The plan's usage: only the numbers of this run's last rate_limits snapshot (invariant 4: nothing else is kept).
-    tail -n "+$(( ${skip:-0} + 1 ))" "$rollout" | grep '"rate_limits"' | tail -n 1 | node -e '
+    tail -n "+$(( ${skip:-0} + 1 ))" "$rollout" | grep '"rate_limits"' | tail -n 1 | /opt/ho/node/bin/node -e '
       let text = ""; process.stdin.on("data", (c) => { text += c; }).on("end", () => {
         let event; try { event = JSON.parse(text); } catch (e) { return; }
         const limits = ((event && (event.payload || event.msg)) || {}).rate_limits;

@@ -407,6 +407,12 @@ class Orchestration:
                                 "(SELECT coalesce(max(seq), 0) FROM events WHERE task_id = %s) WHERE id = %s", (task["id"], task["id"]))
                 self._integrate_if_ready(uow, self._task(uow, task["id"]))
                 return None
+        if lease["provider"] in paused(uow, self.ctx.provider_identity) and OTHER[lease["provider"]] in self._available(uow):
+            # A person paused the agent leading this task: the other one leads from this step on.
+            epoch = self.leases.acquire(uow, task["id"], OTHER[lease["provider"]])
+            self._event(uow, task, "FAILOVER_COMPLETED", f"orchestration moved to {OTHER[lease['provider']]} (epoch {epoch}): "
+                        f"{lease['provider']} is paused", {"from": lease["provider"], "to": OTHER[lease["provider"]], "epoch": epoch})
+            lease = self.leases.get(uow, task["id"], lock=True)
         uow.cur.execute("SELECT coalesce(max(seq), 0) AS seq FROM events WHERE task_id = %s", (task["id"],))
         cursor = int(uow.cur.fetchone()["seq"])  # type: ignore[index]
         uow.cur.execute("UPDATE tasks SET step_requested = false WHERE id = %s", (task["id"],))

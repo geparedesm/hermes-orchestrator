@@ -1331,10 +1331,11 @@
     const pending = counts.data ? counts.data.required_actions.approvals.length + (counts.data.required_actions.clarifications || []).length : 0;
     const waiting = counts.data ? counts.data.required_actions.waiting_tasks.filter(function (t) { return t.state !== "APPROVAL_REQUIRED" && t.state !== "FIX_REQUIRED"; }).length : 0;
     const go = function (v) { setView(v); };
-    const props = { open: open, query: query, go: go };
+    // The search lives on the board and filters only it: other views never hide what needs the person.
+    const props = { open: open, query: "", go: go };
     let body;
     if (view === "home") body = h(Home, props);
-    else if (view === "board") body = h(Board, Object.assign({}, props, { setQuery: setQuery, search: search }));
+    else if (view === "board") body = h(Board, Object.assign({}, props, { query: query, setQuery: setQuery, search: search }));
     else if (view === "approvals") body = h(Approvals, props);
     else if (view === "projects") body = h(Projects, Object.assign({}, props, { create: function (p) { setCreating(p); },
       filter: function (p) { setQuery(p); setView("board"); } }));

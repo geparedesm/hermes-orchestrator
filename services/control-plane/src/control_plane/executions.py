@@ -161,6 +161,10 @@ class Executions:
         elif req.provider not in (None, "none"):
             raise BadRequest(f"{role.value} executions do not use a provider")
         provider = req.provider if role in AGENT_ROLES else None
+        if provider:
+            from .agents import paused  # a person paused this agent in the Dashboard: no new execution (launches queue)
+            if provider in paused(uow, self.ctx.provider_identity):
+                raise Conflict(f"{provider} is paused; the work waits until it is resumed or another agent takes it")
         if bool(req.prompt) == bool(req.command):
             raise BadRequest("give either a prompt (agent roles) or a command")
         if req.prompt and role not in AGENT_ROLES:

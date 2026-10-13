@@ -292,5 +292,6 @@ def test_codex_reads_the_usage_the_runner_copied_from_the_session_log():
     result = CodexAdapter().collect_result(bundle("", **{"rate-limits.json": json.dumps(limits).encode()}))
     assert result.rate_limits == [{"window": "session", "used_percent": 88.0, "resets_at": now + 1380},
                                   {"window": "week", "used_percent": 61.5, "resets_at": now + 3600}]
-    for broken in (b"not json", b"[]", json.dumps({"primary": {"used_percent": 400, "window_minutes": 300, "resets_at": now}}).encode()):
+    for broken in (b"not json", b"[]", b'{"primary": {"used_percent": 5, "window_minutes": 300, "resets_at": 1e400}}',
+                   b'{"primary": {"used_percent": NaN, "window_minutes": 300, "resets_at": 1}}', json.dumps({"primary": {"used_percent": 400, "window_minutes": 300, "resets_at": now}}).encode()):
         assert CodexAdapter().collect_result(bundle("", **{"rate-limits.json": broken})).rate_limits == []

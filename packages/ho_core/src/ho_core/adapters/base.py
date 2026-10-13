@@ -282,7 +282,9 @@ def usage_window(window: str, used_percent: Any, resets_at: Any, *, now: float |
         return None
     try:
         percent, reset = float(used_percent), int(resets_at)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # 1e400 is infinity: never a reset time
+        return None
+    if percent != percent:  # NaN
         return None
     current = now if now is not None else time.time()
     if not (0 <= percent <= 100) or not (current - 86400 <= reset <= current + 31 * 86400):
