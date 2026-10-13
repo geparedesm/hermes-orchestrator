@@ -44,7 +44,8 @@ are never Hermes LLM tools (AD-10).
 
 **Pause and resume:** a new `provider_settings (provider, identity, enabled)` table. While an agent is paused:
 - routing gives it no new work, and no execution of it is created or dispatched (the launches queue);
-- its unstarted executions hold no worker slot, and running work finishes;
+- running work finishes; an unstarted execution keeps its worker slot and waits (rare: a pause right after it was created);
+- its queued launches never hold back other work by priority;
 - tasks it leads wait until it is resumed. Pausing never moves a lead: that would invalidate queued launches.
 and running work finishes.
 

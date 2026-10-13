@@ -692,7 +692,8 @@
 
   function SearchBox(props) {
     return h("label", { className: "orch-search orch-right" }, h(Icon, { name: "search", size: 15 }),
-      h("input", { ref: props.search, value: props.query, onChange: function (e) { props.setQuery(e.target.value); }, placeholder: "Search tasks", "aria-label": "Search" }),
+      h("input", { ref: props.search, value: props.query, autoFocus: props.focus, onChange: function (e) { props.setQuery(e.target.value); },
+        placeholder: "Search tasks", "aria-label": "Search" }),
       props.query ? h("button", { type: "button", className: "orch-search-clear", "aria-label": "Clear search", onClick: function () { props.setQuery(""); } }, h(Icon, { name: "x", size: 13 }))
         : h("kbd", null, "/"));
   }
@@ -721,7 +722,7 @@
         h("div", { className: "orch-chips" }, ["", ...projects].map(function (p) {
           return h("button", { key: p || "all", type: "button", className: cx("orch-chip", project === p && "orch-chip-on"), onClick: function () { setProject(p); } }, p || "All projects");
         })),
-        h(SearchBox, { query: props.query, setQuery: props.setQuery, search: props.search })),
+        h(SearchBox, { query: props.query, setQuery: props.setQuery, search: props.search, focus: props.focusSearch })),
       h("div", { className: "orch-board" }, COLUMNS.map(function (c) {
         const items = tasks.filter(function (t) { return c.states.indexOf(t.state) >= 0; });
         return h("div", { key: c.id, className: cx("orch-column", c.id === "you" && items.length && "orch-column-attention") },
@@ -1312,6 +1313,7 @@
     const [task, setTask] = useState(null);
     const [creating, setCreating] = useState(null); // null, or the project to preselect ("" for none)
     const [query, setQuery] = useState("");
+    const [focusSearch, setFocusSearch] = useState(false);
     const counts = usePoll("/summary");
     const search = useRef(null);
     const open = useCallback(function (key) { setCreating(null); setTask(key); }, []);
@@ -1319,10 +1321,10 @@
     useEffect(function () {
       function onKey(e) {
         const typing = /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || "");
-        if (e.key === "/" && !typing) {  // the search lives on the board
+        if (e.key === "/" && !typing) {  // the search lives on the board: focus it now, or when the board has loaded
           e.preventDefault();
-          setView("board");
-          setTimeout(function () { if (search.current) search.current.focus(); }, 0);
+          if (search.current) search.current.focus();
+          else { setFocusSearch(true); setView("board"); }
         }
       }
       window.addEventListener("keydown", onKey);
@@ -1335,7 +1337,7 @@
     const props = { open: open, query: "", go: go };
     let body;
     if (view === "home") body = h(Home, props);
-    else if (view === "board") body = h(Board, Object.assign({}, props, { query: query, setQuery: setQuery, search: search }));
+    else if (view === "board") body = h(Board, Object.assign({}, props, { query: query, setQuery: setQuery, search: search, focusSearch: focusSearch }));
     else if (view === "approvals") body = h(Approvals, props);
     else if (view === "projects") body = h(Projects, Object.assign({}, props, { create: function (p) { setCreating(p); },
       filter: function (p) { setQuery(p); setView("board"); } }));
@@ -1348,7 +1350,7 @@
       h("nav", { className: "orch-nav" },
         VIEWS.map(function (v) {
           const badge = v[0] === "approvals" ? pending : v[0] === "home" ? waiting : 0;
-          return h("button", { key: v[0], type: "button", className: cx("orch-nav-item", view === v[0] && "orch-nav-on"), onClick: function () { setView(v[0]); } },
+          return h("button", { key: v[0], type: "button", className: cx("orch-nav-item", view === v[0] && "orch-nav-on"), onClick: function () { setFocusSearch(false); setView(v[0]); } },
             h(Icon, { name: v[2], size: 15 }), v[1], badge ? h("span", { className: "orch-badge" }, badge) : null);
         }),
         h(AgentLine, { go: go })),

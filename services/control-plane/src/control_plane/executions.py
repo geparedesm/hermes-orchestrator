@@ -344,10 +344,7 @@ class Executions:
         # A replacement takes over the slot of the execution it stops.
         uow.cur.execute(
             "SELECT count(*) AS n FROM executions WHERE state IN ('REQUESTED', 'STARTING', 'RUNNING', 'STOPPING') "
-            "AND role IN ('ORCHESTRATOR', 'DEVELOPER', 'REVIEWER') AND id IS DISTINCT FROM %s "
-            # Unstarted executions of a paused agent hold no worker slot (they wait until it is resumed).
-            "AND NOT (state = 'REQUESTED' AND EXISTS (SELECT 1 FROM provider_settings ps WHERE ps.provider = executions.provider "
-            "AND ps.identity = coalesce(executions.provider_identity, 'default') AND NOT ps.enabled))",
+            "AND role IN ('ORCHESTRATOR', 'DEVELOPER', 'REVIEWER') AND id IS DISTINCT FROM %s",
             (replacing,),
         )
         if uow.cur.fetchone()["n"] >= cap:  # type: ignore[index]
@@ -418,7 +415,9 @@ class Executions:
             if uow.cur.fetchone() is not None:
                 return
             if row["provider"]:
-                from .agents import paused  # paused before it could start: it waits, unstarted, until resumed
+                # Paused before it could start: it waits, unstarted and keeping its worker slot, until resumed. (Its
+                # capability grant expires as during a long Agent Manager outage: the execution then fails as POLICY.)
+                from .agents import paused
                 if row["provider"] in paused(uow, row["provider_identity"] or self.ctx.provider_identity):
                     return
             if (row["spec"].get("purpose") or {}).get("fenced"):
