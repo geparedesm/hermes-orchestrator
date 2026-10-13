@@ -79,5 +79,6 @@ tmp="$(mktemp config/.images.lock.XXXXXX)"
   echo "images:"
   printf '%s\n' "${LOCK[@]}" | sort -u
 } > "$tmp"
+chmod 644 "$tmp"  # mktemp makes it 0600; Agent Manager reads it as another user (Linux enforces this; Docker Desktop does not)
 mv "$tmp" config/images.lock.yaml
 cat config/images.lock.yaml
