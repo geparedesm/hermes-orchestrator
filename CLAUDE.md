@@ -69,3 +69,4 @@ Integration tests use the real Git Service in process and `tests/integration/fak
 - Operator project for real runs: `~/HermesProjects/hello-api`. Test harnesses may set task states directly in SQL only as a documented stand-in.
 - Smoke tests use throwaway provider identities (`HO_PROVIDER_IDENTITY`); never touch `cred-*-default`.
 - Code and docs in English; talk to the user in Spanish.
+- Design before frontend code: any UI (Dashboard tab, plugin views, pages) is first designed in `ui/*.pen` with pencil.dev (pencil MCP, skill `pen-dev`: `web-app`, `table`, `design-system`, `code` guides) and approved by the user; frontend code is then built from that design. Style: minimal and user-friendly (`get_style` Minimalistic Swiss 7 / Minimalistic Panel 2 / Soft Bento), one reusable component set, high contrast, no decorative gradients or cards for everything.
