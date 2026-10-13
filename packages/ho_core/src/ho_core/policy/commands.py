@@ -76,6 +76,8 @@ _WRAPPERS = frozenset({"env", "xargs", "exec", "nohup", "sudo", "watch", "timeou
                        "ionice", "setsid", "chroot", "doas", "unbuffer", "parallel"})
 _OPTION_ARGS = frozenset({"-I", "-i", "-n", "-P", "-L", "-s", "-d", "-u", "-g", "-E", "-C", "-k", "-a", "--replace"})
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
+_READ_ONLY = frozenset({"ls", "cat", "head", "tail", "wc", "grep", "echo", "pwd", "true", "which", "stat", "file",
+                        "cut", "diff"})
 _KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "fi", "done"})
 
 
@@ -159,7 +161,7 @@ def provably_blocked(command: str) -> bool:
     (chmod, su, a database client, an unknown program, a substitution, a redirection to a file, a background job)
     may have had an effect, so the command is not provably blocked (T-55, Codex review)."""
     text = re.sub(r"\s[12]?>&[12]|\s[12]?>\s*/dev/null", " ", command)  # harmless redirections
-    if re.search(r"\$\(|`|<\(|>\(|>|<|(?<!&)&(?!&)|\beval\b|\bsource\b", text):
+    if re.search(r"\$\(|`|<\(|>\(|>|<|(?<!&)&(?!&)|\beval\b|\bsource\b|[\n\r]", text):  # a newline separates commands
         return False
     absent = False
     for tokens in _commands(text):
@@ -168,7 +170,8 @@ def provably_blocked(command: str) -> bool:
         if runs in CONTAINER_TOOLS | {"sudo"}:
             absent = True
             continue
-        if _classify_segment(_strip_prefix(shlex.join(tokens))).command_class != S:
+        # Only programs that never write, with nothing flagged in their arguments (not `find`, which can -delete).
+        if tokens[0] not in _READ_ONLY or _classify_segment(_strip_prefix(shlex.join(tokens))).command_class != S:
             return False
     return absent
 

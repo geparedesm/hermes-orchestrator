@@ -204,7 +204,9 @@ def test_only_commands_needing_absent_capabilities_are_provably_blocked():
     for command in ("chmod 777 /workspace/run.sh", "su - postgres", "git push --force", "psql -c 'DROP TABLE x'",
                     "ls -la", "docker ps; chmod 777 x", "docker ps $(chmod 777 /workspace/run.sh)", "sudo ls > /workspace/x",
                     "sudo ls & chmod 777 x", "docker ps `chmod 777 x`", "cat /run/ho-credentials/codex/auth.json /var/run/docker.sock",
-                    "chmod 777 /workspace/docker.sock", "pg_isready; sudo -u postgres psql", 'bash -lc "chmod 777 x; docker ps"'):
+                    "chmod 777 /workspace/docker.sock", "pg_isready; sudo -u postgres psql", 'bash -lc "chmod 777 x; docker ps"',
+                    "docker ps\nchmod 777 /workspace/run.sh", "docker ps; find /workspace -type f -delete",
+                    "docker ps; git restore /workspace/run.sh"):
         assert not provably_blocked(command), command
 
 
