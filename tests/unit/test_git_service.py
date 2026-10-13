@@ -644,3 +644,106 @@ def test_dependencies_that_conflict_are_reconciled_once_in_the_dependent_workspa
     assert result["ok"], result
     assert [m["result"] for m in result["merged"]][:2] == ["contained in another head", "contained in another head"]
     assert sh(root / "app", "show", f"{result['integration_sha']}:models.py") == "from . import property\nfrom . import contract"
+
+
+def test_github_merge_pins_exact_commit_when_remote_advances(api, root, origin, tmp_path, monkeypatch):
+    from git_service import github
+
+    original = github._git_remote
+    later = {}
+
+    def remote(repo, *args, **kwargs):
+        if args[0] == "fetch" and "advance" not in later:
+            state = json.loads((tmp_path / "gh-state.json").read_text())
+            if state["prs"] and state["prs"][0]["state"] == "MERGED":
+                merged = state["prs"][0]["mergeCommit"]["oid"]
+                tree = sh(origin, "rev-parse", f"{merged}^{{tree}}")
+                later["advance"] = sh(origin, "commit-tree", tree, "-p", merged, "-m", "another merge")
+                sh(origin, "update-ref", "refs/heads/main", later["advance"])
+        return original(repo, *args, **kwargs)
+
+    monkeypatch.setattr(github, "_git_remote", remote)
+    result = _merge_pr(api, root, origin, tmp_path, "gh-exact")
+    assert later["advance"] != result["merge_sha"]
+    assert sh(root / "app", "rev-parse", "refs/hermes/merges/gh-exact") == result["merge_sha"]
+    assert sh(root / "app", "rev-parse", "main") == result["merge_sha"]
+    # A replay uses the same commit rather than whichever remote tip was fetched.
+    replay = github.merge_pr(root / "app", approval_id="gh-exact", number=1, target_branch="main",
+                             target_sha="a" * 40, head_sha="b" * 40, method="merge")
+    assert replay["already_merged"] and replay["merge_sha"] == result["merge_sha"]
+
+
+@pytest.mark.parametrize("failure_stage", ["answer", "record"])
+def test_github_merge_recovers_lost_answer(api, root, origin, tmp_path, monkeypatch, failure_stage):
+    from git_service import github
+    from git_service.gitcmd import GitError
+
+    original = github.gh
+    original_run = github.run
+
+    def lose_answer(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if failure_stage == "answer" and args[:2] == ("pr", "merge"):
+            raise GitError("connection reset after merge")
+        return result
+
+    def lose_record(repo, *args, **kwargs):
+        if failure_stage == "record" and args[:2] == ("update-ref", "refs/hermes/merges/gh-recover"):
+            raise GitError("connection reset before recording merge")
+        return original_run(repo, *args, **kwargs)
+
+    monkeypatch.setattr(github, "gh", lose_answer)
+    monkeypatch.setattr(github, "run", lose_record)
+    result = _merge_pr(api, root, origin, tmp_path, "gh-recover")
+    assert "connection reset" in result["message"]
+    state = json.loads((tmp_path / "gh-state.json").read_text())
+    pr = state["prs"][0]
+    assert pr["state"] == "MERGED"
+    assert sh(root / "app", "rev-parse", "refs/hermes/merge-intents/gh-recover")
+    monkeypatch.setattr(github, "gh", original)
+    monkeypatch.setattr(github, "run", original_run)
+    # Reconstruct the authorization's base from the merged commit's first parent.
+    base = sh(origin, "rev-parse", f"{pr['mergeCommit']['oid']}^1")
+    token = sign_merge(KEY, approval_id="gh-recover", expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                       subject={"project": "app", "target_branch": "main", "target_sha": base,
+                                "head_sha": pr["headRefOid"], "method": "merge", "pr_number": 1})
+    response = api("/v1/merge", {"path": "app", "task": "T-1", "authorization": token})
+    assert response.status_code == 200, response.text
+    assert response.json()["already_merged"]
+    assert response.json()["merge_sha"] == pr["mergeCommit"]["oid"]
+    calls = json.loads((tmp_path / "gh-state.json").read_text())["calls"]
+    assert sum(c[:2] == ["pr", "merge"] for c in calls) == 1
+
+
+def test_github_merge_does_not_adopt_external_merge(api, root, origin, tmp_path):
+    from git_service import github
+
+    result = _merge_pr(api, root, origin, tmp_path, "gh-outside")
+    repo = root / "app"
+    sh(repo, "update-ref", "-d", "refs/hermes/merges/gh-outside")
+    sh(repo, "update-ref", "-d", "refs/hermes/merge-intents/gh-outside")
+    pr = json.loads((tmp_path / "gh-state.json").read_text())["prs"][0]
+    with pytest.raises(github.Refused, match="outside the platform"):
+        github.merge_pr(repo, approval_id="gh-outside", number=1, target_branch="main",
+                        target_sha=sh(origin, "rev-parse", f"{result['merge_sha']}^1"),
+                        head_sha=pr["headRefOid"], method="merge")
+
+
+def test_github_merge_recovery_requires_matching_intent_and_commit(api, root, origin, tmp_path, monkeypatch):
+    from git_service import github
+    from git_service.gitcmd import GitError
+
+    result = _merge_pr(api, root, origin, tmp_path, "gh-evidence")
+    repo = root / "app"
+    sh(repo, "update-ref", "-d", "refs/hermes/merges/gh-evidence")
+    pr = json.loads((tmp_path / "gh-state.json").read_text())["prs"][0]
+    args = {"approval_id": "gh-evidence", "number": 1, "target_branch": "main",
+            "target_sha": sh(origin, "rev-parse", f"{result['merge_sha']}^1"),
+            "head_sha": pr["headRefOid"], "method": "merge"}
+    with pytest.raises(github.Refused, match="does not match"):
+        github.merge_pr(repo, **{**args, "method": "squash"})
+    monkeypatch.setattr(github, "pr_view", lambda *a: {**pr, "mergeCommit": None})
+    with pytest.raises(GitError, match="exact merge commit"):
+        github.merge_pr(repo, **args)
+    assert subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet",
+                           "refs/hermes/merges/gh-evidence"], env=ENV, capture_output=True).returncode != 0

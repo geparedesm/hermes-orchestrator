@@ -192,33 +192,53 @@ def merge_pr(repo: Path, *, approval_id: str, number: int, target_branch: str, t
                 "local": update_local(repo, target_branch, done)}
     info = _github(repo)
     pr = pr_view(repo, number)
-    if pr["state"] == "MERGED":
-        raise Refused("the pull request was merged outside the platform")
     if pr["headRefOid"] != head_sha or pr["baseRefName"] != target_branch:
         raise Refused("the pull request head or base changed after approval")
-    if remote_branch_sha(repo, target_branch) != target_sha:
-        raise Refused(f"{target_branch} on GitHub moved after approval")
-    conflict = (f"pull request #{number} conflicts with {target_branch} on GitHub, which moved after the task was "
-                f"integrated: bring the local {target_branch} up to date and retry the task to integrate it again")
-    if pr.get("mergeable") == "CONFLICTING":  # GitHub's MergeableState
-        raise Refused(conflict)
-    flag = {"merge": "--merge", "squash": "--squash", "rebase": "--rebase"}[method]
-    try:
-        gh("pr", "merge", str(number), "--repo", info["repo"], flag, "--match-head-commit", head_sha)
-    except GitError as exc:
-        if "not mergeable" in str(exc):  # GitHub computed the conflict after the check above
-            raise Refused(conflict) from exc
-        raise
-    merged = pr_view(repo, number)
-    if merged["state"] != "MERGED":
-        raise GitError("GitHub did not report the pull request as merged (merge queue?)")
+    # Persist the approved operation before the remote side effect. A retry may adopt a
+    # merged PR only when this exact operation was attempted here, never merely because
+    # someone else merged a PR with the same head.
+    intent_ref = f"refs/hermes/merge-intents/{approval_id}"
+    intent = json.dumps({"repo": info["repo"], "number": number, "target_branch": target_branch,
+                         "target_sha": target_sha, "head_sha": head_sha, "method": method}, sort_keys=True)
+    saved = try_git(repo, "rev-parse", "--verify", "--quiet", intent_ref)
+    if saved and git(repo, "cat-file", "blob", saved) != intent:
+        raise Refused("the merge attempt does not match this approval")
+    recovered = pr["state"] == "MERGED"
+    if recovered:
+        if not saved:
+            raise Refused("the pull request was merged outside the platform")
+        merged = pr
+    else:
+        if remote_branch_sha(repo, target_branch) != target_sha:
+            raise Refused(f"{target_branch} on GitHub moved after approval")
+        conflict = (f"pull request #{number} conflicts with {target_branch} on GitHub, which moved after the task was "
+                    f"integrated: bring the local {target_branch} up to date and retry the task to integrate it again")
+        if pr.get("mergeable") == "CONFLICTING":
+            raise Refused(conflict)
+        flag = {"merge": "--merge", "squash": "--squash", "rebase": "--rebase"}[method]
+        if not saved:
+            blob = run(repo, "hash-object", "-w", "--stdin", input_text=intent).stdout.strip()
+            run(repo, "update-ref", intent_ref, blob)
+        try:
+            gh("pr", "merge", str(number), "--repo", info["repo"], flag, "--match-head-commit", head_sha)
+        except GitError as exc:
+            if "not mergeable" in str(exc):
+                raise Refused(conflict) from exc
+            raise
+        merged = pr_view(repo, number)
+        if merged["state"] != "MERGED":
+            raise GitError("GitHub did not report the pull request as merged (merge queue?)")
     merge_sha = (merged.get("mergeCommit") or {}).get("oid")
+    if not merge_sha or not valid_sha(merge_sha):
+        raise GitError("GitHub did not report the exact merge commit")
     _git_remote(repo, "fetch", "-q", "--no-tags", "origin", f"+refs/heads/{target_branch}:refs/remotes/origin/{target_branch}")
-    tip = git(repo, "rev-parse", f"refs/remotes/origin/{target_branch}")
-    # The record points at the merged target, which post-merge verification checks out.
-    run(repo, "update-ref", record, tip)
-    return {"merge_sha": merge_sha if merge_sha and valid_sha(merge_sha) else tip, "target_branch": target_branch,
-            "method": method, "already_merged": False, "pr": number, "local": update_local(repo, target_branch, tip)}
+    if try_git(repo, "rev-parse", "--verify", "--quiet", f"{merge_sha}^{{commit}}") != merge_sha:
+        _git_remote(repo, "fetch", "-q", "--no-tags", "origin", merge_sha)
+    # Pin verification and every retry to the PR's commit, even if the target moved
+    # again before the fetch. Never substitute the current tip for missing evidence.
+    run(repo, "update-ref", record, merge_sha)
+    return {"merge_sha": merge_sha, "target_branch": target_branch, "method": method,
+            "already_merged": recovered, "pr": number, "local": update_local(repo, target_branch, merge_sha)}
 
 
 def update_local(repo: Path, branch: str, tip: str) -> dict[str, str]:
