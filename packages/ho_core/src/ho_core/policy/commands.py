@@ -78,29 +78,46 @@ _OPTION_ARGS = frozenset({"-I", "-i", "-n", "-P", "-L", "-s", "-d", "-u", "-g", 
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
 
 
-def _executables(segment: str, depth: int = 0) -> list[str]:
-    """The programs a segment runs: the first word, through wrappers and their options, and inside `sh -c` scripts."""
+_COMMAND_BREAKS = frozenset({";", "&&", "||", "|", "&", "\n", "(", ")", "|&", ";;"})
+
+
+def _commands(text: str) -> list[list[str]]:
+    """The simple commands of a line as token lists, quoting preserved (`bash -lc "exec docker ps"` keeps its script)."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    commands: list[list[str]] = [[]]
     try:
-        tokens = shlex.split(segment, posix=True)
-    except ValueError:
-        tokens = segment.split()
-    found, i = [], 0
-    while i < len(tokens):
-        name = tokens[i].rsplit("/", 1)[-1]
-        found.append(name)
-        if name in _SHELLS and depth < 3:
-            for j in range(i + 1, len(tokens) - 1):
-                if tokens[j].startswith("-") and not tokens[j].startswith("--") and "c" in tokens[j]:
-                    for part in _SEPARATORS.split(tokens[j + 1]):
-                        found += _executables(part, depth + 1)
-                    break
-            return found
-        if name not in _WRAPPERS:
-            return found
-        i += 1
-        while i < len(tokens) and (tokens[i].startswith("-") or re.match(r"^\w+=", tokens[i]) or tokens[i].isdigit()
-                                   or tokens[i] in ("{}", "%")):
-            i += 2 if tokens[i] in _OPTION_ARGS else 1
+        for token in lexer:
+            if token in _COMMAND_BREAKS or set(token) <= set(";&|()"):
+                commands.append([])
+            else:
+                commands[-1].append(token)
+    except ValueError:  # unbalanced quotes: fall back to words
+        commands = [text.split()]
+    return [c for c in commands if c]
+
+
+def _executables(text: str, depth: int = 0) -> list[str]:
+    """Every program a line runs: each command's first word, through wrappers and their options, and inside
+    `sh -c` scripts."""
+    found: list[str] = []
+    for tokens in _commands(text):
+        i = 0
+        while i < len(tokens):
+            name = tokens[i].rsplit("/", 1)[-1]
+            found.append(name)
+            if name in _SHELLS and depth < 3:
+                for j in range(i + 1, len(tokens) - 1):
+                    if tokens[j].startswith("-") and not tokens[j].startswith("--") and "c" in tokens[j]:
+                        found += _executables(tokens[j + 1], depth + 1)
+                        break
+                break
+            if name not in _WRAPPERS:
+                break
+            i += 1
+            while i < len(tokens) and (tokens[i].startswith("-") or re.match(r"^\w+=", tokens[i]) or tokens[i].isdigit()
+                                       or tokens[i] in ("{}", "%")):
+                i += 2 if tokens[i] in _OPTION_ARGS else 1
     return found
 
 
@@ -118,7 +135,10 @@ def classify(command: str) -> Classification:
     text = command.strip()
     if not text:
         return Classification(C, "CMD-C99", "Empty command")
-    # The whole line is checked too, for patterns that span separators.
+    # The whole line is checked too, for patterns that span separators, and for container tools run anywhere in it
+    # (through wrappers or shell scripts, with their quoting intact).
+    if CONTAINER_TOOLS & set(_executables(text)):
+        return next(Classification(r.command_class, r.rule_id, r.summary) for r in _RULES if r.rule_id == "CMD-H07")
     results = [_classify_segment(_strip_prefix(text))]
     results += [_classify_segment(_strip_prefix(s)) for s in _SEPARATORS.split(text) if s]
     # Every segment must be SAFE for the line to be SAFE; the riskiest one decides.
@@ -133,13 +153,16 @@ def provably_blocked(command: str) -> bool:
     """Whether every high-risk part of a command needs something absent from every worker image (AD-14): a container
     tool or its socket (not installed, never mounted), or sudo (not installed; workers run unprivileged). Anything
     else flagged high-risk (chmod, su, git push --force, ...) may have had an effect, so it is not provably blocked."""
+    # Substitutions, background jobs, redirections, and eval run (or write) before a missing program fails.
+    if re.search(r"\$\(|`|<\(|>\(|>|(?<!&)&(?!&)|\beval\b|\bsource\b", command):
+        return False
     risky = [s for s in _SEPARATORS.split(command.strip()) if s and _classify_segment(_strip_prefix(s)).command_class == H]
     if not risky:
         return False
     for segment in risky:
         rule = _classify_segment(_strip_prefix(segment)).rule_id
         programs = _executables(_strip_prefix(segment))
-        if rule == "CMD-H07" or (rule == "CMD-H09" and programs and programs[0] == "sudo"):
+        if rule == "CMD-H07" or (rule == "CMD-H09" and programs and programs[0] == "sudo"):  # tool absent / not mounted
             continue
         return False
     return True

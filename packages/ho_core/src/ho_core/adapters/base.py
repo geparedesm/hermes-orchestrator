@@ -24,8 +24,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable, Protocol
 
 from .. import schemas
-from ..enums import Role, StrEnum
-from ..policy.commands import classify
+from ..enums import CommandClass, Role, StrEnum
+from ..policy.commands import classify, provably_blocked
 
 RESULT_SCHEMA = "agent-result"
 RUNNER = "/opt/ho/bin/ho-agent-run"
@@ -262,6 +262,8 @@ def command_event(event_type: str, command: str, **extra: Any) -> AdapterEvent:
         "command": command[:500],
         "class": classification.command_class.value,
         "rule": classification.rule_id,
+        # Decided on the whole command, before it is cut short (T-55, Codex review).
+        "blocked": classification.command_class == CommandClass.HIGH_RISK and provably_blocked(command),
         **extra,
     })
 

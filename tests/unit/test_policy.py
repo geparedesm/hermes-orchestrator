@@ -82,7 +82,8 @@ def test_riskiest_segment_wins():
     assert classify("ls && docker ps").command_class == CommandClass.HIGH_RISK
     for command in ("xargs docker rm", "/usr/bin/docker ps", "sh -c 'docker ps'", "nohup kubectl apply -f x", "docker-compose up",
                     'bash -lc "docker ps"', "env DOCKER_HOST=tcp://host:2375 docker ps", "xargs -I {} docker inspect {}",
-                    "timeout 5 docker ps", "sudo -u root docker ps"):
+                    "timeout 5 docker ps", "sudo -u root docker ps", 'bash -lc "exec docker ps"', 'bash -lc "env X=1 docker ps"',
+                    "ls && bash -c 'ls; docker ps'"):
         assert classify(command).command_class == CommandClass.HIGH_RISK, command
     for command in ("git log --all --oneline | grep -i docker", "find . -iname 'docker-compose*' | head"):
         assert classify(command).rule_id != "CMD-H07", command  # the word in an argument is not container control
@@ -201,5 +202,15 @@ def test_only_commands_needing_absent_capabilities_are_provably_blocked():
                     'bash -lc "docker ps"', "cat /var/run/docker.sock"):
         assert provably_blocked(command), command
     for command in ("chmod 777 /workspace/run.sh", "su - postgres", "git push --force", "psql -c 'DROP TABLE x'",
-                    "ls -la", "docker ps; chmod 777 x"):
+                    "ls -la", "docker ps; chmod 777 x", "docker ps $(chmod 777 /workspace/run.sh)", "sudo ls > /workspace/x",
+                    "sudo ls & chmod 777 x", "docker ps `chmod 777 x`"):
         assert not provably_blocked(command), command
+
+
+def test_a_command_is_judged_blocked_on_its_whole_text_before_it_is_cut_short():
+    from ho_core.adapters.base import command_event
+
+    event = command_event("COMMAND_STARTED", "docker ps" + " " * 600 + "; chmod 777 /workspace/run.sh")
+    assert len(event.data["command"]) == 500 and event.data["blocked"] is False
+    assert command_event("COMMAND_STARTED", "sudo -u postgres psql").data["blocked"] is True
+    assert command_event("COMMAND_STARTED", "ls -la").data["blocked"] is False  # not flagged at all
