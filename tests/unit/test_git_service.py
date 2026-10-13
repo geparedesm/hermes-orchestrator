@@ -244,6 +244,39 @@ def test_integration_conflict_changes_nothing_and_can_be_resolved(api, root):
     assert "<<<<<<<" in (repo / conflict["path"] / "app.py").read_text()
 
 
+MANIFEST = "{\n    'name': 'Module',\n    'version': '%s',\n    'depends': ['base'],\n}\n"
+
+
+@pytest.mark.parametrize(("user", "task", "final"), [("19.0.1.3.0", "19.0.1.2.1", "19.0.1.3.0"),
+                                                    ("19.0.1.2.1", "19.0.2.0.0", "19.0.2.0.0")])
+def test_parallel_manifest_version_bumps_integrate_with_the_higher_version(api, root, user, task, final):
+    """T-53: the person and the task both bumped `version`; only that line conflicted."""
+    repo = root / "app"
+    commit(repo, "manifest", {"__manifest__.py": MANIFEST % "19.0.1.2.0"})
+    ws = prepare(api)
+    work(root, "w1", {"__manifest__.py": MANIFEST % task, "feature.py": "print('feature')\n"})
+    collect(api, ws)
+    commit(repo, "user bump", {"__manifest__.py": (MANIFEST % user).replace("['base']", "['base', 'mail']")})
+    result = api("/v1/integrate", {"path": "app", "task": "T-1", "target_branch": "main",
+                                   "heads": ["refs/hermes/workspaces/w1"]}).json()
+    assert result["ok"] and "manifest version aligned" in result["merged"][0]["result"]
+    merged = sh(repo, "show", f"{result['integration_sha']}:__manifest__.py")
+    assert f"'version': '{final}'" in merged and "['base', 'mail']" in merged  # the person's other edit is kept
+    assert sh(repo, "show", f"{result['integration_sha']}:feature.py") == "print('feature')"
+
+
+def test_a_manifest_conflict_beyond_the_version_line_is_still_reported(api, root):
+    repo = root / "app"
+    commit(repo, "manifest", {"__manifest__.py": MANIFEST % "19.0.1.2.0"})
+    ws = prepare(api)
+    work(root, "w1", {"__manifest__.py": (MANIFEST % "19.0.1.2.1").replace("['base']", "['base', 'web']")})
+    collect(api, ws)
+    commit(repo, "user", {"__manifest__.py": (MANIFEST % "19.0.1.3.0").replace("['base']", "['base', 'mail']")})
+    result = api("/v1/integrate", {"path": "app", "task": "T-1", "target_branch": "main",
+                                   "heads": ["refs/hermes/workspaces/w1"]}).json()
+    assert not result["ok"] and result["conflicts"] == ["__manifest__.py"]
+
+
 # ------------------------------------------------------------------------ merge
 
 
