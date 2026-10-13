@@ -44,8 +44,8 @@ fi
 
 mkdir -p "$OUT/config"
 cp -R config/. "$OUT/config/"
-if [[ -f "$ENV_FILE" ]]; then  # settings only: values of keys that look like credentials are dropped
-  grep -vE '^[A-Z0-9_]*(TOKEN|PASSWORD|SECRET|KEY)[A-Z0-9_]*=' "$ENV_FILE" > "$OUT/env.settings" || true
+if [[ -f "$ENV_FILE" ]]; then
+  python3 scripts/backup_settings.py "$ENV_FILE" > "$OUT/env.settings"
 fi
 
 {
