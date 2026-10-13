@@ -207,7 +207,7 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
             "facts": [["Target commit", str(subject.get("target_sha") or "")[:12]], ["Task commit", str(subject.get("head_sha") or "")[:12]]],
             "links": [],
         }
-    changes, commands, count, unproven = [], [], 0, 0
+    changes, commands, count, unproven, rules = [], [], 0, 0, set()
     uow.cur.execute("SELECT summary, data FROM events WHERE task_id = %s AND type = 'COMMAND_HIGH_RISK' ORDER BY seq", (tid,))
     for row in uow.cur.fetchall():
         data = row["data"] or {}
@@ -217,6 +217,10 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
         # Recorded before the platform knew which commands could not run: none of them is taken as blocked.
         unproven += int(data["unproven"]) if "unproven" in data else observed
         who = " ".join(str(x).lower() for x in (data.get("role"), data.get("provider")) if x) or "an agent"
+        rules |= set(data.get("rules") or []) | {i.get("rule") for i in data.get("commands") or []}
+        if data.get("commands") and observed > len(data["commands"]):
+            changes.append({"kind": "!", "text": f"{observed - len(data['commands'])} more command(s) by {who} not shown: "
+                                                 + ", ".join(sorted(RULE_WORDS.get(r, r) for r in data.get("rules") or []))})
         for item in data.get("commands") or []:
             commands.append({"who": who, "command": item.get("command"), "rule": item.get("rule"),
                              "meaning": RULE_WORDS.get(item.get("rule"), "run a risky command")})
@@ -238,7 +242,10 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     # Every other gate requirement passes too (reviewer coverage, CI, requirements met): only the exception is left.
     checked = (tests == "PASSED" and bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
                and gate is not None and not failing)
-    words = sorted({c["meaning"] for c in commands})
+    # Every rule, shown or not; the example is the most serious one (credentials and data before blocked tools).
+    severity = ["CMD-H11", "CMD-H06", "CMD-H05", "CMD-H03", "CMD-H01", "CMD-H02", "CMD-H04", "CMD-H10", "CMD-H08", "CMD-H09", "CMD-H07"]
+    words = [RULE_WORDS.get(r, "run a risky command") for r in sorted((r for r in rules if r),
+                                                                      key=lambda r: severity.index(r) if r in severity else 0)]
     example = f" (for example, {words[0]})" if words else ""
     if other:
         headline = "This change needs a closer look before it is added: " + "; ".join(_plain_reason(r) for r in other) + "."
@@ -314,8 +321,8 @@ def _waiting(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
         why = "The orchestrator asked you directly."
         yes, no = "The orchestrator goes ahead.", "The task stops."
     text = str(change)
-    first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
-    headline = (first if len(first) <= 220 else first[:217] + "…") if action == "ASSUMPTION" or subject.get("kind") != "plan_expansion" \
+    # The question in full: its first sentence may be only the context of what is asked.
+    headline = text[:600] if subject.get("kind") != "plan_expansion" \
         else f"The plan grew to {subject.get('added')} new subtasks (limit {subject.get('limit')}). Let the agents do the bigger plan?"
     return {"headline": headline, "highlights": [], "recommendation": None,
             "changes": [{"kind": "?", "text": text[:600]}], "why": why, "if_yes": yes, "if_no": no,
