@@ -608,7 +608,7 @@
       h("div", { className: "orch-agentcard-foot" },
         h("span", { className: "orch-muted orch-small" }, seen ? "Updated " + ago(seen) + ", when it last worked" : "Usage appears after its first run"),
         h(Button, { small: true, icon: a.enabled ? "pause" : "play", disabled: busy, onClick: toggle,
-          title: a.enabled ? "New work goes to the other agents; running work finishes" : "Give it new work again" }, a.enabled ? "Pause" : "Resume")),
+          title: a.enabled ? "New work goes to the other agents; running work finishes; tasks it leads wait until you resume it" : "Give it new work again" }, a.enabled ? "Pause" : "Resume")),
       error ? h("div", { className: "orch-alert" }, error) : null);
   }
   function ConnectAgent() {

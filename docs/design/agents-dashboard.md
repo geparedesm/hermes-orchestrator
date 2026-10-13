@@ -42,7 +42,10 @@ are never Hermes LLM tools (AD-10).
 - The Agent Manager runs the existing verification (one-turn request) in the bootstrap container and writes the token
   to the volume (mode 0600).
 
-**Pause and resume:** a new `provider_settings (provider, identity, enabled)` table. Routing skips a paused provider,
+**Pause and resume:** a new `provider_settings (provider, identity, enabled)` table. While an agent is paused:
+- routing gives it no new work, and no execution of it is created or dispatched (the launches queue);
+- its unstarted executions hold no worker slot, and running work finishes;
+- tasks it leads wait until it is resumed. Pausing never moves a lead: that would invalidate queued launches.
 and running work finishes.
 
 **Disconnect:** after a confirmation, the Agent Manager removes `cred-<provider>-<identity>` and the credential becomes

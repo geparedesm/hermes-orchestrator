@@ -344,7 +344,10 @@ class Executions:
         # A replacement takes over the slot of the execution it stops.
         uow.cur.execute(
             "SELECT count(*) AS n FROM executions WHERE state IN ('REQUESTED', 'STARTING', 'RUNNING', 'STOPPING') "
-            "AND role IN ('ORCHESTRATOR', 'DEVELOPER', 'REVIEWER') AND id IS DISTINCT FROM %s",
+            "AND role IN ('ORCHESTRATOR', 'DEVELOPER', 'REVIEWER') AND id IS DISTINCT FROM %s "
+            # Unstarted executions of a paused agent hold no worker slot (they wait until it is resumed).
+            "AND NOT (state = 'REQUESTED' AND EXISTS (SELECT 1 FROM provider_settings ps WHERE ps.provider = executions.provider "
+            "AND ps.identity = coalesce(executions.provider_identity, 'default') AND NOT ps.enabled))",
             (replacing,),
         )
         if uow.cur.fetchone()["n"] >= cap:  # type: ignore[index]

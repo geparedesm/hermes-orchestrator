@@ -87,6 +87,7 @@ class Agents:
             "updated_at = now()", (provider, identity, enabled, principal.value))
         record_event(uow.cur, "AGENT_RESUMED" if enabled else "AGENT_PAUSED", actor=principal.value,
                      summary=f"{provider} {'resumed' if enabled else 'paused'} by {principal.value}"
-                             + ("" if enabled else ": new work goes to the other agents; running work finishes"),
+                             + ("" if enabled else ": new work goes to the other agents; running work finishes; "
+                                "tasks it leads wait until it is resumed"),
                      data={"provider": provider, "identity": identity}, pending=uow.events)
         return next(a for a in self.view(uow) if a["provider"] == provider)

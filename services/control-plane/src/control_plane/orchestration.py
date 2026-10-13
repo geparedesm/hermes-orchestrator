@@ -300,12 +300,6 @@ class Orchestration:
                     except Conflict as exc:
                         self._event(uow, task, "LAUNCH_DROPPED", f"{row['kind'].lower()} dropped: {exc}")
                         continue
-                if row["kind"] == "STEP" and row["request"].get("provider") in paused(uow, self.ctx.provider_identity):
-                    # Queued for an agent a person paused since: ask for the step again, which hands the lead to the
-                    # other agent when it can (or queues it again until one is free).
-                    if self.request_step(uow, task) is not None:
-                        started += 1
-                    continue
                 subtask = None
                 if row["subtask_id"]:
                     uow.cur.execute("SELECT * FROM subtasks WHERE id = %s", (row["subtask_id"],))
@@ -329,8 +323,10 @@ class Orchestration:
     def dispatch(self, uow: UnitOfWork, task: Row) -> bool:
         """Scheduler dispatcher: take a READY task, lead it, and plan it."""
         cap = int(self.ctx.platform["machine"]["max_agent_workers"])
-        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE state = ANY(%s) AND role IN ('ORCHESTRATOR', 'DEVELOPER', 'REVIEWER')",
-                        (list(ACTIVE),))
+        # Unstarted executions of a paused agent hold no worker slot (they wait until it is resumed).
+        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE state = ANY(%s) AND role IN ('ORCHESTRATOR', 'DEVELOPER', 'REVIEWER') "
+                        "AND NOT (state = 'REQUESTED' AND EXISTS (SELECT 1 FROM provider_settings ps WHERE ps.provider = executions.provider "
+                        "AND ps.identity = coalesce(executions.provider_identity, 'default') AND NOT ps.enabled))", (list(ACTIVE),))
         if int(uow.cur.fetchone()["n"]) >= cap:  # type: ignore[index]
             return False
         if self._classify(uow, task):
@@ -413,12 +409,6 @@ class Orchestration:
                                 "(SELECT coalesce(max(seq), 0) FROM events WHERE task_id = %s) WHERE id = %s", (task["id"], task["id"]))
                 self._integrate_if_ready(uow, self._task(uow, task["id"]))
                 return None
-        if lease["provider"] in paused(uow, self.ctx.provider_identity) and OTHER[lease["provider"]] in self._available(uow):
-            # A person paused the agent leading this task: the other one leads from this step on.
-            epoch = self.leases.acquire(uow, task["id"], OTHER[lease["provider"]])
-            self._event(uow, task, "FAILOVER_COMPLETED", f"orchestration moved to {OTHER[lease['provider']]} (epoch {epoch}): "
-                        f"{lease['provider']} is paused", {"from": lease["provider"], "to": OTHER[lease["provider"]], "epoch": epoch})
-            lease = self.leases.get(uow, task["id"], lock=True)
         uow.cur.execute("SELECT coalesce(max(seq), 0) AS seq FROM events WHERE task_id = %s", (task["id"],))
         cursor = int(uow.cur.fetchone()["seq"])  # type: ignore[index]
         uow.cur.execute("UPDATE tasks SET step_requested = false WHERE id = %s", (task["id"],))
