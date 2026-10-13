@@ -288,3 +288,20 @@ def test_the_dashboard_shows_each_agents_plan_usage_and_a_person_can_pause_it(ap
     with services.ctx.unit_of_work() as uow:
         assert paused_providers(uow, services.ctx.provider_identity) == set()
     assert api.post("/v1/agents/gemini/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 404
+
+
+def test_an_execution_waiting_for_dispatch_does_not_start_once_its_agent_is_paused(api, services, agents, task):
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+
+    with services.ctx.db.transaction() as cur:  # stand-in: Agent Manager degraded, so the request waits unstarted
+        cur.execute("INSERT INTO component_health (component, state) VALUES ('agent_manager', 'DEGRADED') "
+                    "ON CONFLICT (component) DO UPDATE SET state = 'DEGRADED'")
+    execution = run_agent(api, task).json()["id"]
+    assert api.post("/v1/agents/codex/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 200
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE component_health SET state = 'HEALTHY' WHERE component = 'agent_manager'")
+    services.executions.dispatch(execution)
+    assert api.get(f"/v1/executions/{execution}").json()["state"] == "REQUESTED" and execution not in agents.containers
+    api.post("/v1/agents/codex/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    services.executions.dispatch(execution)
+    assert api.get(f"/v1/executions/{execution}").json()["state"] != "REQUESTED"

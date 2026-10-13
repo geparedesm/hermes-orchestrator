@@ -48,8 +48,9 @@ if [[ -n $thread ]]; then
         const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
         const pick = (w) => (w && typeof w === "object" ? { used_percent: num(w.used_percent), window_minutes: num(w.window_minutes),
           resets_at: num(w.resets_at), resets_in_seconds: num(w.resets_in_seconds) } : null);
+        const seen = Date.parse((event && event.timestamp) || "");  // when Codex logged this snapshot, not now
         process.stdout.write(JSON.stringify({ primary: pick(limits.primary), secondary: pick(limits.secondary),
-          observed_at: Math.floor(Date.now() / 1000) }));
+          observed_at: isFinite(seen) ? Math.floor(seen / 1000) : null }));
       });' > "$OUT/rate-limits.json" 2>/dev/null || true
   fi
 fi

@@ -414,6 +414,10 @@ class Executions:
             uow.cur.execute("SELECT 1 FROM component_health WHERE component = 'agent_manager' AND state = 'DEGRADED'")
             if uow.cur.fetchone() is not None:
                 return
+            if row["provider"]:
+                from .agents import paused  # paused before it could start: it waits, unstarted, until resumed
+                if row["provider"] in paused(uow, row["provider_identity"] or self.ctx.provider_identity):
+                    return
             if (row["spec"].get("purpose") or {}).get("fenced"):
                 uow.cur.execute("SELECT epoch FROM task_leases WHERE task_id = %s FOR UPDATE", (row["task_id"],))
                 lease = uow.cur.fetchone()
