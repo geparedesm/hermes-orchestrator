@@ -254,7 +254,7 @@ class Orchestration:
         # Launches held for a paused agent wait for that agent, not for capacity: they never hold back other work.
         uow.cur.execute(
             "SELECT t.*, min(p.requested_at) AS since FROM pending_launches p JOIN tasks t ON t.id = p.task_id "
-            "WHERE t.id <> %s AND coalesce(p.request->>'provider', '') <> ALL(%s) GROUP BY t.id",
+            "WHERE t.id <> %s AND coalesce(p.request->>'provider', p.request->>'reviewer', '') <> ALL(%s) GROUP BY t.id",
             (task["id"], sorted(paused(uow, self.ctx.provider_identity))))
         for other in uow.cur.fetchall():
             if self._rank(other, other["launch_suspended_at"] or other["since"]) < mine:
