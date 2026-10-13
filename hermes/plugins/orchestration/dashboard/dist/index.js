@@ -8,7 +8,7 @@
   if (!SDK || !window.__HERMES_PLUGINS__) return;
   const React = SDK.React;
   const h = React.createElement;
-  const { useState, useEffect, useCallback, useRef } = React;
+  const { useState, useEffect, useCallback, useRef, Fragment } = React;
 
   // Mirrors ho_core.attachments; the server checks everything again.
   const ATTACH = { maxFiles: 10, maxFile: 10 * 1024 * 1024, maxTotal: 25 * 1024 * 1024,
@@ -127,6 +127,8 @@
     folder: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z", branch: "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9",
     cpu: "M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
     inbox: "M22 12h-6l-2 3h-4l-2-3H2M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z",
+    home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z", kanban: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8 7v7M12 7v4M16 7v9",
+    approve: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM8 12l3 3 5-6", activity: "M22 12h-4l-3 9L9 3l-3 9H2",
   };
   function Icon(props) {
     return h("svg", { className: cx("orch-icon", props.className), viewBox: "0 0 24 24", width: props.size || 16, height: props.size || 16,
@@ -520,14 +522,110 @@
         h(Button, { small: true, onClick: function () { props.open(t.key); } }, "Open")));
   }
 
+  // ------------------------------------------------------------ agents (shared header line and System cards)
+
+  // Each agent's color; a future agent gets a stable one from its name.
+  const AGENT_COLOR = { claude: "#d97757", codex: "#5bb8e8" };
+  function agentColor(name) {
+    if (AGENT_COLOR[name]) return AGENT_COLOR[name];
+    let n = 0;
+    for (let i = 0; i < (name || "").length; i++) n = (n * 31 + name.charCodeAt(i)) % 360;
+    return "hsl(" + n + ", 55%, 62%)";
+  }
+  const AGENT_STATUS = { available: ["Available", "good"], near_limit: ["Near limit", "warn"], limited: ["Limited", "bad"],
+    paused: ["Paused", "muted"], login_needed: ["Log in needed", "bad"] };
+  function resetIn(value) {
+    if (!value) return null;
+    const ms = new Date(value).getTime() - Date.now();
+    if (ms <= 0) return "reset";
+    const m = Math.round(ms / 60000);
+    if (m < 60) return m + "m";
+    const hrs = Math.floor(m / 60);
+    if (hrs < 48) return hrs + "h " + (m % 60) + "m";
+    return new Date(value).toLocaleDateString(undefined, { weekday: "short" }) + " " + new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }
+  function resetPhrase(value) {
+    const r = resetIn(value);
+    return !r ? "" : r === "reset" ? "Reset" : /^[0-9]/.test(r) ? "Resets in " + r : "Resets " + r;
+  }
+  function windowText(w) {
+    if (!w) return "no data yet";
+    return (w.reset ? "reset" : Math.round(w.used_percent) + "% used") + " · as of " + ago(w.observed_at);
+  }
+
+  // The compact line in the shared header: every agent's session use and when it resets, on every tab.
+  function AgentLine(props) {
+    const agents = usePoll("/agents");
+    if (!agents.data) return null;
+    return h("div", { className: "orch-agentline" },
+      agents.data.agents.map(function (a) {
+        const s = a.session;
+        const tone = a.status === "near_limit" ? "warn" : a.status === "limited" || a.status === "login_needed" ? "bad" : null;
+        const label = a.status === "paused" ? "paused" : a.status === "login_needed" ? "log in" : s ? Math.round(s.used_percent) + "%" : "—";
+        const tip = capital(a.provider) + " — session: " + windowText(s) + (s && !s.reset ? ", " + resetPhrase(s.resets_at).toLowerCase() : "")
+          + "; this week: " + windowText(a.week) + (a.week && !a.week.reset ? ", " + resetPhrase(a.week.resets_at).toLowerCase() : "");
+        return h("button", { key: a.provider, type: "button", className: "orch-agentline-item", title: tip, onClick: function () { props.go("system"); } },
+          h("span", { className: "orch-agent-dot", style: { background: agentColor(a.provider) } }),
+          h("span", { className: "orch-agentline-name" }, capital(a.provider)),
+          h("span", { className: "orch-agentline-track" }, h("span", { style: { width: (s ? Math.min(100, s.used_percent) : 0) + "%",
+            background: tone ? "var(--o-" + tone + ")" : agentColor(a.provider) } })),
+          h("span", { className: cx("orch-agentline-pct", tone && "orch-text-" + tone) }, label),
+          s && !s.reset ? h("span", { className: "orch-agentline-reset" }, "↻ " + resetIn(s.resets_at)) : null);
+      }),
+      h("button", { type: "button", className: "orch-agentline-add", title: "Connect an agent", "aria-label": "Connect an agent",
+        onClick: function () { props.go("system"); } }, h(Icon, { name: "plus", size: 14 })));
+  }
+
+  function UsageMeter(props) {
+    const w = props.window;
+    const pct = w ? Math.min(100, w.used_percent) : 0;
+    const tone = pct >= 100 ? "bad" : pct >= 80 ? "warn" : null;
+    return h("div", { className: "orch-usage" },
+      h("div", { className: "orch-usage-row" },
+        h("span", { className: "orch-muted" }, props.label + (w ? " · " + (w.reset ? "reset" : Math.round(w.used_percent) + "% used") : "")),
+        h("span", { className: tone ? "orch-text-" + tone : null }, w ? (w.reset ? "Reset" : resetPhrase(w.resets_at)) : "No data yet")),
+      h("div", { className: "orch-usage-track" }, h("div", { style: { width: pct + "%", background: tone ? "var(--o-" + tone + ")" : agentColor(props.agent) } })));
+  }
+  function AgentCard(props) {
+    const a = props.agent;
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    const st = AGENT_STATUS[a.status] || [a.status, "muted"];
+    function toggle() {
+      setBusy(true); setError(null);
+      post("/agents/" + a.provider + "/" + (a.enabled ? "pause" : "resume"), {}).then(props.done)
+        .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(false); });
+    }
+    const seen = (a.session || a.week || {}).observed_at;
+    return h("article", { className: "orch-agentcard" },
+      h("div", { className: "orch-agentcard-head" },
+        h("span", { className: "orch-agent-dot", style: { background: agentColor(a.provider) } }),
+        h("strong", null, capital(a.provider)),
+        h("span", { className: "orch-muted orch-small" }, a.running ? a.running + " running" : "idle"),
+        h(Pill, { tone: st[1], className: "orch-right" }, st[0])),
+      h(UsageMeter, { label: "Session", window: a.session, agent: a.provider }),
+      h(UsageMeter, { label: "This week", window: a.week, agent: a.provider }),
+      h("div", { className: "orch-agentcard-foot" },
+        h("span", { className: "orch-muted orch-small" }, seen ? "Updated " + ago(seen) + ", when it last worked" : "Usage appears after its first run"),
+        h(Button, { small: true, icon: a.enabled ? "pause" : "play", disabled: busy, onClick: toggle,
+          title: a.enabled ? "New work goes to the other agents; running work finishes; tasks it leads wait until you resume it" : "Give it new work again" }, a.enabled ? "Pause" : "Resume")),
+      error ? h("div", { className: "orch-alert" }, error) : null);
+  }
+  function ConnectAgent() {
+    const [open, setOpen] = useState(false);
+    return h("article", { className: "orch-agentcard orch-agentcard-add" },
+      open ? h("div", { className: "orch-stack" },
+        h("strong", null, "Connect an agent"),
+        h("p", { className: "orch-muted orch-small" }, "Log in once with your plan; the login stays in its own protected volume."),
+        h("code", { className: "orch-code" }, "make auth-claude"), h("code", { className: "orch-code" }, "make auth-codex"),
+        h("p", { className: "orch-muted orch-small" }, "Run one in the platform folder. Logging in from here is coming next."),
+        h(Button, { small: true, onClick: function () { setOpen(false); } }, "Close"))
+        : h("button", { type: "button", className: "orch-agentcard-addbtn", onClick: function () { setOpen(true); } },
+          h(Icon, { name: "plus", size: 18 }), h("span", null, "Connect an agent")));
+  }
+
   // ------------------------------------------------------------ home
 
-  function Stat(props) {
-    return h("button", { type: "button", className: cx("orch-stat", props.onClick && "orch-clickable"), onClick: props.onClick },
-      h("span", { className: "orch-stat-icon orch-tone-" + props.tone }, h(Icon, { name: props.icon, size: 18 })),
-      h("span", { className: "orch-stat-body" }, h("span", { className: "orch-stat-n" }, props.value),
-        h("span", { className: "orch-stat-label" }, props.label), props.sub ? h("span", { className: "orch-stat-sub" }, props.sub) : null));
-  }
   function Activity(props) {
     const items = props.items || [];
     if (!items.length) return h(Empty, { title: "No activity yet", text: "What the agents do shows up here." });
@@ -540,30 +638,20 @@
         h("span", { className: "orch-muted orch-feed-time" }, ago(e.occurred_at)));
     }));
   }
-  function Agents(props) {
-    const usage = props.usage || {};
-    const providers = Object.keys(usage);
-    if (!providers.length) return h(Empty, { title: "No agent runs in 24 h", icon: "cpu" });
-    return h("ul", { className: "orch-agents" }, providers.map(function (p) {
-      const u = usage[p];
-      const models = Object.keys(u.models || {}).filter(function (m) { return m !== "unknown"; });
-      const rate = u.executions ? Math.round(100 * u.succeeded / u.executions) : 0;
-      return h("li", { key: p, className: "orch-agent" },
-        h("span", { className: "orch-avatar" }, capital((p || "runner").slice(0, 2))),
-        h("div", { className: "orch-agent-body" }, h("strong", null, p || "runner"),
-          h("div", { className: "orch-muted orch-ellipsis" }, models.join(", ") || "model not recorded")),
-        h("div", { className: "orch-agent-stats" }, h("div", null, count(u.executions) + " runs"),
-          h("div", { className: "orch-muted" }, rate + "% ok · " + count(u.tokens) + " tok")));
-    }));
+  function AgentTag(props) {
+    if (!props.agent) return null;
+    return h("span", { className: "orch-agenttag" }, h("span", { className: "orch-agent-dot", style: { background: agentColor(props.agent) } }),
+      capital(props.agent));
   }
   function TaskRow(props) {
     const t = props.task;
+    const waiting = WAITING.indexOf(t.state) >= 0;
     return h("button", { type: "button", className: "orch-taskrow", onClick: function () { props.open(t.key); } },
-      h("div", { className: "orch-taskrow-main" },
-        h("div", { className: "orch-taskrow-top" }, h("span", { className: "orch-key" }, t.key), h("span", { className: "orch-ellipsis" }, t.title)),
-        h("div", { className: "orch-muted orch-small" }, STATUS[t.state] || t.state, " · ", t.project, t.running ? " · " : null,
-          t.running ? h("span", { className: "orch-live" }, "agents working") : null)),
-      h("div", { className: "orch-taskrow-side" }, h(Stepper, { state: t.state, resume: t.resume_state, compact: true }), h(Progress, { task: t })));
+      h("div", { className: "orch-taskrow-top" }, h("span", { className: "orch-key" }, t.key), h("span", { className: "orch-ellipsis orch-taskrow-title" }, t.title),
+        h(AgentTag, { agent: t.agent })),
+      h(Stepper, { state: t.state, resume: t.resume_state, compact: true }),
+      h("div", { className: cx("orch-small", waiting ? "orch-text-warn" : "orch-muted") }, STATUS[t.state] || t.state,
+        t.subtasks ? " · " + t.subtasks_done + " of " + t.subtasks + " parts" : ""));
   }
 
   function Home(props) {
@@ -577,39 +665,45 @@
     const waiting = tasks.filter(function (t) { return WAITING.indexOf(t.state) >= 0 && t.state !== "APPROVAL_REQUIRED"; });
     const active = tasks.filter(function (t) { return FINISHED.indexOf(t.state) < 0 && WAITING.indexOf(t.state) < 0; });
     const needs = rounds.length + approvals.length + waiting.length;
-    const done = s.done_tasks_30_days || {};
     function reload() { summary.reload(); board.reload(); }
-    return h("div", { className: "orch-home" },
-      h("div", { className: "orch-stats" },
-        h(Stat, { icon: "alert", tone: needs ? "warn" : "good", value: needs, label: "Need you", sub: needs ? "questions, decisions, stuck tasks" : "all clear" }),
-        h(Stat, { icon: "play", tone: "info", value: active.length, label: "In progress", onClick: function () { props.go("board"); } }),
-        h(Stat, { icon: "cpu", tone: "info", value: s.running.length, label: "Agents running", onClick: function () { props.go("system"); } }),
-        h(Stat, { icon: "check", tone: "good", value: count(done.count), label: "Done in 30 days", sub: done.mean_minutes ? "about " + minutes(done.mean_minutes) + " each" : null })),
-      h("div", { className: "orch-grid" },
-        h("div", { className: "orch-main" },
-          h(Card, { title: "Needs you", count: needs, className: needs ? "orch-attention" : null },
-            needs === 0 ? h(Empty, { icon: "check", title: "All clear", text: "Nothing is waiting for you right now." })
-              : h("div", { className: "orch-stack" },
-                rounds.map(function (c) { return h(QuestionCard, { key: c.id, round: c, done: reload, open: props.open }); }),
-                approvals.map(function (a) { return h(ApprovalCard, { key: a.id, approval: a, done: reload, open: props.open }); }),
-                waiting.map(function (t) { return h(WaitingCard, { key: t.key, task: t, open: props.open, done: reload }); }))),
-          h(Card, { title: "In progress", count: active.length, action: h(Button, { small: true, onClick: function () { props.go("board"); } }, "Open board") },
-            active.length === 0 ? h(Empty, { title: "No task in progress", text: "Create one with New task." })
-              : h("div", { className: "orch-list" }, active.map(function (t) { return h(TaskRow, { key: t.key, task: t, open: props.open }); })))),
-        h("aside", { className: "orch-side" },
-          h(Card, { title: "Recent activity" }, h(Activity, { items: s.recent_activity, open: props.open })),
-          h(Card, { title: "Agents (24 h)" }, h(Agents, { usage: (s.provider_usage || {})["24_hours"] })))));
+    return h("div", { className: "orch-grid" },
+      h("div", { className: "orch-main" },
+        h("div", { className: "orch-section-head" },
+          h("div", null, h("h2", null, "Needs you"), h("p", { className: "orch-muted" }, needs
+            ? needs + (needs === 1 ? " thing waits" : " things wait") + " for your decision. Everything else runs on its own."
+            : "Nothing is waiting for you. Everything runs on its own.")),
+          approvals.length ? h("button", { type: "button", className: "orch-link", onClick: function () { props.go("approvals"); } }, "All approvals →") : null),
+        needs === 0 ? h(Empty, { icon: "check", title: "All clear", text: "When an agent needs you, it appears here and in your chat." })
+          : h("div", { className: "orch-stack" },
+            approvals.map(function (a) { return h(ApprovalCard, { key: a.id, approval: a, done: reload, open: props.open }); }),
+            rounds.map(function (c) { return h(QuestionCard, { key: c.id, round: c, done: reload, open: props.open }); }),
+            waiting.map(function (t) { return h(WaitingCard, { key: t.key, task: t, open: props.open, done: reload }); }))),
+      h("aside", { className: "orch-side" },
+        h("section", { className: "orch-side-section" },
+          h("div", { className: "orch-section-head" }, h("h3", null, "In progress"),
+            h("button", { type: "button", className: "orch-link", onClick: function () { props.go("board"); } }, "Open board →")),
+          active.length === 0 ? h("p", { className: "orch-muted" }, "No task in progress. Create one with New task.")
+            : h("div", { className: "orch-list" }, active.map(function (t) { return h(TaskRow, { key: t.key, task: t, open: props.open }); }))),
+        h("section", { className: "orch-side-section" }, h("div", { className: "orch-section-head" }, h("h3", null, "Recent activity")),
+          h(Activity, { items: s.recent_activity, open: props.open, limit: 6 }))));
   }
 
   // ------------------------------------------------------------ board
 
+  function SearchBox(props) {
+    return h("label", { className: "orch-search orch-right" }, h(Icon, { name: "search", size: 15 }),
+      h("input", { ref: props.search, value: props.query, autoFocus: props.focus, onChange: function (e) { props.setQuery(e.target.value); },
+        placeholder: "Search tasks", "aria-label": "Search" }),
+      props.query ? h("button", { type: "button", className: "orch-search-clear", "aria-label": "Clear search", onClick: function () { props.setQuery(""); } }, h(Icon, { name: "x", size: 13 }))
+        : h("kbd", null, "/"));
+  }
   function BoardCard(props) {
     const t = props.task;
     return h("button", { type: "button", className: cx("orch-tile", "orch-tone-border-" + tone(t.state)), onClick: function () { props.open(t.key); } },
       h("div", { className: "orch-tile-top" }, h("span", { className: "orch-key" }, t.key),
         t.priority === "HIGH" || t.priority === "CRITICAL" ? h(Pill, { tone: t.priority === "CRITICAL" ? "bad" : "warn" }, t.priority.toLowerCase()) : null,
         t.pending_approvals ? h(Pill, { tone: "warn" }, "decision") : null,
-        t.running ? h("span", { className: "orch-live orch-right", title: "agents working" }, "●") : null),
+        h("span", { className: "orch-right" }, h(AgentTag, { agent: t.agent }))),
       h("div", { className: "orch-tile-title" }, t.title),
       h("div", { className: "orch-tile-status" }, STATUS[t.state] || t.state),
       h(Stepper, { state: t.state, resume: t.resume_state, compact: true }),
@@ -627,7 +721,8 @@
       h("div", { className: "orch-toolbar" },
         h("div", { className: "orch-chips" }, ["", ...projects].map(function (p) {
           return h("button", { key: p || "all", type: "button", className: cx("orch-chip", project === p && "orch-chip-on"), onClick: function () { setProject(p); } }, p || "All projects");
-        }))),
+        })),
+        h(SearchBox, { query: props.query, setQuery: props.setQuery, search: props.search, focus: props.focusSearch })),
       h("div", { className: "orch-board" }, COLUMNS.map(function (c) {
         const items = tasks.filter(function (t) { return c.states.indexOf(t.state) >= 0; });
         return h("div", { key: c.id, className: cx("orch-column", c.id === "you" && items.length && "orch-column-attention") },
@@ -640,23 +735,37 @@
 
   // ------------------------------------------------------------ approvals view
 
+  function Decided(props) {
+    const items = props.items || [];
+    return h("aside", { className: "orch-side" }, h("section", { className: "orch-side-section" },
+      h("div", { className: "orch-section-head" }, h("h3", null, "Decided recently")),
+      items.length === 0 ? h("p", { className: "orch-muted" }, "Your decisions appear here.")
+        : h("ul", { className: "orch-decided" }, items.map(function (d, i) {
+          return h("li", { key: i },
+            h("span", { className: d.rejected ? "orch-text-warn" : "orch-text-good" }, h(Icon, { name: d.rejected ? "retry" : "check", size: 14 })),
+            h("span", { className: "orch-decided-text" }, d.task ? h(TaskLink, { task: d.task, open: props.open }) : null, " ",
+              (d.rejected ? "sent back · " : "") + d.summary.replace(/^T-[0-9]+:\s*/, "")),
+            h("span", { className: "orch-muted orch-small" }, ago(d.decided_at)));
+        }))));
+  }
   function Approvals(props) {
     const [tab, setTab] = useState("PENDING");
-    const summary = usePoll(tab === "PENDING" ? "/summary" : null);
+    const summary = usePoll("/summary");
     const expired = usePoll(tab === "EXPIRED" ? "/approvals?state=EXPIRED" : null);
-    const tabs = h("div", { className: "orch-chips" }, [["PENDING", "Waiting for you"], ["EXPIRED", "Expired"]].map(function (x) {
-      return h("button", { key: x[0], type: "button", className: cx("orch-chip", tab === x[0] && "orch-chip-on"), onClick: function () { setTab(x[0]); } }, x[1]);
+    const rounds = summary.data ? summary.data.required_actions.clarifications || [] : [];
+    const waiting = summary.data ? summary.data.required_actions.approvals.length + rounds.length : 0;
+    const tabs = h("div", { className: "orch-segments" }, [["PENDING", "Waiting" + (waiting ? " · " + waiting : "")], ["EXPIRED", "Expired"]].map(function (x) {
+      return h("button", { key: x[0], type: "button", className: cx("orch-segment", tab === x[0] && "orch-segment-on"), onClick: function () { setTab(x[0]); } }, x[1]);
     }));
     let body;
     if (tab === "PENDING") {
-      const rounds = summary.data ? summary.data.required_actions.clarifications || [] : [];
       body = !summary.data ? h(Loading, { error: summary.error })
-        : summary.data.required_actions.approvals.length + rounds.length === 0 ? h(Empty, { icon: "check", title: "No decisions waiting", text: "When an agent needs you, it appears here and in your chat." })
-          : h("div", { className: "orch-approval-grid" },
-            rounds.map(function (c) { return h(QuestionCard, { key: c.id, round: c, done: summary.reload, open: props.open }); }),
+        : waiting === 0 ? h(Empty, { icon: "check", title: "No decisions waiting", text: "When an agent needs you, it appears here and in your chat." })
+          : h("div", { className: "orch-stack" },
             summary.data.required_actions.approvals.map(function (a) {
               return h(ApprovalCard, { key: a.id, approval: a, done: summary.reload, open: props.open });
-            }));
+            }),
+            rounds.map(function (c) { return h(QuestionCard, { key: c.id, round: c, done: summary.reload, open: props.open }); }));
     } else {
       body = !expired.data ? h(Loading, { error: expired.error }) : h(Card, null, h(Table, { rows: expired.data.approvals, empty: "No expired approvals.", columns: [
         ["Decision", function (a) { return a.summary; }],
@@ -664,7 +773,8 @@
         ["Expired", function (a) { return ago(a.expires_at); }],
         ["", function (a) { return h(Renew, { id: a.id, done: expired.reload }); }]] }));
     }
-    return h("div", { className: "orch-stack" }, tabs, body);
+    return h("div", { className: "orch-grid" }, h("div", { className: "orch-main" }, tabs, body),
+      h(Decided, { items: summary.data ? summary.data.decided_recently : [], open: props.open }));
   }
 
   // ------------------------------------------------------------ projects view
@@ -675,23 +785,6 @@
     NEEDS_RECOVERY: ["Stopped: needs you", "bad"], DONE: ["Created", "good"], REJECTED: ["Rejected", "muted"],
     INVALIDATED: ["Request again: the parent changed", "muted"], FAILED: ["Abandoned", "muted"] };
 
-  function projectStats(tasks, slug) {
-    const mine = tasks.filter(function (t) { return t.project === slug; });
-    return { active: mine.filter(function (t) { return FINISHED.indexOf(t.state) < 0; }).length,
-      needs: mine.filter(function (t) { return WAITING.indexOf(t.state) >= 0; }).length };
-  }
-  function ChildRow(props) {
-    const c = props.project;
-    const st = PROJECT_STATUS[c.status] || [c.status, "muted"];
-    const stats = projectStats(props.tasks, c.slug);
-    return h("li", { className: "orch-child" },
-      h(Icon, { name: "folder", size: 14 }),
-      h("div", { className: "orch-child-body" }, h("strong", { className: "orch-ellipsis" }, c.slug),
-        h("div", { className: "orch-muted orch-small orch-ellipsis" }, stats.active + " active" + (stats.needs ? " · " + stats.needs + " need you" : ""))),
-      h(Pill, { tone: st[1] }, st[0]),
-      c.status === "PROJECT_READY" ? h(Button, { small: true, icon: "plus", onClick: function () { props.create(c.slug); } }, "Task") : null,
-      h(Button, { small: true, onClick: function () { props.filter(c.slug); } }, "Tasks"));
-  }
   // Creations of a parent's children: waiting for approval, running, or stopped for a person.
   function Creations(props) {
     const list = usePoll("/projects/" + props.slug + "/children");
@@ -725,6 +818,32 @@
     }), error ? h("div", { className: "orch-alert" }, error) : null);
   }
 
+  const STACK = { odoo: "Odoo", node: "Node", python: "Python", generic: "Generic", flutter: "Flutter" };
+  function projectStats(tasks, slug) {
+    const mine = tasks.filter(function (t) { return t.project === slug; });
+    const last = mine.reduce(function (m, t) { return !m || t.updated_at > m ? t.updated_at : m; }, null);
+    return { active: mine.filter(function (t) { return FINISHED.indexOf(t.state) < 0; }).length,
+      done: mine.filter(function (t) { return t.state === "DONE"; }).length,
+      needs: mine.filter(function (t) { return WAITING.indexOf(t.state) >= 0; }).length, last: last };
+  }
+  function ProjectRow(props) {
+    const p = props.project;
+    const st = PROJECT_STATUS[p.status] || [p.status, "muted"];
+    const stats = projectStats(props.tasks, p.slug);
+    const ready = p.status === "PROJECT_READY";
+    return h("div", { className: cx("orch-prow", props.child && "orch-prow-child") },
+      h("div", { className: "orch-prow-name" }, h(Icon, { name: props.child ? "branch" : "folder", size: 16 }),
+        h("div", { className: "orch-ellipsis" }, h("strong", null, p.slug), h("div", { className: "orch-muted orch-small orch-ellipsis" }, p.host_path || p.name))),
+      h("div", { className: "orch-prow-stack" }, (p.toolchain || []).length ? p.toolchain.map(function (t) { return h(Pill, { key: t }, STACK[t] || t); }) : h("span", { className: "orch-muted" }, "—")),
+      h("div", { className: "orch-row orch-prow-status" }, h("span", { className: "orch-dot orch-tone-" + st[1] }), h("span", { className: st[1] === "warn" ? "orch-text-warn" : null }, st[0])),
+      h("div", { className: "orch-muted" }, stats.active + " open · " + stats.done + " done" + (stats.needs ? " · " : ""), stats.needs ? h("span", { className: "orch-text-warn" }, stats.needs + " need you") : null),
+      h("div", { className: "orch-muted" }, stats.last ? ago(stats.last) : "—"),
+      h("div", { className: "orch-row orch-prow-actions" },
+        p.status === "PROPOSED" ? h(Button, { small: true, kind: "primary", icon: "approve", onClick: function () { props.go("approvals"); } }, "Review setup") : null,
+        props.label && ready ? h(Button, { small: true, icon: "plus", onClick: function () { props.newChild(p); } }, "New " + props.label) : null,
+        ready ? h(Button, { small: true, icon: "plus", onClick: function () { props.create(p.slug); } }, "Task") : null,
+        h(Button, { small: true, onClick: function () { props.filter(p.slug); } }, "Tasks")));
+  }
   function Projects(props) {
     const projects = usePoll("/projects");
     const board = usePoll("/board");
@@ -735,32 +854,22 @@
     const tasks = (board.data && board.data.tasks) || [];
     const slugs = list.map(function (p) { return p.slug; });
     const top = list.filter(function (p) { return !p.parent || slugs.indexOf(p.parent) < 0; });
-    return h("div", null,
-      h("div", { className: "orch-project-grid" }, top.map(function (p) {
-        const stats = projectStats(tasks, p.slug);
-        const st = PROJECT_STATUS[p.status] || [p.status, "muted"];
-        const kids = list.filter(function (c) { return c.parent === p.slug; });
-        const label = p.children ? p.children.label : null;
-        return h("article", { key: p.slug, className: cx("orch-project", (label || kids.length) && "orch-project-parent") },
-          h("div", { className: "orch-project-head" }, h("span", { className: "orch-project-icon" }, h(Icon, { name: "folder", size: 18 })),
-            h("div", null, h("strong", null, p.slug), h("div", { className: "orch-muted orch-small orch-ellipsis" }, p.host_path || p.name)),
-            h(Pill, { tone: st[1], className: "orch-right" }, st[0])),
-          h("div", { className: "orch-project-facts" },
-            h("span", null, h(Icon, { name: "branch", size: 13 }), " ", p.default_branch || "—"),
-            h("span", null, stats.active + " active"), stats.needs ? h("span", { className: "orch-text-warn" }, stats.needs + " need you") : null,
-            h("span", { className: "orch-muted" }, "since " + new Date(p.registered_at).toLocaleDateString())),
-          p.git_remote ? h("div", { className: "orch-muted orch-small orch-ellipsis" }, p.git_remote) : null,
-          h("div", { className: "orch-row" },
-            p.status === "PROJECT_READY" ? h(Button, { kind: "primary", small: true, icon: "plus", onClick: function () { props.create(p.slug); } }, "New task") : null,
-            label && p.status === "PROJECT_READY" ? h(Button, { small: true, icon: "plus", onClick: function () { setNewChild(p); } }, "New " + label) : null,
-            h(Button, { small: true, onClick: function () { props.filter(p.slug); } }, "Show tasks")),
-          label || kids.length ? h("div", { className: "orch-children" },
-            h("div", { className: "orch-small orch-muted orch-children-title" }, capital((label || "child project") + "s") + " (" + kids.length + ")"),
-            kids.length ? h("ul", { className: "orch-child-list" }, kids.map(function (c) {
-              return h(ChildRow, { key: c.slug, project: c, tasks: tasks, create: props.create, filter: props.filter });
-            })) : h("div", { className: "orch-muted orch-small" }, "None yet."),
-            label ? h(Creations, { slug: p.slug }) : null) : null);
-      })),
+    const setup = list.filter(function (p) { return p.status === "PROPOSED"; }).length;
+    const rowProps = { tasks: tasks, create: props.create, filter: props.filter, go: props.go, newChild: setNewChild };
+    return h("div", { className: "orch-stack" },
+      h("p", { className: "orch-muted" }, list.length + (list.length === 1 ? " project" : " projects") + (setup ? " · " + setup + " need" + (setup === 1 ? "s" : "") + " setup" : "")),
+      h("div", { className: "orch-card orch-ptable" },
+        h("div", { className: "orch-prow orch-prow-head" }, ["Project", "Stack", "Status", "Tasks", "Last activity", ""].map(function (c, i) { return h("div", { key: i }, c); })),
+        top.map(function (p) {
+          const kids = list.filter(function (c) { return c.parent === p.slug; });
+          const label = p.children ? p.children.label : null;
+          return h(Fragment, { key: p.slug },
+            h(ProjectRow, Object.assign({ project: p, label: label }, rowProps)),
+            kids.map(function (c) { return h(ProjectRow, Object.assign({ key: c.slug, project: c, child: true }, rowProps)); }),
+            label ? h(Creations, { slug: p.slug }) : null);
+        })),
+      list.some(function (p) { return p.children; }) ? h("p", { className: "orch-muted orch-small" },
+        "Modules created from a parent start with its skeleton, its rules, and real tests.") : null,
       newChild ? h(NewChild, { parent: newChild, close: function () { setNewChild(null); }, done: function () { setNewChild(null); projects.reload(); props.go("home"); } }) : null);
   }
 
@@ -806,60 +915,67 @@
 
   // ------------------------------------------------------------ system view
 
+  const SERVICE_TEXT = { control_plane: "API and scheduler", agent_manager: "Starts isolated workers", git_service: "The only writer of your repositories",
+    postgres: "The source of truth", postgresql: "The source of truth", redis: "Wake-ups", hermes: "Chat and this dashboard" };
+  function tokens(n) { return !n ? "0" : n >= 1e6 ? (n / 1e6).toFixed(1) + " M" : n >= 1e3 ? Math.round(n / 1e3) + " k" : String(n); }
   function System(props) {
     const workers = usePoll("/workers");
     const summary = usePoll("/summary");
+    const agents = usePoll("/agents");
     const [windowKey, setWindowKey] = useState("24_hours");
-    if (!workers.data || !summary.data) return h(Loading, { error: workers.error || summary.error });
+    if (!workers.data || !summary.data || !agents.data) return h(Loading, { error: workers.error || summary.error || agents.error });
     const w = workers.data;
     const s = summary.data;
     const health = s.health || {};
     const components = health.components || {};
     const usage = (s.provider_usage || {})[windowKey] || {};
-    return h("div", { className: "orch-grid" },
-      h("div", { className: "orch-main" },
-        h(Card, { title: "Workers" },
-          h("div", { className: "orch-capacity" },
-            h("div", null, h("div", { className: "orch-small orch-muted" }, "Agent workers"),
-              h("div", { className: "orch-big" }, w.capacity.agent_workers + " / " + w.capacity.max_agent_workers),
-              h(Meter, { value: w.capacity.agent_workers, max: w.capacity.max_agent_workers })),
-            h("div", null, h("div", { className: "orch-small orch-muted" }, "Memory reserved"),
-              h("div", { className: "orch-big" }, bytes(w.capacity.memory_limit_bytes_in_use)),
-              h("div", { className: "orch-small orch-muted" }, bytes(w.capacity.memory_available_for_executions) + " available")),
-            h("div", null, h("div", { className: "orch-small orch-muted" }, "All containers"), h("div", { className: "orch-big" }, count(w.capacity.workers)))),
-          h(Table, { rows: w.running, empty: "No worker is running.", columns: [
-            ["Task", function (e) { return h(TaskLink, { task: e.task, open: props.open }); }], ["Role", function (e) { return e.role.toLowerCase(); }],
-            ["Agent", function (e) { return e.provider || "runner"; }],
-            ["CPU", function (e) { return e.cpu_percent === undefined ? "—" : e.cpu_percent + " %"; }],
-            ["Memory", function (e) { return bytes(e.memory_bytes) + (e.memory_limit_bytes ? " / " + bytes(e.memory_limit_bytes) : ""); }],
-            ["Started", function (e) { return ago(e.started_at); }]] })),
-        h(Card, { title: "Agent usage", action: h("div", { className: "orch-chips" }, [["24_hours", "24 h"], ["7_days", "7 days"]].map(function (x) {
-          return h("button", { key: x[0], type: "button", className: cx("orch-chip", windowKey === x[0] && "orch-chip-on"), onClick: function () { setWindowKey(x[0]); } }, x[1]);
-        })) }, h(Table, { rows: Object.keys(usage).map(function (p) { return Object.assign({ id: p, provider: p }, usage[p]); }), empty: "No agent runs.", columns: [
-          ["Agent", function (u) { return u.provider || "runner"; }],
-          ["Models", function (u) { return Object.keys(u.models || {}).map(function (m) { return m + " (" + u.models[m].executions + ")"; }).join(", ") || "—"; }],
-          ["Runs", function (u) { return count(u.executions); }], ["Succeeded", function (u) { return count(u.succeeded); }],
-          ["Failed", function (u) { return count(u.failed); }], ["Tokens", function (u) { return count(u.tokens); }],
-          ["Mean time", function (u) { return minutes(u.mean_minutes); }]] })),
-        h(Card, { title: "Queue" }, h(Table, { rows: s.queue, empty: "The queue is empty.", columns: [
-          ["Task", function (q) { return h(TaskLink, { task: q.key, open: props.open }); }], ["Project", function (q) { return q.project; }],
-          ["Priority", function (q) { return q.priority; }], ["Waiting", function (q) { return minutes(q.waiting_minutes); }]] })),
-        h(Card, { title: "Recent test runs" }, h(Table, { rows: s.recent_tests, empty: "No test runs yet.", columns: [
-          ["Task", function (v) { return h(TaskLink, { task: v.task, open: props.open }); }], ["Purpose", function (v) { return v.purpose.toLowerCase().replace(/_/g, " "); }],
-          ["Result", function (v) { return h(Pill, { tone: v.state === "PASSED" ? "good" : v.state === "FAILED" ? "bad" : "info" }, v.state.toLowerCase()); }],
-          ["Duration", function (v) { return minutes(v.minutes); }], ["When", function (v) { return ago(v.created_at); }]] }))),
-      h("aside", { className: "orch-side" },
-        h(Card, { title: "Health" },
-          h("div", { className: "orch-health" }, h(Pill, { tone: health.state === "DEGRADED" ? "bad" : "good" }, health.state === "DEGRADED" ? "Degraded" : "Healthy")),
-          h("ul", { className: "orch-checks" }, Object.keys(components).sort().map(function (name) {
+    const names = Object.keys(components).sort();
+    const down = names.filter(function (n) { return components[n].state !== "HEALTHY"; });
+    return h("div", { className: "orch-stack orch-system" },
+      h("section", { className: "orch-stack" },
+        h("div", { className: "orch-section-head" }, h("div", null, h("h2", null, "Agents"),
+          h("p", { className: "orch-muted" }, "Usage of each plan. When a limit is reached, new work waits and resumes on its own after the reset."))),
+        h("div", { className: "orch-agentcards" },
+          agents.data.agents.map(function (a) { return h(AgentCard, { key: a.provider, agent: a, done: agents.reload }); }),
+          h(ConnectAgent)),
+        h("div", { className: "orch-card" },
+          h("header", { className: "orch-card-head" }, h("h3", null, "Activity"),
+            h("div", { className: "orch-card-action orch-segments" }, [["24_hours", "24 h"], ["7_days", "7 days"]].map(function (x) {
+              return h("button", { key: x[0], type: "button", className: cx("orch-segment", windowKey === x[0] && "orch-segment-on"), onClick: function () { setWindowKey(x[0]); } }, x[1]);
+            }))),
+          h(Table, { rows: Object.keys(usage).filter(Boolean).map(function (p) { return Object.assign({ id: p, provider: p }, usage[p]); }), empty: "No agent runs in this period.", columns: [
+            ["Agent", function (u) { return h(AgentTag, { agent: u.provider }); }],
+            ["Model", function (u) { return h("code", null, Object.keys(u.models || {}).filter(function (m) { return m !== "unknown"; }).join(", ") || "—"); }],
+            ["Runs", function (u) { return count(u.executions); }],
+            ["Success", function (u) {
+              const pct = u.executions ? Math.round(100 * u.succeeded / u.executions) : 0;
+              return h("span", { className: "orch-row" }, h("span", { className: "orch-usage-track orch-usage-mini" }, h("div", { style: { width: pct + "%", background: "var(--o-good)" } })),
+                count(u.succeeded) + " of " + count(u.executions) + " · " + pct + "%");
+            }],
+            ["Tokens", function (u) { return tokens(u.tokens); }], ["Mean time", function (u) { return minutes(u.mean_minutes); }]] }))),
+      h("div", { className: "orch-grid orch-grid-even" },
+        h("section", { className: "orch-stack" },
+          h("div", { className: "orch-section-head" }, h("div", null, h("h2", null, "Services"),
+            h("p", { className: "orch-muted" }, down.length ? down.length + " of " + names.length + " services need attention." : "All platform services are healthy."))),
+          h("ul", { className: "orch-card orch-services" }, names.map(function (name) {
             const c = components[name];
-            return h("li", { key: name }, h("span", { className: "orch-dot orch-tone-" + (c.state === "HEALTHY" ? "good" : "bad") }), name.replace(/_/g, " "),
-              c.last_error && c.state !== "HEALTHY" ? h("div", { className: "orch-muted orch-small" }, c.last_error) : null);
+            const ok = c.state === "HEALTHY";
+            return h("li", { key: name }, h("span", { className: "orch-dot orch-tone-" + (ok ? "good" : "bad") }),
+              h("strong", null, capital(name.replace(/_/g, " "))),
+              h("span", { className: "orch-muted orch-small orch-ellipsis" }, ok ? SERVICE_TEXT[name] || "" : c.last_error || "not responding"),
+              h("span", { className: cx("orch-small orch-right", ok ? "orch-text-good" : "orch-text-bad") }, ok ? "Healthy" : "Down"));
           }))),
-        h(Card, { title: "Last 7 days" }, h("ul", { className: "orch-facts" },
-          h("li", null, h("span", null, "Retries"), h("strong", null, count((s.resilience_7_days || {}).retries))),
-          h("li", null, h("span", null, "Provider fallbacks"), h("strong", null, count((s.resilience_7_days || {}).fallbacks))),
-          h("li", null, h("span", null, "Notifications waiting for Hermes"), h("strong", null, count(s.pending_notifications)))))));
+        h("section", { className: "orch-stack" },
+          h("div", { className: "orch-section-head" }, h("div", null, h("h2", null, "Queue"), h("p", { className: "orch-muted" }, "Work waiting to start, oldest first."))),
+          h("div", { className: "orch-card orch-capacity-line" },
+            h("div", { className: "orch-capacity-workers" },
+              h("div", { className: "orch-usage-row" }, h("span", { className: "orch-muted" }, "Workers busy"),
+                h("strong", null, w.capacity.agent_workers + " of " + w.capacity.max_agent_workers)),
+              h(Meter, { value: w.capacity.agent_workers, max: w.capacity.max_agent_workers })),
+            h("div", null, h("div", { className: "orch-muted orch-small" }, "Memory free"), h("strong", null, bytes(w.capacity.memory_available_for_executions)))),
+          h(Card, null, h(Table, { rows: s.queue, empty: "Nothing is waiting.", columns: [
+            ["Task", function (q) { return h(TaskLink, { task: q.key, open: props.open }); }], ["Project", function (q) { return q.project; }],
+            ["Waiting", function (q) { return minutes(q.waiting_minutes); }]] })))));
   }
 
   // ------------------------------------------------------------ task panel
@@ -1190,16 +1306,14 @@
 
   // ------------------------------------------------------------ page
 
-  const VIEWS = [["home", "Home"], ["board", "Board"], ["approvals", "Approvals"], ["projects", "Projects"], ["system", "System"]];
-  function greeting() {
-    const hour = new Date().getHours();
-    return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  }
+  const VIEWS = [["home", "Home", "home"], ["board", "Board", "kanban"], ["approvals", "Approvals", "approve"], ["projects", "Projects", "folder"],
+    ["system", "System", "activity"]];
   function OrchestrationPage() {
     const [view, setView] = useState("home");
     const [task, setTask] = useState(null);
     const [creating, setCreating] = useState(null); // null, or the project to preselect ("" for none)
     const [query, setQuery] = useState("");
+    const [focusSearch, setFocusSearch] = useState(false);
     const counts = usePoll("/summary");
     const search = useRef(null);
     const open = useCallback(function (key) { setCreating(null); setTask(key); }, []);
@@ -1207,7 +1321,11 @@
     useEffect(function () {
       function onKey(e) {
         const typing = /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || "");
-        if (e.key === "/" && !typing && search.current) { e.preventDefault(); search.current.focus(); }
+        if (e.key === "/" && !typing) {  // the search lives on the board: focus it now, or when the board has loaded
+          e.preventDefault();
+          if (search.current) search.current.focus();
+          else { setFocusSearch(true); setView("board"); }
+        }
       }
       window.addEventListener("keydown", onKey);
       return function () { window.removeEventListener("keydown", onKey); };
@@ -1215,29 +1333,27 @@
     const pending = counts.data ? counts.data.required_actions.approvals.length + (counts.data.required_actions.clarifications || []).length : 0;
     const waiting = counts.data ? counts.data.required_actions.waiting_tasks.filter(function (t) { return t.state !== "APPROVAL_REQUIRED" && t.state !== "FIX_REQUIRED"; }).length : 0;
     const go = function (v) { setView(v); };
-    const props = { open: open, query: query, go: go };
+    // The search lives on the board and filters only it: other views never hide what needs the person.
+    const props = { open: open, query: "", go: go };
     let body;
     if (view === "home") body = h(Home, props);
-    else if (view === "board") body = h(Board, props);
+    else if (view === "board") body = h(Board, Object.assign({}, props, { query: query, setQuery: setQuery, search: search, focusSearch: focusSearch }));
     else if (view === "approvals") body = h(Approvals, props);
     else if (view === "projects") body = h(Projects, Object.assign({}, props, { create: function (p) { setCreating(p); },
       filter: function (p) { setQuery(p); setView("board"); } }));
     else body = h(System, props);
     return h("div", { className: "orch-page" },
       h("header", { className: "orch-top" },
-        h("div", { className: "orch-hello" }, h("h1", null, greeting()),
-          h("p", { className: "orch-muted" }, pending + waiting ? (pending + waiting) + (pending + waiting === 1 ? " thing needs" : " things need") + " you." : "Here is what your agents are doing.")),
-        h("div", { className: "orch-top-tools" },
-          h("label", { className: "orch-search" }, h(Icon, { name: "search", size: 15 }),
-            h("input", { ref: search, value: query, onChange: function (e) { setQuery(e.target.value); }, placeholder: "Search tasks and projects", "aria-label": "Search" }),
-            query ? h("button", { type: "button", className: "orch-search-clear", "aria-label": "Clear search", onClick: function () { setQuery(""); } }, h(Icon, { name: "x", size: 13 }))
-              : h("kbd", null, "/")),
-          h(Button, { kind: "primary", icon: "plus", onClick: function () { setCreating(""); } }, "New task"))),
-      h("nav", { className: "orch-nav" }, VIEWS.map(function (v) {
-        const badge = v[0] === "approvals" ? pending : v[0] === "home" ? waiting : 0;
-        return h("button", { key: v[0], type: "button", className: cx("orch-nav-item", view === v[0] && "orch-nav-on"), onClick: function () { setView(v[0]); } },
-          v[1], badge ? h("span", { className: "orch-badge" }, badge) : null);
-      })),
+        h("div", { className: "orch-hello" }, h("h1", null, "Orchestration"),
+          h("p", { className: "orch-muted" }, "Your agents build, review and test. You decide what ships.")),
+        h(Button, { kind: "primary", icon: "plus", onClick: function () { setCreating(""); } }, "New task")),
+      h("nav", { className: "orch-nav" },
+        VIEWS.map(function (v) {
+          const badge = v[0] === "approvals" ? pending : v[0] === "home" ? waiting : 0;
+          return h("button", { key: v[0], type: "button", className: cx("orch-nav-item", view === v[0] && "orch-nav-on"), onClick: function () { setFocusSearch(false); setView(v[0]); } },
+            h(Icon, { name: v[2], size: 15 }), v[1], badge ? h("span", { className: "orch-badge" }, badge) : null);
+        }),
+        h(AgentLine, { go: go })),
       body,
       task ? h(TaskPanel, { task: task, close: close }) : null,
       creating !== null ? h(NewTask, { project: creating, created: function (key) { setCreating(null); setView("board"); setTask(key); }, cancel: function () { setCreating(null); } }) : null);

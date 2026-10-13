@@ -30,6 +30,7 @@ from ho_core.routing import ProviderStats, route
 from ho_core.statemachine import WAITING_STATES, Trigger
 
 from . import budgets, manifests, recovery, testenv
+from .agents import paused
 from .approvals import Approvals
 from .auth import Principal
 from .budgets import BudgetExhausted
@@ -185,6 +186,7 @@ class Orchestration:
         blocked = {r["provider"] for r in uow.cur.fetchall() if r["status"] == "AUTH_REQUIRED"}
         uow.cur.execute("SELECT DISTINCT provider FROM executions WHERE failure_class = 'QUOTA' AND ended_at > now() - interval '30 minutes'")
         blocked |= {r["provider"] for r in uow.cur.fetchall()}
+        blocked |= paused(uow, self.ctx.provider_identity)  # a person paused it in the Dashboard
         return [p for p in ("claude", "codex") if p not in blocked]
 
     def _route(self, uow: UnitOfWork, task: Row, kind: str, *, suggested: str | None = None, exclude: tuple[str, ...] = ()) -> str | None:
@@ -213,6 +215,10 @@ class Orchestration:
         """Start an execution now, or queue it when capacity, budget, a scope conflict, or a
         higher-priority task stands in the way (design changes 3 and 6)."""
         blocker = self._blocker(uow, task, kind, subtask)
+        agent = request.get("provider") or request.get("reviewer")
+        if blocker is None and agent in paused(uow, self.ctx.provider_identity):
+            # Held before any Git work (a review would otherwise prepare a workspace on every retry).
+            blocker = f"{agent} is paused; the work waits until it is resumed"
         if blocker is None:
             try:
                 with uow.cur.connection.transaction():
@@ -249,9 +255,11 @@ class Orchestration:
     def _blocker(self, uow: UnitOfWork, task: Row, kind: str, subtask: Row | None) -> str | None:
         """Why a launch must wait, or None."""
         mine = self._rank(task, task["launch_suspended_at"])
+        # Launches held for a paused agent wait for that agent, not for capacity: they never hold back other work.
         uow.cur.execute(
             "SELECT t.*, min(p.requested_at) AS since FROM pending_launches p JOIN tasks t ON t.id = p.task_id "
-            "WHERE t.id <> %s GROUP BY t.id", (task["id"],))
+            "WHERE t.id <> %s AND coalesce(p.request->>'provider', p.request->>'reviewer', '') <> ALL(%s) GROUP BY t.id",
+            (task["id"], sorted(paused(uow, self.ctx.provider_identity))))
         for other in uow.cur.fetchall():
             if self._rank(other, other["launch_suspended_at"] or other["since"]) < mine:
                 if task["launch_suspended_at"] is None:
@@ -1368,7 +1376,8 @@ class Orchestration:
         request = {"kind": "SUBTASK_REVIEW", "reviewer": reviewer, "developer": developer, "ref": ref, "head": head,
                    "subtask": str(subtask["id"])}
         self._set_subtask(uow, subtask, "IN_REVIEW", None)
-        if self._blocker(uow, task, "SUBTASK_REVIEW", subtask) is None:
+        held = reviewer in paused(uow, self.ctx.provider_identity)  # queued before any Git work while paused
+        if not held and self._blocker(uow, task, "SUBTASK_REVIEW", subtask) is None:
             try:
                 with uow.cur.connection.transaction():
                     self._launch_review(uow, task, subtask, request)
@@ -1378,7 +1387,8 @@ class Orchestration:
             except (Conflict, UpstreamError):
                 pass  # queued below; a service outage must not undo the finished execution being recorded
         uow.cur.execute("INSERT INTO pending_launches (id, task_id, subtask_id, kind, request, reason) VALUES (%s, %s, %s, %s, %s, %s)",
-                        (uuid7(), task["id"], subtask["id"], "SUBTASK_REVIEW", jsonb(request), "waiting for capacity"))
+                        (uuid7(), task["id"], subtask["id"], "SUBTASK_REVIEW", jsonb(request),
+                         f"{reviewer} is paused" if held else "waiting for capacity"))
 
     def _subtask_review_failed(self, uow: UnitOfWork, task_id: UUID, subtask_id: UUID, reason: str) -> None:
         """A subtask review that failed or was lost is retried (bounded); then the orchestrator decides."""
@@ -1615,6 +1625,8 @@ class Orchestration:
     def _integration_review_later(self, task_key: str, provider: str) -> None:
         try:
             with self.ctx.unit_of_work() as uow:
+                if provider in paused(uow, self.ctx.provider_identity):
+                    return  # no Git work while its reviewer is paused; heal_reviews asks again once it is resumed
                 task = self.tasks.get(uow, task_key, lock=True)  # one request per provider, however many paths ask
                 if task["state"] != S.REVIEW or self._integration_review_pending(uow, task["id"], provider):
                     return
@@ -1795,8 +1807,8 @@ class Orchestration:
             return 0
         moved = 0
         with self.ctx.unit_of_work() as uow:
-            if "claude" not in self._available(uow):
-                return 0
+            if "claude" not in self._available(uow) or "codex" in paused(uow, self.ctx.provider_identity):
+                return 0  # a person paused the current lead: its tasks wait for it, the lead never moves
             uow.cur.execute(
                 "SELECT t.* FROM tasks t JOIN task_leases l ON l.task_id = t.id WHERE l.provider = 'codex' AND t.state = ANY(%s) "
                 "AND NOT EXISTS (SELECT 1 FROM events e WHERE e.task_id = t.id AND e.type = 'FAILOVER_COMPLETED' "

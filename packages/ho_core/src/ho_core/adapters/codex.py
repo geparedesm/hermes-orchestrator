@@ -41,6 +41,8 @@ from .base import (
     normalize_structured,
     result_schema,
     runner_state,
+    USAGE_WINDOWS,
+    usage_window,
 )
 
 _CONFIG = [
@@ -129,6 +131,7 @@ class CodexAdapter:
                 result.high_risk_commands += 1
         result.session_id = next((e.get("thread_id") for e in raw if e.get("type") == "thread.started"), None)
         result.credential_refreshed = (bundle.text("credential.txt") or "").strip() == "refreshed"
+        result.rate_limits = self._rate_limits(bundle)
         failed = any(e.get("type") == "turn.failed" for e in raw)
         last = bundle.text("last_message.json")
         structured: Any = None
@@ -144,6 +147,33 @@ class CodexAdapter:
             result.error = self._last_error(raw) or (
                 "the final answer did not match the result schema" if last else str(runner_state(bundle).get("reason") or "execution failed"))
         return result
+
+    @staticmethod
+    def _rate_limits(bundle: OutputBundle) -> list[dict[str, Any]]:
+        """The plan's usage that ho-agent-run copied from the session log (`rate-limits.json`: the last
+        TokenCountEvent.rate_limits, primary and secondary, with used_percent, window_minutes, and resets_at or
+        resets_in_seconds). `codex exec --json` itself carries no rate limits."""
+        try:
+            data = json.loads(bundle.text("rate-limits.json") or "null")
+        except ValueError:
+            return []
+        if not isinstance(data, dict):
+            return []
+        observed = data.get("observed_at")
+        out: dict[str, dict[str, Any]] = {}
+        for key in ("primary", "secondary"):
+            item = data.get(key)
+            if not isinstance(item, dict):
+                continue
+            minutes = item.get("window_minutes")
+            window = "session" if minutes == 300 else "week" if minutes == 10080 else None
+            reset = item.get("resets_at")
+            if reset is None and isinstance(item.get("resets_in_seconds"), (int, float)) and isinstance(observed, (int, float)):
+                reset = observed + item["resets_in_seconds"]
+            usage = usage_window(window, item.get("used_percent"), reset, observed_at=observed) if window else None
+            if usage:
+                out[window] = usage  # type: ignore[index]
+        return [out[w] for w in USAGE_WINDOWS if w in out]
 
     @staticmethod
     def _last_error(raw: list[dict[str, Any]]) -> str | None:

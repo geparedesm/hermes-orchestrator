@@ -251,3 +251,74 @@ def test_secrets_are_granted_by_reference_only(api, services, projects_root, age
     assert spec["secret_env"] == ["demo/test/NPM_TOKEN"]
     reviewer = run_agent(api, key, role="REVIEWER", capabilities={"workspace": "READ"}, secrets=["TEST_DATABASE_URL"])
     assert api.get(f"/v1/executions/{reviewer.json()['id']}").json()["grant"]["capabilities"]["secrets"] == []
+
+
+def test_the_dashboard_shows_each_agents_plan_usage_and_a_person_can_pause_it(api, services, agents, task):
+    """docs/design/agents-dashboard.md: usage from the CLI's own events; pausing is a person's decision."""
+    import time
+
+    reset = int(time.time()) + 3600
+    limits = {"primary": {"used_percent": 88.0, "window_minutes": 300, "resets_at": reset},
+              "secondary": {"used_percent": 61.0, "window_minutes": 10080, "resets_at": reset + 86400}, "observed_at": int(time.time()),
+              "reasoning": "never kept"}
+    execution = run_agent(api, task).json()["id"]
+    agents.finish_agent(execution, (FIXTURES / "codex-success.jsonl").read_bytes(),
+                        extra={"ho/rate-limits.json": json.dumps(limits).encode()})
+    services.scheduler.run_once()
+    view = {a["provider"]: a for a in api.get("/v1/agents").json()["agents"]}
+    codex = view["codex"]
+    assert codex["session"]["used_percent"] == 88.0 and codex["week"]["used_percent"] == 61.0 and codex["status"] == "near_limit"
+    assert view["claude"]["session"] is None and view["claude"]["status"] in ("available", "login_needed")
+    with services.ctx.db.transaction() as cur:  # the raw file is never an artifact; only the numbers are kept
+        cur.execute("SELECT count(*) AS n FROM artifacts WHERE path LIKE '%%rate-limits%%'")
+        assert cur.fetchone()["n"] == 0
+
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+
+    assert api.post("/v1/agents/codex/pause", {}, token=PLUGIN_TOKEN, principal="telegram:12345").status_code == 403
+    paused = api.post("/v1/agents/codex/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    assert paused.status_code == 200 and paused.json()["status"] == "paused" and not paused.json()["enabled"]
+    from control_plane.agents import paused as paused_providers
+
+    with services.ctx.unit_of_work() as uow:  # what routing (Orchestration._available) skips: new work goes elsewhere
+        assert paused_providers(uow, services.ctx.provider_identity) == {"codex"}
+    refused = run_agent(api, task, provider="codex")  # every launch path goes through here: nothing new starts
+    assert refused.status_code == 409 and "paused" in refused.text
+    api.post("/v1/agents/codex/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    with services.ctx.unit_of_work() as uow:
+        assert paused_providers(uow, services.ctx.provider_identity) == set()
+    assert api.post("/v1/agents/gemini/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 404
+
+
+def test_an_execution_waiting_for_dispatch_does_not_start_once_its_agent_is_paused(api, services, agents, task):
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+
+    with services.ctx.db.transaction() as cur:  # stand-in: Agent Manager degraded, so the request waits unstarted
+        cur.execute("INSERT INTO component_health (component, state) VALUES ('agent_manager', 'DEGRADED') "
+                    "ON CONFLICT (component) DO UPDATE SET state = 'DEGRADED'")
+    execution = run_agent(api, task).json()["id"]
+    assert api.post("/v1/agents/codex/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 200
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE component_health SET state = 'HEALTHY' WHERE component = 'agent_manager'")
+    services.executions.dispatch(execution)
+    assert api.get(f"/v1/executions/{execution}").json()["state"] == "REQUESTED" and execution not in agents.containers
+    api.post("/v1/agents/codex/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    services.executions.dispatch(execution)
+    assert api.get(f"/v1/executions/{execution}").json()["state"] != "REQUESTED"
+
+
+def test_renewing_a_paused_agents_login_holds_its_interrupted_work_until_resume(api, services, agents, task):
+    """Codex review: the continuation must not be lost when the login is renewed while the agent is paused."""
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+
+    execution = run_agent(api, task, provider="claude").json()["id"]
+    agents.finish_agent(execution, (FIXTURES / "claude-auth-failure.jsonl").read_bytes(), exit_code=1)
+    services.scheduler.run_once()
+    assert api.post("/v1/agents/claude/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 200
+    body = api.post("/v1/credentials/claude/default/ready").json()
+    assert credential(api, "claude")["status"] == "READY" and body["tasks_resumed"] == [task]
+    new = body["executions_continued"][0]["continued_by"]
+    assert api.get(f"/v1/executions/{new}").json()["state"] == "REQUESTED" and new not in agents.containers  # held
+    api.post("/v1/agents/claude/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    services.executions.dispatch(new)
+    assert api.get(f"/v1/executions/{new}").json()["state"] != "REQUESTED"

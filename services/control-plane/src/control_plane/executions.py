@@ -133,7 +133,8 @@ class Executions:
     # ----------------------------------------------------------------- request
 
     def request(self, uow: UnitOfWork, *, principal: Principal, task_key: str, req: ExecutionRequest,
-                replacing: UUID | None = None, retry_of: UUID | None = None, allow_waiting: bool = False) -> Row:
+                replacing: UUID | None = None, retry_of: UUID | None = None, allow_waiting: bool = False,
+                hold_if_paused: bool = False) -> Row:
         if self.ctx.agents is None:
             raise UpstreamError("agent-manager is not configured")
         task = self.tasks.get(uow, task_key, lock=True)
@@ -161,6 +162,11 @@ class Executions:
         elif req.provider not in (None, "none"):
             raise BadRequest(f"{role.value} executions do not use a provider")
         provider = req.provider if role in AGENT_ROLES else None
+        if provider:
+            from .agents import paused  # a person paused this agent in the Dashboard: no new execution (launches queue)
+            if provider in paused(uow, self.ctx.provider_identity) and not hold_if_paused:
+                raise Conflict(f"{provider} is paused; the work waits until it is resumed or another agent takes it")
+            # hold_if_paused: the execution is recorded and dispatch holds it (unstarted) until the agent is resumed
         if bool(req.prompt) == bool(req.command):
             raise BadRequest("give either a prompt (agent roles) or a command")
         if req.prompt and role not in AGENT_ROLES:
@@ -410,6 +416,12 @@ class Executions:
             uow.cur.execute("SELECT 1 FROM component_health WHERE component = 'agent_manager' AND state = 'DEGRADED'")
             if uow.cur.fetchone() is not None:
                 return
+            if row["provider"]:
+                # Paused before it could start: it waits, unstarted and keeping its worker slot, until resumed. (Its
+                # capability grant expires as during a long Agent Manager outage: the execution then fails as POLICY.)
+                from .agents import paused
+                if row["provider"] in paused(uow, row["provider_identity"] or self.ctx.provider_identity):
+                    return
             if (row["spec"].get("purpose") or {}).get("fenced"):
                 uow.cur.execute("SELECT epoch FROM task_leases WHERE task_id = %s FOR UPDATE", (row["task_id"],))
                 lease = uow.cur.fetchone()
@@ -563,8 +575,9 @@ class Executions:
             purpose=spec.get("purpose") or {},
             subtask_id=row["subtask_id"],
         )
+        # The continuation is recorded even while a person has paused the agent: dispatch holds it until the resume.
         return self.request(uow, principal=Principal("control-plane", "auth-resume"), task_key=task_key, req=req,
-                            retry_of=None if row["provider_session_id"] else row["id"])
+                            retry_of=None if row["provider_session_id"] else row["id"], hold_if_paused=True)
 
     def _send_stop(self, execution_id: str) -> None:
         try:
@@ -705,6 +718,9 @@ class Executions:
         )
         if result.ok:
             self._set_credential(uow, row["provider"], row["provider_identity"] or "default", "READY", None)
+        if result.rate_limits:
+            from .agents import record_usage  # the plan's usage windows the CLI reported (Dashboard agents)
+            record_usage(uow, row, result.rate_limits)
         if result.high_risk_commands:
             # What the person deciding a gate exception needs (T-55): every rule and how many commands may have had an
             # effect, from all of them; the commands themselves (redacted, cut short) only as a bounded list to show.

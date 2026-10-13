@@ -181,6 +181,14 @@ class TaskApi:
     def expired_approvals(self) -> Any:
         return self.call("GET", "/v1/approvals", params={"state": "EXPIRED"})
 
+    def agents(self) -> Any:
+        return self.call("GET", "/v1/agents")
+
+    def agent_action(self, provider: str, verb: str) -> Any:
+        if not re.match(r"^[a-z][a-z0-9-]{0,30}$", provider or "") or verb not in ("pause", "resume"):
+            raise ApiError(400, "invalid agent action")
+        return self.call("POST", f"/v1/agents/{provider}/{verb}", {})
+
     def decide(self, approval_id: str, approve: bool, note: str | None = None) -> Any:
         body: dict[str, Any] = {"decision": "APPROVE" if approve else "REJECT"}
         if note:
