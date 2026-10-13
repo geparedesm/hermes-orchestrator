@@ -85,7 +85,7 @@ def test_riskiest_segment_wins():
                     "timeout 5 docker ps", "sudo -u root docker ps", 'bash -lc "exec docker ps"', 'bash -lc "env X=1 docker ps"',
                     "ls && bash -c 'ls; docker ps'", "if docker ps; then echo yes; fi", "for x in a; do docker ps; done",
                     "env -i docker ps", "timeout 5s docker ps", "bash -c 'X=1 docker ps'", "find . -exec docker ps \\;",
-                    "grep docker x; docker ps"):
+                    "grep docker x; docker ps", "rg --pre=docker pattern .", "git log -p --ext-diff | grep docker"):
         assert classify(command).command_class == CommandClass.HIGH_RISK, command
     for command in ("git log --all --oneline | grep -i docker", "find . -iname 'docker-compose*' | head",
                     'find . -iname "*.cfg" -o -iname "docker-compose*" | head; cat .github/workflows/*.yml 2>/dev/null | head -50; ls -la'):
@@ -202,7 +202,7 @@ def test_only_commands_needing_absent_capabilities_are_provably_blocked():
     from ho_core.policy.commands import provably_blocked
 
     for command in ("sudo -u postgres psql -c '\\l'", "ls; sudo service postgresql status 2>&1", "docker ps -a",
-                    "docker ps -a 2>/dev/null | head -5", "env X=1 docker ps"):
+                    "docker ps -a 2>/dev/null | head -5"):
         assert provably_blocked(command), command
     for command in ("chmod 777 /workspace/run.sh", "su - postgres", "git push --force", "psql -c 'DROP TABLE x'",
                     "ls -la", "docker ps; chmod 777 x", "docker ps $(chmod 777 /workspace/run.sh)", "sudo ls > /workspace/x",
@@ -210,7 +210,8 @@ def test_only_commands_needing_absent_capabilities_are_provably_blocked():
                     "chmod 777 /workspace/docker.sock", "pg_isready; sudo -u postgres psql", 'bash -lc "chmod 777 x; docker ps"',
                     "docker ps\nchmod 777 /workspace/run.sh", "docker ps; find /workspace -type f -delete",
                     "docker ps; git restore /workspace/run.sh", "sudo ls; diff --output=/workspace/results a b",
-                    "/workspace/docker ps", "sudo ls; file -C x"):
+                    "/workspace/docker ps", "sudo ls; file -C x", 'env --split-string="touch /workspace/marker" docker ps',
+                    "env X=1 docker ps"):
         assert not provably_blocked(command), command
 
 

@@ -71,12 +71,7 @@ _ORDER = {S: 0, C: 1, H: 2}
 
 
 CONTAINER_TOOLS = frozenset({"docker", "docker-compose", "podman", "nerdctl", "kubectl", "helm"})
-_WRAPPERS = frozenset({"env", "xargs", "exec", "nohup", "sudo", "watch", "timeout", "nice", "time", "command", "stdbuf",
-                       "ionice", "setsid", "chroot", "doas", "unbuffer", "parallel"})
-_OPTION_ARGS = frozenset({"-I", "-i", "-n", "-P", "-L", "-s", "-d", "-u", "-g", "-E", "-C", "-k", "-a", "--replace"})
-_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
 _READ_ONLY = frozenset({"ls", "cat", "head", "tail", "wc", "grep", "echo", "pwd", "true", "which", "stat", "cut"})
-_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "fi", "done"})
 
 
 _COMMAND_BREAKS = frozenset({";", "&&", "||", "|", "&", "\n", "(", ")", "|&", ";;"})
@@ -98,35 +93,11 @@ def _commands(text: str) -> list[list[str]]:
     return [c for c in commands if c]
 
 
-def _executables(text: str, depth: int = 0) -> list[str]:
-    """Every program a line runs: each command's first word, through wrappers and their options, and inside
-    `sh -c` scripts."""
-    found: list[str] = []
-    for tokens in _commands(text):
-        i = 0
-        while i < len(tokens):
-            name = tokens[i].rsplit("/", 1)[-1]
-            if name in _KEYWORDS:  # `if docker ps; then`, `do docker ps; done`: the program comes after the keyword
-                i += 1
-                continue
-            found.append(name)
-            if name in _SHELLS and depth < 3:
-                for j in range(i + 1, len(tokens) - 1):
-                    if tokens[j].startswith("-") and not tokens[j].startswith("--") and "c" in tokens[j]:
-                        found += _executables(tokens[j + 1], depth + 1)
-                        break
-                break
-            if name not in _WRAPPERS:
-                break
-            i += 1
-            while i < len(tokens) and (tokens[i].startswith("-") or re.match(r"^\w+=", tokens[i]) or tokens[i].isdigit()
-                                       or tokens[i] in ("{}", "%")):
-                i += 2 if tokens[i] in _OPTION_ARGS else 1
-    return found
-
-
-_SEARCH = frozenset({"grep", "rg", "ls", "cat", "head", "tail", "wc", "echo", "fc-list", "which"})
-_GIT_READ = frozenset({"log", "show", "grep", "status", "diff", "ls-files", "blame"})
+# Programs whose options cannot run other programs (not rg: --pre; not git diff: external diff and textconv).
+_SEARCH = frozenset({"grep", "ls", "cat", "head", "tail", "wc", "echo", "fc-list", "which"})
+_GIT_READ = frozenset({"log", "status", "ls-files"})
+_GIT_SAFE_OPTION = re.compile(r"^(--all|--oneline|--graph|--decorate|--short|--porcelain|-s|-n|-\d+|--max-count=\d+|"
+                              r"--format=\S*|--pretty=\S*|--)$")
 
 
 def _search_only(text: str) -> bool:
@@ -139,7 +110,8 @@ def _search_only(text: str) -> bool:
         name = tokens[0]
         if name == "find" and not set(tokens) & {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf", "-fls"}:
             continue
-        if name == "git" and len(tokens) > 1 and tokens[1] in _GIT_READ:
+        if name == "git" and len(tokens) > 1 and tokens[1] in _GIT_READ \
+                and all(_GIT_SAFE_OPTION.match(t) or not t.startswith("-") for t in tokens[2:]):
             continue
         if name not in _SEARCH:
             return False
@@ -181,10 +153,9 @@ def provably_blocked(command: str) -> bool:
         return False
     absent = False
     for tokens in _commands(text):
-        # Through wrappers (`env X=1 docker`, `timeout 5 sudo …`): the first program that is absent fails the command.
-        runs = next((p for p in _executables(shlex.join(tokens)) if p not in _WRAPPERS - {"sudo"}), None)
-        named = [t for t in tokens if t.rsplit("/", 1)[-1] == runs]
-        if runs in CONTAINER_TOOLS | {"sudo"} and named and "/" not in named[0]:  # `/workspace/docker` could exist
+        # The command itself is the absent program, by bare name: no wrapper (whose options can run programs) and no
+        # path (`/workspace/docker` could exist). Whatever follows sudo never runs, since sudo is absent.
+        if tokens[0] in CONTAINER_TOOLS | {"sudo"}:
             absent = True
             continue
         # Only programs that never write, with nothing flagged in their arguments (not `find`, which can -delete).
