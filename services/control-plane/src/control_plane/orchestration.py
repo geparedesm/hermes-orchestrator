@@ -1376,7 +1376,8 @@ class Orchestration:
         request = {"kind": "SUBTASK_REVIEW", "reviewer": reviewer, "developer": developer, "ref": ref, "head": head,
                    "subtask": str(subtask["id"])}
         self._set_subtask(uow, subtask, "IN_REVIEW", None)
-        if self._blocker(uow, task, "SUBTASK_REVIEW", subtask) is None:
+        held = reviewer in paused(uow, self.ctx.provider_identity)  # queued before any Git work while paused
+        if not held and self._blocker(uow, task, "SUBTASK_REVIEW", subtask) is None:
             try:
                 with uow.cur.connection.transaction():
                     self._launch_review(uow, task, subtask, request)
@@ -1386,7 +1387,8 @@ class Orchestration:
             except (Conflict, UpstreamError):
                 pass  # queued below; a service outage must not undo the finished execution being recorded
         uow.cur.execute("INSERT INTO pending_launches (id, task_id, subtask_id, kind, request, reason) VALUES (%s, %s, %s, %s, %s, %s)",
-                        (uuid7(), task["id"], subtask["id"], "SUBTASK_REVIEW", jsonb(request), "waiting for capacity"))
+                        (uuid7(), task["id"], subtask["id"], "SUBTASK_REVIEW", jsonb(request),
+                         f"{reviewer} is paused" if held else "waiting for capacity"))
 
     def _subtask_review_failed(self, uow: UnitOfWork, task_id: UUID, subtask_id: UUID, reason: str) -> None:
         """A subtask review that failed or was lost is retried (bounded); then the orchestrator decides."""
