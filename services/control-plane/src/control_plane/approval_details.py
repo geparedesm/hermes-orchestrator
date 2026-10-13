@@ -228,7 +228,7 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     uow.cur.execute("SELECT requirements FROM quality_gate_evaluations WHERE task_id = %s ORDER BY evaluated_at DESC LIMIT 1", (tid,))
     gate = uow.cur.fetchone()
     # The gate's own line for policy violations only repeats the commands above.
-    failing = [r for r in (gate or {}).get("requirements") or [] if r.get("status") in ("FAIL", "APPROVAL_REQUIRED")
+    failing = [r for r in (gate or {}).get("requirements") or [] if r.get("status") != "PASS"  # PENDING blocks the gate too
                and r.get("name") not in ("exception_approval", "no_policy_violations")]
     changes += [{"kind": "!", "text": f"{r['name'].replace('_', ' ')}: {r.get('detail') or r['status'].lower()}"} for r in failing]
     reasons = list(subject.get("reasons") or [])
