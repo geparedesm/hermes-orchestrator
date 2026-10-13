@@ -300,6 +300,12 @@ class Orchestration:
                     except Conflict as exc:
                         self._event(uow, task, "LAUNCH_DROPPED", f"{row['kind'].lower()} dropped: {exc}")
                         continue
+                if row["kind"] == "STEP" and row["request"].get("provider") in paused(uow, self.ctx.provider_identity):
+                    # Queued for an agent a person paused since: ask for the step again, which hands the lead to the
+                    # other agent when it can (or queues it again until one is free).
+                    if self.request_step(uow, task) is not None:
+                        started += 1
+                    continue
                 subtask = None
                 if row["subtask_id"]:
                     uow.cur.execute("SELECT * FROM subtasks WHERE id = %s", (row["subtask_id"],))

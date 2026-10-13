@@ -273,7 +273,8 @@ def command_event(event_type: str, command: str, **extra: Any) -> AdapterEvent:
 USAGE_WINDOWS = ("session", "week")
 
 
-def usage_window(window: str, used_percent: Any, resets_at: Any, *, now: float | None = None) -> dict[str, Any] | None:
+def usage_window(window: str, used_percent: Any, resets_at: Any, *, now: float | None = None,
+                 observed_at: Any = None) -> dict[str, Any] | None:
     """One plan usage window, kept only when every value is a plain, plausible number (invariant 4: nothing else from
     the provider is kept): a percentage from 0 to 100 and a reset time within 31 days."""
     import time
@@ -289,7 +290,14 @@ def usage_window(window: str, used_percent: Any, resets_at: Any, *, now: float |
     current = now if now is not None else time.time()
     if not (0 <= percent <= 100) or not (current - 86400 <= reset <= current + 31 * 86400):
         return None
-    return {"window": window, "used_percent": round(percent, 1), "resets_at": reset}
+    out: dict[str, Any] = {"window": window, "used_percent": round(percent, 1), "resets_at": reset}
+    try:  # when the provider said so (epoch seconds), and only a plausible past moment
+        seen = int(observed_at) if observed_at is not None and not isinstance(observed_at, bool) else None
+    except (TypeError, ValueError, OverflowError):
+        seen = None
+    if seen is not None and current - 31 * 86400 <= seen <= current + 300:
+        out["observed_at"] = seen
+    return out
 
 
 def normalize_structured(provider: str, value: Any, result: ExecutionResult, schema: str = RESULT_SCHEMA) -> bool:

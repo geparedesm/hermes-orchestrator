@@ -170,7 +170,7 @@ class CodexAdapter:
             reset = item.get("resets_at")
             if reset is None and isinstance(item.get("resets_in_seconds"), (int, float)) and isinstance(observed, (int, float)):
                 reset = observed + item["resets_in_seconds"]
-            usage = usage_window(window, item.get("used_percent"), reset) if window else None
+            usage = usage_window(window, item.get("used_percent"), reset, observed_at=observed) if window else None
             if usage:
                 out[window] = usage  # type: ignore[index]
         return [out[w] for w in USAGE_WINDOWS if w in out]

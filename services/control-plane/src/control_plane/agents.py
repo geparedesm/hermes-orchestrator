@@ -21,15 +21,18 @@ from .executions import ACTIVE
 
 
 def record_usage(uow: UnitOfWork, execution: Row, rate_limits: list[dict[str, Any]]) -> None:
-    """Keep the latest usage window a provider reported in this execution (never an older one over a newer one)."""
+    """Keep the latest usage window a provider reported (never an older observation over a newer one). When it was
+    observed: the provider's own time when it gives one (Codex), else when the execution started (Claude's events
+    carry none): never later than the truth, so "as of" never overstates freshness."""
     for window in rate_limits:
         uow.cur.execute(
             "INSERT INTO provider_usage (provider, identity, window_kind, used_percent, resets_at, observed_at, execution_id) "
-            "VALUES (%s, %s, %s, %s, to_timestamp(%s), now(), %s) ON CONFLICT (provider, identity, window_kind) DO UPDATE SET "
+            "VALUES (%s, %s, %s, %s, to_timestamp(%s), coalesce(to_timestamp(%s), %s, now()), %s) "
+            "ON CONFLICT (provider, identity, window_kind) DO UPDATE SET "
             "used_percent = EXCLUDED.used_percent, resets_at = EXCLUDED.resets_at, observed_at = EXCLUDED.observed_at, "
             "execution_id = EXCLUDED.execution_id WHERE provider_usage.observed_at <= EXCLUDED.observed_at",
             (execution["provider"], execution["provider_identity"] or "default", window["window"], window["used_percent"],
-             window["resets_at"], execution["id"]))
+             window["resets_at"], window.get("observed_at"), execution.get("started_at"), execution["id"]))
 
 
 def paused(uow: UnitOfWork, identity: str) -> set[str]:
