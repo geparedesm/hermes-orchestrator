@@ -17,6 +17,11 @@ RUN apt-get update \
 # Mount points owned by the worker user: Docker copies this ownership into a new, empty
 # named volume the first time it is mounted (output, input, session, and dependency-cache volumes).
 COPY --chmod=755 ho-wait-secrets ho-verify /opt/ho/bin/
+# Agents run commands in login shells (`bash -l`), whose /etc/profile resets PATH: every directory a toolchain adds
+# to PATH is listed in /etc/ho-path and added back by /etc/profile.d/ho-path.sh, so tools never "disappear".
+RUN echo "/opt/ho/bin" > /etc/ho-path \
+ && printf '%s\n' 'while read -r dir; do case ":$PATH:" in *":$dir:"*) ;; *) PATH="$dir:$PATH" ;; esac; done < /etc/ho-path' \
+                  'export PATH' > /etc/profile.d/ho-path.sh
 
 LABEL org.hermes-orchestrator.role="agent-base" org.hermes-orchestrator.toolchains="generic"
 ENV HOME=/home/agent
