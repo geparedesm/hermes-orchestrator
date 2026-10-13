@@ -90,6 +90,7 @@ def _task(api, services, projects_root):
 
 
 def test_a_gate_exception_lists_the_risky_commands(api, services, projects_root):
+    """Recorded before the commands were kept: listed as recorded, and never taken as blocked."""
     from ho_core.enums import ApprovalAction, Risk
 
     key, row = _task(api, services, projects_root)
@@ -106,6 +107,7 @@ def test_a_gate_exception_lists_the_risky_commands(api, services, projects_root)
     [approval] = pending(api, "HIGH_RISK_OPERATION")
     assert texts(approval) == ["2 high-risk command(s) observed in execution 01a1 (advisory)"]
     assert approval["details"]["risk"] == "critical" and ["Commit", "a" * 12] in approval["details"]["facts"]
+    assert "Check what they did" in approval["details"]["headline"] and approval["details"]["recommendation"]["action"] == "look"
     assert approval["details"]["if_no"] == "The task goes back to the agents to fix it."
 
 
@@ -152,8 +154,8 @@ def test_a_gate_exception_says_in_plain_words_what_the_agents_tried(api, service
     from ho_core.enums import ApprovalAction, Risk
 
     key, row = _task(api, services, projects_root)
-    data = {"execution_id": "01a1", "role": "REVIEWER", "provider": "claude",
-            "commands": [{"command": "sudo -u postgres psql -c '\\l'", "rule": rule}]}
+    data = {"execution_id": "01a1", "role": "REVIEWER", "provider": "claude", "count": 1, "rules": [rule],
+            "unproven": 0 if blocked else 1, "commands": [{"command": "sudo -u postgres psql -c '\\l'", "rule": rule}]}
     with services.ctx.db.transaction() as cur:
         cur.execute("INSERT INTO events (task_id, project_id, type, actor, summary, data, audit) VALUES "
                     "(%s, %s, 'COMMAND_HIGH_RISK', 'agent-manager', '1 high-risk command(s) observed in execution 01a1 (advisory)', %s, false)",
@@ -167,11 +169,12 @@ def test_a_gate_exception_says_in_plain_words_what_the_agents_tried(api, service
     [approval] = pending(api, "HIGH_RISK_OPERATION")
     d = approval["details"]
     assert d["commands"] == [{"who": "reviewer claude", "command": "sudo -u postgres psql -c '\\l'", "rule": rule,
-                              "meaning": "use administrator permissions" if blocked else "read passwords or keys"}]
+                              "meaning": "use administrator permissions or change permissions" if blocked
+                              else "read passwords or keys"}]
     assert "01a1" not in d["headline"] and texts(approval) == []  # the commands are listed once, not repeated as lines
     if blocked:
         assert d["headline"] == ("The agents tried 1 action(s) they are not allowed to do (for example, use administrator "
-                                 "permissions). They were blocked and changed nothing.")
+                                 "permissions or change permissions). They were blocked and changed nothing.")
         assert d["risk"] == "low" and d["recommendation"]["action"] == "look"  # no passing tests or review recorded here
     else:
         assert "Check what they did" in d["headline"] and d["risk"] == "critical" and d["recommendation"]["action"] == "look"

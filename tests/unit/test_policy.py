@@ -80,7 +80,9 @@ def test_high_risk_commands(command):
 
 def test_riskiest_segment_wins():
     assert classify("ls && docker ps").command_class == CommandClass.HIGH_RISK
-    for command in ("xargs docker rm", "/usr/bin/docker ps", "sh -c 'docker ps'", "nohup kubectl apply -f x", "docker-compose up"):
+    for command in ("xargs docker rm", "/usr/bin/docker ps", "sh -c 'docker ps'", "nohup kubectl apply -f x", "docker-compose up",
+                    'bash -lc "docker ps"', "env DOCKER_HOST=tcp://host:2375 docker ps", "xargs -I {} docker inspect {}",
+                    "timeout 5 docker ps", "sudo -u root docker ps"):
         assert classify(command).command_class == CommandClass.HIGH_RISK, command
     for command in ("git log --all --oneline | grep -i docker", "find . -iname 'docker-compose*' | head"):
         assert classify(command).rule_id != "CMD-H07", command  # the word in an argument is not container control
@@ -189,3 +191,15 @@ def test_only_orchestrator_reads_projects(platform):
     assert grant["capabilities"]["workspace"] == "NONE"
     grant, notes = evaluate_grant(request(Role.DEVELOPER, project_read=["demo"]), config(platform), platform, now=NOW)
     assert grant["capabilities"]["project_read"] == []
+
+
+def test_only_commands_needing_absent_capabilities_are_provably_blocked():
+    """T-55, Codex review: a flagged command is "blocked" only when it needs a tool no worker has."""
+    from ho_core.policy.commands import provably_blocked
+
+    for command in ("sudo -u postgres psql -c '\\l'", "pg_isready; sudo service postgresql status", "docker ps -a",
+                    'bash -lc "docker ps"', "cat /var/run/docker.sock"):
+        assert provably_blocked(command), command
+    for command in ("chmod 777 /workspace/run.sh", "su - postgres", "git push --force", "psql -c 'DROP TABLE x'",
+                    "ls -la", "docker ps; chmod 777 x"):
+        assert not provably_blocked(command), command

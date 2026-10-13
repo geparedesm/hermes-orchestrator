@@ -45,10 +45,10 @@ _RULES: tuple[_Rule, ...] = (
     _rule("CMD-H04", H, r"\bgh\s+(repo\s+delete|pr\s+merge|api\b.*-X\s*DELETE)", "GitHub destructive or merge operation"),
     _rule("CMD-H05", H, r"\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)[a-z]*\s+(/|~|\$HOME|\.\.|\*)(\s|/?$)", "Mass deletion outside the workspace"),
     _rule("CMD-H06", H, r"\b(drop\s+(database|schema|table)|truncate\s+table|delete\s+from\s+\w+\s*;?\s*$)", "Destructive database statement"),
-    # A container tool run as a command (also through a wrapper or `sh -c`), or its socket; not the word inside an
-    # argument such as `grep -i docker` or `find -iname "docker-compose*"` (T-55).
-    _rule("CMD-H07", H, r"(^|\b(?:xargs|exec|env|nohup|sudo|watch)\s+(?:-\S+\s+)*|\b(?:ba)?sh\s+-c\s+['\"]?)(?:\S*/)?"
-                        r"(?:docker(?:-compose)?|podman|nerdctl|kubectl|helm)\b|docker\.sock", "Container or cluster control"),
+    # Container tools run as a command, or their socket. A tool run through a wrapper (`env X=1 docker`, `xargs -I {}
+    # docker`, `bash -lc "docker ps"`) is found by `_executables` below; the word inside an ordinary argument
+    # (`grep -i docker`, `find -iname "docker-compose*"`) is not container control (T-55).
+    _rule("CMD-H07", H, r"^(?:\S*/)?(?:docker(?:-compose)?|podman|nerdctl|kubectl|helm)\b|docker\.sock", "Container or cluster control"),
     _rule("CMD-H08", H, r"\b(terraform\s+(apply|destroy)|pulumi\s+(up|destroy)|cdk\s+deploy|serverless\s+deploy)\b", "Infrastructure change"),
     _rule("CMD-H09", H, r"\b(sudo|su\s|chmod\s+(-R\s+)?[0-7]*7[0-7]{2}\b|chown\s+-R|setcap|mount\s)", "Privilege or permission change"),
     _rule("CMD-H10", H, r"\b(aws|gcloud|az)\s+\S*\s*(delete|remove|rm|destroy|deploy)\b", "Cloud destructive or deploy operation"),
@@ -71,7 +71,42 @@ _SEPARATORS = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
 _ORDER = {S: 0, C: 1, H: 2}
 
 
+CONTAINER_TOOLS = frozenset({"docker", "docker-compose", "podman", "nerdctl", "kubectl", "helm"})
+_WRAPPERS = frozenset({"env", "xargs", "exec", "nohup", "sudo", "watch", "timeout", "nice", "time", "command", "stdbuf",
+                       "ionice", "setsid", "chroot", "doas", "unbuffer", "parallel"})
+_OPTION_ARGS = frozenset({"-I", "-i", "-n", "-P", "-L", "-s", "-d", "-u", "-g", "-E", "-C", "-k", "-a", "--replace"})
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
+
+
+def _executables(segment: str, depth: int = 0) -> list[str]:
+    """The programs a segment runs: the first word, through wrappers and their options, and inside `sh -c` scripts."""
+    try:
+        tokens = shlex.split(segment, posix=True)
+    except ValueError:
+        tokens = segment.split()
+    found, i = [], 0
+    while i < len(tokens):
+        name = tokens[i].rsplit("/", 1)[-1]
+        found.append(name)
+        if name in _SHELLS and depth < 3:
+            for j in range(i + 1, len(tokens) - 1):
+                if tokens[j].startswith("-") and not tokens[j].startswith("--") and "c" in tokens[j]:
+                    for part in _SEPARATORS.split(tokens[j + 1]):
+                        found += _executables(part, depth + 1)
+                    break
+            return found
+        if name not in _WRAPPERS:
+            return found
+        i += 1
+        while i < len(tokens) and (tokens[i].startswith("-") or re.match(r"^\w+=", tokens[i]) or tokens[i].isdigit()
+                                   or tokens[i] in ("{}", "%")):
+            i += 2 if tokens[i] in _OPTION_ARGS else 1
+    return found
+
+
 def _classify_segment(segment: str) -> Classification:
+    if CONTAINER_TOOLS & set(_executables(segment)):
+        return next(Classification(r.command_class, r.rule_id, r.summary) for r in _RULES if r.rule_id == "CMD-H07")
     for rule in _RULES:
         if rule.pattern.search(segment):
             return Classification(rule.command_class, rule.rule_id, rule.summary)
@@ -92,6 +127,22 @@ def classify(command: str) -> Classification:
     if worst.command_class == S and re.search(r"\$\(|`|\beval\b|\bsource\b|\b(ba)?sh\s+-c\b", text):
         return Classification(C, "CMD-C98", "Command substitution or eval")
     return worst
+
+
+def provably_blocked(command: str) -> bool:
+    """Whether every high-risk part of a command needs something absent from every worker image (AD-14): a container
+    tool or its socket (not installed, never mounted), or sudo (not installed; workers run unprivileged). Anything
+    else flagged high-risk (chmod, su, git push --force, ...) may have had an effect, so it is not provably blocked."""
+    risky = [s for s in _SEPARATORS.split(command.strip()) if s and _classify_segment(_strip_prefix(s)).command_class == H]
+    if not risky:
+        return False
+    for segment in risky:
+        rule = _classify_segment(_strip_prefix(segment)).rule_id
+        programs = _executables(_strip_prefix(segment))
+        if rule == "CMD-H07" or (rule == "CMD-H09" and programs and programs[0] == "sudo"):
+            continue
+        return False
+    return True
 
 
 def _strip_prefix(segment: str) -> str:

@@ -140,6 +140,11 @@ def test_high_risk_commands_raise_an_advisory_event(api, services, agents, task)
     services.scheduler.run_once()
     assert api.get(f"/v1/executions/{execution}").json()["state"] == "SUCCEEDED"
     assert "COMMAND_HIGH_RISK" in events(api, task)
+    with services.ctx.db.transaction() as cur:  # what the person deciding needs: the command, and that it may have had an effect
+        cur.execute("SELECT data FROM events WHERE type = 'COMMAND_HIGH_RISK'")
+        data = cur.fetchone()["data"]
+    assert data["count"] == 1 and data["rules"] == ["CMD-H11"] and data["unproven"] == 1 and data["role"] == "DEVELOPER"
+    assert data["commands"] == [{"command": "cat /run/ho-credentials/claude/oauth_token", "rule": "CMD-H11", "blocked": False}]
 
 
 def test_resume_continues_the_provider_session(api, services, agents, task):

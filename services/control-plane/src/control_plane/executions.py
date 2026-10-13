@@ -25,6 +25,7 @@ from ho_core.adapters import AgentAssignment, ExecutionResult, FailureClass, Out
 from ho_core.enums import ProjectStatus, Role, TaskState
 from ho_core.hashing import sha256_hex
 from ho_core.ids import uuid7
+from ho_core.policy.commands import provably_blocked
 from ho_core.policy.engine import GrantRequest, evaluate_grant
 from ho_core.redact import redact
 from ho_core.statemachine import ACTIVE_STATES, TERMINAL_STATES, Trigger
@@ -706,13 +707,18 @@ class Executions:
         if result.ok:
             self._set_credential(uow, row["provider"], row["provider_identity"] or "default", "READY", None)
         if result.high_risk_commands:
-            # The commands themselves (redacted, cut short), so the person deciding a gate exception sees them (T-55).
-            commands = [{"command": redact(str(e.data.get("command") or ""))[0][:200], "rule": e.data.get("rule")}
-                        for e in result.events if e.type == "COMMAND_STARTED" and e.data.get("class") == "HIGH_RISK"][:10]
+            # What the person deciding a gate exception needs (T-55): every rule and how many commands may have had an
+            # effect, from all of them; the commands themselves (redacted, cut short) only as a bounded list to show.
+            flagged = [e.data for e in result.events if e.type == "COMMAND_STARTED" and e.data.get("class") == "HIGH_RISK"]
+            unproven = sum(1 for d in flagged if not provably_blocked(str(d.get("command") or "")))
+            unproven += max(0, result.high_risk_commands - len(flagged))  # observed but not kept as events: unknown
+            commands = [{"command": redact(str(d.get("command") or ""))[0][:200], "rule": d.get("rule"),
+                         "blocked": provably_blocked(str(d.get("command") or ""))} for d in flagged[:10]]
             record_event(uow.cur, "COMMAND_HIGH_RISK", actor="agent-manager", project_id=row["project_id"], task_id=row["task_id"],
                          summary=f"{result.high_risk_commands} high-risk command(s) observed in execution {str(row['id'])[:8]} (advisory)",
                          data={"execution_id": str(row["id"]), "role": row["role"], "provider": row["provider"],
-                               "commands": commands}, pending=uow.events)
+                               "count": result.high_risk_commands, "rules": sorted({str(d.get("rule")) for d in flagged}),
+                               "unproven": unproven, "commands": commands}, pending=uow.events)
 
     def _set_credential(self, uow: UnitOfWork, provider: str, identity: str, status: str, error: str | None) -> None:
         uow.cur.execute(

@@ -116,13 +116,13 @@ def _config(uow: UnitOfWork, approval: Row, defaults: dict[str, Any]) -> dict[st
     }
 
 
-# High-risk command rules in plain words, and those whose capability is absent from every worker (AD-14: no GitHub
-# credentials, no Docker, no sudo or root, no cloud credentials), so the command cannot have had an effect.
+# High-risk command rules in plain words. Whether a command could have had an effect is decided when it is recorded
+# (ho_core.policy.commands.provably_blocked: only tools absent from every worker image count as blocked).
 RULE_WORDS = {"CMD-H01": "force-push code", "CMD-H02": "delete a branch on GitHub", "CMD-H03": "rewrite the code history",
               "CMD-H04": "merge or delete on GitHub", "CMD-H05": "delete files outside their work folder",
               "CMD-H06": "delete database data", "CMD-H07": "control containers (Docker)", "CMD-H08": "change infrastructure",
-              "CMD-H09": "use administrator permissions", "CMD-H10": "change cloud services", "CMD-H11": "read passwords or keys"}
-SANDBOX_BLOCKED = frozenset({"CMD-H01", "CMD-H02", "CMD-H04", "CMD-H07", "CMD-H08", "CMD-H09", "CMD-H10"})
+              "CMD-H09": "use administrator permissions or change permissions", "CMD-H10": "change cloud services",
+              "CMD-H11": "read passwords or keys"}
 
 
 GATE_REASONS = {"without running any test": "code changed without running any test", "critical change": "it is a critical change",
@@ -202,20 +202,20 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
             "facts": [["Target commit", str(subject.get("target_sha") or "")[:12]], ["Task commit", str(subject.get("head_sha") or "")[:12]]],
             "links": [],
         }
-    changes, commands, count, rules = [], [], 0, set()
+    changes, commands, count, unproven = [], [], 0, 0
     uow.cur.execute("SELECT summary, data FROM events WHERE task_id = %s AND type = 'COMMAND_HIGH_RISK' ORDER BY seq", (tid,))
     for row in uow.cur.fetchall():
         data = row["data"] or {}
-        listed = data.get("commands") or []
         found = re.match(r"(\d+) ", row["summary"])
-        count += len(listed) or (int(found.group(1)) if found else 1)
+        observed = int(data.get("count") or (found.group(1) if found else 1))
+        count += observed
+        # Recorded before the platform knew which commands could not run: none of them is taken as blocked.
+        unproven += int(data["unproven"]) if "unproven" in data else observed
         who = " ".join(str(x).lower() for x in (data.get("role"), data.get("provider")) if x) or "an agent"
-        for item in listed:
-            rules.add(item.get("rule"))
+        for item in data.get("commands") or []:
             commands.append({"who": who, "command": item.get("command"), "rule": item.get("rule"),
-                             "meaning": RULE_WORDS.get(item.get("rule"), "a risky command")})
-        if not listed:
-            rules.add(None)  # recorded before the commands were kept: unknown
+                             "meaning": RULE_WORDS.get(item.get("rule"), "run a risky command")})
+        if not data.get("commands"):
             changes.append({"kind": "!", "text": row["summary"]})
     uow.cur.execute("SELECT summary FROM policy_decisions WHERE task_id = %s AND decision = 'DENY'", (tid,))
     denied = [r["summary"] for r in uow.cur.fetchall()]
@@ -228,7 +228,7 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     changes += [{"kind": "!", "text": f"{r['name'].replace('_', ' ')}: {r.get('detail') or r['status'].lower()}"} for r in failing]
     reasons = list(subject.get("reasons") or [])
     other = [r for r in reasons if not r.startswith("policy violations")]
-    blocked = bool(rules or denied) and rules <= SANDBOX_BLOCKED  # policy denials were refused, so had no effect
+    blocked = bool(count or denied) and unproven == 0  # policy denials were refused, so had no effect
     tests, review_rows = _checks(uow, tid)
     checked = tests == "PASSED" and bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
     words = sorted({c["meaning"] for c in commands})
