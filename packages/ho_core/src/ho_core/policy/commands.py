@@ -45,10 +45,9 @@ _RULES: tuple[_Rule, ...] = (
     _rule("CMD-H04", H, r"\bgh\s+(repo\s+delete|pr\s+merge|api\b.*-X\s*DELETE)", "GitHub destructive or merge operation"),
     _rule("CMD-H05", H, r"\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)[a-z]*\s+(/|~|\$HOME|\.\.|\*)(\s|/?$)", "Mass deletion outside the workspace"),
     _rule("CMD-H06", H, r"\b(drop\s+(database|schema|table)|truncate\s+table|delete\s+from\s+\w+\s*;?\s*$)", "Destructive database statement"),
-    # Container tools run as a command, or their socket. A tool run through a wrapper (`env X=1 docker`, `xargs -I {}
-    # docker`, `bash -lc "docker ps"`) is found by `_executables` below; the word inside an ordinary argument
-    # (`grep -i docker`, `find -iname "docker-compose*"`) is not container control (T-55).
-    _rule("CMD-H07", H, r"^(?:\S*/)?(?:docker(?:-compose)?|podman|nerdctl|kubectl|helm)\b|docker\.sock", "Container or cluster control"),
+    # Container tools anywhere in the line (wrappers, shell scripts), or their socket; except in a line that only
+    # searches or reads (`git log | grep -i docker`, `find -iname "docker-compose*"`: T-55), see `_search_only`.
+    _rule("CMD-H07", H, r"\b(docker|podman|nerdctl|kubectl|helm)\b", "Container or cluster control"),
     _rule("CMD-H08", H, r"\b(terraform\s+(apply|destroy)|pulumi\s+(up|destroy)|cdk\s+deploy|serverless\s+deploy)\b", "Infrastructure change"),
     _rule("CMD-H09", H, r"\b(sudo|su\s|chmod\s+(-R\s+)?[0-7]*7[0-7]{2}\b|chown\s+-R|setcap|mount\s)", "Privilege or permission change"),
     _rule("CMD-H10", H, r"\b(aws|gcloud|az)\s+\S*\s*(delete|remove|rm|destroy|deploy)\b", "Cloud destructive or deploy operation"),
@@ -76,8 +75,7 @@ _WRAPPERS = frozenset({"env", "xargs", "exec", "nohup", "sudo", "watch", "timeou
                        "ionice", "setsid", "chroot", "doas", "unbuffer", "parallel"})
 _OPTION_ARGS = frozenset({"-I", "-i", "-n", "-P", "-L", "-s", "-d", "-u", "-g", "-E", "-C", "-k", "-a", "--replace"})
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
-_READ_ONLY = frozenset({"ls", "cat", "head", "tail", "wc", "grep", "echo", "pwd", "true", "which", "stat", "file",
-                        "cut", "diff"})
+_READ_ONLY = frozenset({"ls", "cat", "head", "tail", "wc", "grep", "echo", "pwd", "true", "which", "stat", "cut"})
 _KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{", "}", "fi", "done"})
 
 
@@ -127,10 +125,31 @@ def _executables(text: str, depth: int = 0) -> list[str]:
     return found
 
 
+_SEARCH = frozenset({"grep", "rg", "ls", "cat", "head", "tail", "wc", "echo", "fc-list", "which"})
+_GIT_READ = frozenset({"log", "show", "grep", "status", "diff", "ls-files", "blame"})
+
+
+def _search_only(text: str) -> bool:
+    """A line made only of searches and reads, where container words can only be arguments (no wrapper, shell,
+    substitution, or `find -exec`)."""
+    if re.search(r"\$\(|`|<\(|>\(|\beval\b|[\n\r]|docker\.sock|/var/run/docker", text):  # the socket is never an argument
+        return False
+    commands = _commands(text)
+    for tokens in commands:
+        name = tokens[0]
+        if name == "find" and not set(tokens) & {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf", "-fls"}:
+            continue
+        if name == "git" and len(tokens) > 1 and tokens[1] in _GIT_READ:
+            continue
+        if name not in _SEARCH:
+            return False
+    return bool(commands)
+
+
 def _classify_segment(segment: str) -> Classification:
-    if CONTAINER_TOOLS & set(_executables(segment)):
-        return next(Classification(r.command_class, r.rule_id, r.summary) for r in _RULES if r.rule_id == "CMD-H07")
     for rule in _RULES:
+        if rule.rule_id == "CMD-H07" and _search_only(segment):
+            continue
         if rule.pattern.search(segment):
             return Classification(rule.command_class, rule.rule_id, rule.summary)
     return Classification(C, "CMD-C99", "Unrecognized command")
@@ -141,10 +160,7 @@ def classify(command: str) -> Classification:
     text = command.strip()
     if not text:
         return Classification(C, "CMD-C99", "Empty command")
-    # The whole line is checked too, for patterns that span separators, and for container tools run anywhere in it
-    # (through wrappers or shell scripts, with their quoting intact).
-    if CONTAINER_TOOLS & set(_executables(text)):
-        return next(Classification(r.command_class, r.rule_id, r.summary) for r in _RULES if r.rule_id == "CMD-H07")
+    # The whole line is checked too, for patterns that span separators.
     results = [_classify_segment(_strip_prefix(text))]
     results += [_classify_segment(_strip_prefix(s)) for s in _SEPARATORS.split(text) if s]
     # Every segment must be SAFE for the line to be SAFE; the riskiest one decides.
@@ -167,7 +183,8 @@ def provably_blocked(command: str) -> bool:
     for tokens in _commands(text):
         # Through wrappers (`env X=1 docker`, `timeout 5 sudo …`): the first program that is absent fails the command.
         runs = next((p for p in _executables(shlex.join(tokens)) if p not in _WRAPPERS - {"sudo"}), None)
-        if runs in CONTAINER_TOOLS | {"sudo"}:
+        named = [t for t in tokens if t.rsplit("/", 1)[-1] == runs]
+        if runs in CONTAINER_TOOLS | {"sudo"} and named and "/" not in named[0]:  # `/workspace/docker` could exist
             absent = True
             continue
         # Only programs that never write, with nothing flagged in their arguments (not `find`, which can -delete).
