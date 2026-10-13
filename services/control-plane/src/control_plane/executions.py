@@ -162,6 +162,8 @@ class Executions:
         elif req.provider not in (None, "none"):
             raise BadRequest(f"{role.value} executions do not use a provider")
         provider = req.provider if role in AGENT_ROLES else None
+        if provider and req.prompt and req.model is None and self.ctx.agents is not None:
+            req.model = self.ctx.agents.model_for(uow, provider)
         if provider:
             from .agents import paused  # a person paused this agent in the Dashboard: no new execution (launches queue)
             if provider in paused(uow, self.ctx.provider_identity) and not hold_if_paused:

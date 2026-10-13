@@ -147,6 +147,10 @@ class Decision(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
 
 
+class AgentModelUpdate(BaseModel):
+    model: str | None = Field(default=None, max_length=100)
+
+
 class CreateExecution(BaseModel):
     role: Literal["ORCHESTRATOR", "DEVELOPER", "REVIEWER", "TESTER", "BROWSER"]
     prompt: str | None = Field(default=None, min_length=1, max_length=100_000,
@@ -810,6 +814,11 @@ def create_app(services: Services) -> FastAPI:
     def agents_view(_: Identity = Depends(identity)) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
             return jsonable({"agents": services.agents.view(uow)})
+
+    @app.post("/v1/agents/{provider}/model")
+    def agent_model(provider: str, body: AgentModelUpdate, who: Principal = Depends(principal)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return jsonable(services.agents.set_model(uow, provider, body.model, principal=who))
 
     @app.post("/v1/agents/{provider}/{verb}")
     def agents_action(provider: str, verb: str, who: Principal = Depends(principal)) -> dict[str, Any]:

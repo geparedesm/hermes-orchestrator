@@ -121,6 +121,15 @@ def agents() -> Any:
     return _call(_api().agents)
 
 
+class AgentModelBody(BaseModel):
+    model: str | None = Field(default=None, max_length=100)
+
+
+@router.post("/agents/{provider}/model")
+def agent_model(provider: str, body: AgentModelBody) -> Any:
+    return _call(_api().set_agent_model, provider, body.model)
+
+
 @router.post("/agents/{provider}/{verb}")
 def agent_action(provider: str, verb: str) -> Any:
     if verb not in ("pause", "resume"):

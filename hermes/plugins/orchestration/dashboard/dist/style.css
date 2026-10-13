@@ -397,6 +397,9 @@
 .orch-agentcard-head { display: flex; align-items: center; gap: 0.55rem; }
 .orch-agentcard-head strong { font-size: 1rem; }
 .orch-agentcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.orch-input { box-sizing: border-box; width: 100%; margin-top: 0.35rem; padding: 0.45rem 0.55rem; border: 1px solid var(--o-border); border-radius: 5px; background: var(--o-bg); color: var(--o-text); font: inherit; }
+.orch-select { appearance: auto; }
+.orch-agent-auth { margin: 10px 0; }
 .orch-agentcard-add { border-style: dashed; background: transparent; justify-content: center; }
 .orch-agentcard-addbtn { border: 0; background: transparent; color: var(--o-muted); font: inherit; cursor: pointer; display: flex;
   flex-direction: column; align-items: center; gap: 0.4rem; padding: 1rem; }

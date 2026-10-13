@@ -8,6 +8,7 @@ last run: the view says how old it is, and a window whose reset time has passed 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 from ho_core.adapters import ADAPTERS
@@ -15,9 +16,11 @@ from ho_core.adapters import ADAPTERS
 from .auth import Principal
 from .context import Context, UnitOfWork
 from .db import Row
-from .errors import Forbidden, NotFound
+from .errors import BadRequest, Forbidden, NotFound
 from .events import record_event
 from .executions import ACTIVE
+
+_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,99}$")
 
 
 def record_usage(uow: UnitOfWork, execution: Row, rate_limits: list[dict[str, Any]]) -> None:
@@ -63,16 +66,60 @@ class Agents:
                 "observed_at": r["observed_at"], "reset": reset}
         uow.cur.execute("SELECT DISTINCT provider FROM executions WHERE failure_class = 'QUOTA' AND ended_at > now() - interval '30 minutes'")
         limited = {r["provider"] for r in uow.cur.fetchall()}
+        uow.cur.execute("SELECT provider, model, updated_at FROM provider_models")
+        models = {r["provider"]: {"model": r["model"], "updated_at": r["updated_at"]} for r in uow.cur.fetchall()}
+        # Model identifiers come from provider usage records, so the dashboard has no baked-in catalog.
+        uow.cur.execute("SELECT provider, units->>'model' AS model FROM usage_records WHERE units ? 'model'")
+        observed_models: dict[str, set[str]] = {}
+        for row in uow.cur.fetchall():
+            model = row["model"]
+            if model and model != "unknown" and _MODEL.fullmatch(model):
+                observed_models.setdefault(row["provider"], set()).add(model)
         out = []
         for provider in sorted(ADAPTERS):
             windows = usage.get(provider, {})
-            status = ("paused" if provider in off else "login_needed" if login.get(provider) == "AUTH_REQUIRED"
+            status = ("paused" if provider in off else "login_needed" if login.get(provider, "UNKNOWN") != "READY"
                       else "limited" if provider in limited
                       else "near_limit" if any(w["used_percent"] >= 80 for w in windows.values()) else "available")
+            choices = set(observed_models.get(provider, set()))
+            configured = models.get(provider, {}).get("model")
+            if configured:
+                choices.add(configured)
             out.append({"provider": provider, "identity": identity, "login": login.get(provider, "UNKNOWN"),
                         "enabled": provider not in off, "status": status, "running": running.get(provider, 0),
-                        "session": windows.get("session"), "week": windows.get("week")})
+                        "session": windows.get("session"), "week": windows.get("week"),
+                        "model": models.get(provider, {}).get("model"),
+                        "model_updated_at": models.get(provider, {}).get("updated_at"),
+                        "model_options": [{"id": value, "source": "provider_usage" if value in observed_models.get(provider, set()) else "configured"}
+                                          for value in sorted(choices)],
+                        "model_catalog_status": "OBSERVED" if observed_models.get(provider) else "UNAVAILABLE"})
         return out
+
+    def model_for(self, uow: UnitOfWork, provider: str) -> str | None:
+        uow.cur.execute("SELECT model FROM provider_models WHERE provider = %s", (provider,))
+        row = uow.cur.fetchone()
+        return row["model"] if row else None
+
+    def set_model(self, uow: UnitOfWork, provider: str, model: str | None, *, principal: Principal) -> dict[str, Any]:
+        if principal.value not in self.ctx.platform["platform"]["approvers"]:
+            raise Forbidden(f"{principal.value} may not change agent models")
+        if provider not in ADAPTERS:
+            raise NotFound(f"no agent {provider!r}")
+        if model is not None and not _MODEL.fullmatch(model):
+            raise BadRequest("invalid model identifier")
+        if model:
+            uow.cur.execute("INSERT INTO provider_models (provider, model, updated_by) VALUES (%s, %s, %s) "
+                            "ON CONFLICT (provider) DO UPDATE SET model = EXCLUDED.model, updated_by = EXCLUDED.updated_by, updated_at = now()",
+                            (provider, model, principal.value))
+            record_event(uow.cur, "AGENT_MODEL_CHANGED", actor=principal.value,
+                         summary=f"{provider} default model changed by {principal.value}",
+                         data={"provider": provider, "model": model}, pending=uow.events)
+        else:
+            uow.cur.execute("DELETE FROM provider_models WHERE provider = %s", (provider,))
+            record_event(uow.cur, "AGENT_MODEL_RESET", actor=principal.value,
+                         summary=f"{provider} default model reset by {principal.value}",
+                         data={"provider": provider}, pending=uow.events)
+        return next(a for a in self.view(uow) if a["provider"] == provider)
 
     def set_enabled(self, uow: UnitOfWork, provider: str, enabled: bool, *, principal: Principal) -> dict[str, Any]:
         # Which agents may work is a person's decision (AD-10): only approvers may pause or resume one.

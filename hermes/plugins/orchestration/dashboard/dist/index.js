@@ -533,7 +533,7 @@
     return "hsl(" + n + ", 55%, 62%)";
   }
   const AGENT_STATUS = { available: ["Available", "good"], near_limit: ["Near limit", "warn"], limited: ["Limited", "bad"],
-    paused: ["Paused", "muted"], login_needed: ["Log in needed", "bad"] };
+    paused: ["Paused", "muted"], login_needed: ["Authentication needed", "bad"] };
   function resetIn(value) {
     if (!value) return null;
     const ms = new Date(value).getTime() - Date.now();
@@ -572,8 +572,7 @@
           h("span", { className: cx("orch-agentline-pct", tone && "orch-text-" + tone) }, label),
           s && !s.reset ? h("span", { className: "orch-agentline-reset" }, "↻ " + resetIn(s.resets_at)) : null);
       }),
-      h("button", { type: "button", className: "orch-agentline-add", title: "Connect an agent", "aria-label": "Connect an agent",
-        onClick: function () { props.go("system"); } }, h(Icon, { name: "plus", size: 14 })));
+      );
   }
 
   function UsageMeter(props) {
@@ -590,11 +589,20 @@
     const a = props.agent;
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
+    const [model, setModel] = useState(a.model || "");
+    const [savingModel, setSavingModel] = useState(false);
     const st = AGENT_STATUS[a.status] || [a.status, "muted"];
+    const modelOptions = a.model_options || [];
+    const authReady = a.login === "READY";
     function toggle() {
       setBusy(true); setError(null);
       post("/agents/" + a.provider + "/" + (a.enabled ? "pause" : "resume"), {}).then(props.done)
         .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(false); });
+    }
+    function saveModel() {
+      setSavingModel(true); setError(null);
+      post("/agents/" + a.provider + "/model", { model: model.trim() || null }).then(props.done)
+        .catch(function (e) { setError(message(e)); }).finally(function () { setSavingModel(false); });
     }
     const seen = (a.session || a.week || {}).observed_at;
     return h("article", { className: "orch-agentcard" },
@@ -603,12 +611,23 @@
         h("strong", null, capital(a.provider)),
         h("span", { className: "orch-muted orch-small" }, a.running ? a.running + " running" : "idle"),
         h(Pill, { tone: st[1], className: "orch-right" }, st[0])),
-      h(UsageMeter, { label: "Session", window: a.session, agent: a.provider }),
-      h(UsageMeter, { label: "This week", window: a.week, agent: a.provider }),
-      h("div", { className: "orch-agentcard-foot" },
-        h("span", { className: "orch-muted orch-small" }, seen ? "Updated " + ago(seen) + ", when it last worked" : "Usage appears after its first run"),
-        h(Button, { small: true, icon: a.enabled ? "pause" : "play", disabled: busy, onClick: toggle,
-          title: a.enabled ? "New work goes to the other agents; running work finishes; tasks it leads wait until you resume it" : "Give it new work again" }, a.enabled ? "Pause" : "Resume")),
+      !authReady ? h("div", { className: "orch-alert orch-agent-auth" },
+        "No hay una sesión verificada. Ejecuta make auth-" + a.provider + " y vuelve a cargar el dashboard.") : null,
+      authReady ? h("div", { className: "orch-stack orch-agent-controls" },
+        h(UsageMeter, { label: "Session", window: a.session, agent: a.provider }),
+        h(UsageMeter, { label: "This week", window: a.week, agent: a.provider }),
+        h("div", { className: "orch-agentcard-foot" },
+          h("span", { className: "orch-muted orch-small" }, seen ? "Updated " + ago(seen) + ", when it last worked" : "Usage appears after its first run"),
+          h(Button, { small: true, icon: a.enabled ? "pause" : "play", disabled: busy, onClick: toggle,
+            title: a.enabled ? "New work goes to the other agents; running work finishes; tasks it leads wait until you resume it" : "Give it new work again" }, a.enabled ? "Pause" : "Resume")),
+        h("label", { className: "orch-small orch-muted" }, "Default model",
+          modelOptions.length ? h("select", { className: "orch-input orch-select", value: model, onChange: function (e) { setModel(e.target.value); }, disabled: savingModel },
+            h("option", { value: "" }, "Provider default"), modelOptions.map(function (option) {
+              return h("option", { key: option.id, value: option.id }, option.id);
+            })) : h("input", { className: "orch-input", value: model, placeholder: "Provider default", onChange: function (e) { setModel(e.target.value); },
+              onKeyDown: function (e) { if (e.key === "Enter") saveModel(); }, disabled: savingModel })),
+        h("div", { className: "orch-muted orch-small" }, a.model_catalog_status === "OBSERVED" ? "Models reported by completed runs" : "Model catalog unavailable until this agent reports a model"),
+        h(Button, { small: true, kind: "primary", disabled: savingModel || model === (a.model || "") , onClick: saveModel }, savingModel ? "Saving…" : "Save model")) : null,
       error ? h("div", { className: "orch-alert" }, error) : null);
   }
   function ConnectAgent() {
@@ -936,8 +955,7 @@
         h("div", { className: "orch-section-head" }, h("div", null, h("h2", null, "Agents"),
           h("p", { className: "orch-muted" }, "Usage of each plan. When a limit is reached, new work waits and resumes on its own after the reset."))),
         h("div", { className: "orch-agentcards" },
-          agents.data.agents.map(function (a) { return h(AgentCard, { key: a.provider, agent: a, done: agents.reload }); }),
-          h(ConnectAgent)),
+          agents.data.agents.map(function (a) { return h(AgentCard, { key: a.provider, agent: a, done: agents.reload }); })),
         h("div", { className: "orch-card" },
           h("header", { className: "orch-card-head" }, h("h3", null, "Activity"),
             h("div", { className: "orch-card-action orch-segments" }, [["24_hours", "24 h"], ["7_days", "7 days"]].map(function (x) {

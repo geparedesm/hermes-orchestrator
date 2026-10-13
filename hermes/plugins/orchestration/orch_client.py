@@ -189,6 +189,11 @@ class TaskApi:
             raise ApiError(400, "invalid agent action")
         return self.call("POST", f"/v1/agents/{provider}/{verb}", {})
 
+    def set_agent_model(self, provider: str, model: str | None) -> Any:
+        if not re.match(r"^[a-z][a-z0-9-]{0,30}$", provider or ""):
+            raise ApiError(400, "invalid agent")
+        return self.call("POST", f"/v1/agents/{provider}/model", {"model": model})
+
     def decide(self, approval_id: str, approve: bool, note: str | None = None) -> Any:
         body: dict[str, Any] = {"decision": "APPROVE" if approve else "REJECT"}
         if note:
