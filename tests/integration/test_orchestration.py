@@ -753,3 +753,35 @@ def test_a_lost_integration_review_is_requested_again(api, services, agents, rep
     services.orchestration._integration_review_later(task, again["provider"])  # a concurrent path asks again
     services.orchestration.heal_reviews()
     assert [r["id"] for r in active(services, task, "REVIEWER")] == [again["id"]]  # still one reviewer
+
+
+def test_accepted_work_still_integrates_after_a_resolution_that_could_not_start(api, services, agents, repo, task):
+    """T-53: the resolution of a conflict was refused for budget, yet its workspace swap was kept; once the budget was
+    raised, integration found "no committed work" although both subtasks were accepted."""
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "print('task')\n"})
+    commit(repo, "the person writes the same file", {"a.py": "print('person')\n"})
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{agent_launches}', to_jsonb((consumed->>'agent_launches')::int)) "
+      "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # no room left: the review already started
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])  # accepted -> integrate -> conflict
+    assert "INTEGRATION_CONFLICT" in [r["type"] for r in q(services, "SELECT type FROM events e JOIN tasks t ON t.id = e.task_id "
+                                                           "WHERE t.key = %s", task)]
+    rows = q(services, "SELECT kind, status FROM workspaces w JOIN tasks t ON t.id = w.task_id WHERE t.key = %s "
+             "AND w.kind <> 'VERIFICATION'", task)
+    assert rows == [{"kind": "DEVELOPMENT", "status": "ACTIVE"}]  # the refused resolution swapped nothing
+    q(services, "UPDATE budgets SET limits = jsonb_set(limits, '{agent_launches}', '40') "
+      "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", task)  # stand-in: the person raises the budget
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.RUNNING, trigger=Trigger.USER,
+                                  actor="test", reason="budget raised")
+    with services.ctx.unit_of_work() as uow:  # the next attempt reclaims the clone the refused one left behind
+        services.orchestration._resolve_conflict(uow, services.tasks.get(uow, task, lock=True),
+                                                 {"conflicting_ref": "refs/hermes/workspaces/t-1-1a1", "conflicts": ["a.py"]})
+    assert [r["status"] for r in q(services, "SELECT status FROM workspaces WHERE kind = 'CONFLICT'")] == ["ACTIVE"]
+    assert "WORKSPACE_RECLAIMED" in [r["type"] for r in q(services, "SELECT type FROM events")]
+    [resolver] = active(services, task, "DEVELOPER")
+    with services.ctx.unit_of_work() as uow:  # the resolver commits nothing: the accepted work is integrated anyway
+        uow.cur.execute("UPDATE executions SET state = 'SUCCEEDED', ended_at = now() WHERE id = %s", (resolver["id"],))
+        result = services.git.integrate(uow, task, retest=False)
+    assert not result["ok"] and result["conflicts"] == ["a.py"]  # the real conflict, not "no committed work"
