@@ -235,7 +235,9 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     other = [r for r in reasons if not r.startswith("policy violations")]
     blocked = bool(count or denied) and unproven == 0  # policy denials were refused, so had no effect
     tests, review_rows = _checks(uow, tid, subject.get("commit"))
-    checked = tests == "PASSED" and bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
+    # Every other gate requirement passes too (reviewer coverage, CI, requirements met): only the exception is left.
+    checked = (tests == "PASSED" and bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
+               and gate is not None and not failing)
     words = sorted({c["meaning"] for c in commands})
     example = f" (for example, {words[0]})" if words else ""
     if other:
