@@ -1583,7 +1583,8 @@ class Orchestration:
         row = uow.cur.fetchone()
         provider = (row or {}).get("developer_provider") or self._route(uow, task, "IMPLEMENT")
         try:
-            resolved = self.git.resolve_conflicts(uow, task["key"], provider=provider, principal=ORCHESTRATOR)
+            with uow.cur.connection.transaction():  # a launch refused (budget, capacity) swaps no workspace (T-53)
+                resolved = self.git.resolve_conflicts(uow, task["key"], provider=provider, principal=ORCHESTRATOR)
             uow.cur.execute("UPDATE executions SET spec = jsonb_set(spec, '{purpose}', %s) WHERE id = %s",
                             (jsonb({"kind": "RESOLVE", "ref": ref}), resolved["execution"]))
         except ApiError as exc:

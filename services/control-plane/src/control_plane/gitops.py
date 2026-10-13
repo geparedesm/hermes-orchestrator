@@ -283,8 +283,15 @@ class GitChanges:
         changes = self._changes(uow, task, lock=True)
         if changes is None:
             raise Conflict(f"{task_key} has no workspace yet")
-        heads = [f"refs/hermes/workspaces/{w['name']}" for w in self._workspaces(uow, task)
-                 if w["head_sha"] and w["head_sha"] != w["base_sha"]]
+        # Accepted work is always integrated, also when a conflict resolution replaced its workspace and never
+        # committed (or never started: T-53); a resolution that did commit contains it, and integration skips heads
+        # contained in another head.
+        uow.cur.execute("SELECT w.* FROM workspaces w JOIN subtasks s ON s.workspace_id = w.id WHERE s.task_id = %s "
+                        "AND s.state IN ('ACCEPTED', 'INTEGRATED') AND w.status = 'RETAINED' ORDER BY w.created_at",
+                        (task["id"],))
+        retained = uow.cur.fetchall()
+        workspaces = self._workspaces(uow, task) + retained
+        heads = [f"refs/hermes/workspaces/{w['name']}" for w in workspaces if w["head_sha"] and w["head_sha"] != w["base_sha"]]
         if not heads:
             raise Conflict(f"{task_key} has no committed work to integrate")
         result = self.ctx.git.integrate(project["relative_path"], task_key, changes["target_branch"], heads)
@@ -326,8 +333,9 @@ class GitChanges:
         suffix = f"resolve{uow.cur.fetchone()['n'] + 1}"  # type: ignore[index]
         name = f"{task_key.lower()}-{suffix}"
         branch = task_branch(self._policy(self._context(uow, task_key)[2])["prefix"], task_key, suffix)
-        prepared = self.ctx.git.conflict_workspace(project["relative_path"], name, branch, changes["target_branch"],  # type: ignore[index]
-                                                   conflicts["ref"])
+        # Reclaims a clone left by a launch that was rolled back (refused for budget or capacity: T-53).
+        prepared = self._prepare(uow, task, project, name, lambda: self.ctx.git.conflict_workspace(
+            project["relative_path"], name, branch, changes["target_branch"], conflicts["ref"]))  # type: ignore[index]
         # Work already integrated through this workspace replaces the conflicting one.
         uow.cur.execute("UPDATE workspaces SET status = 'RETAINED' WHERE task_id = %s AND name = %s",
                         (task["id"], conflicts["ref"].rsplit("/", 1)[-1]))
