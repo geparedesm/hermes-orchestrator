@@ -30,6 +30,7 @@ from ho_core.routing import ProviderStats, route
 from ho_core.statemachine import WAITING_STATES, Trigger
 
 from . import budgets, manifests, recovery, testenv
+from .agents import paused
 from .approvals import Approvals
 from .auth import Principal
 from .budgets import BudgetExhausted
@@ -185,6 +186,7 @@ class Orchestration:
         blocked = {r["provider"] for r in uow.cur.fetchall() if r["status"] == "AUTH_REQUIRED"}
         uow.cur.execute("SELECT DISTINCT provider FROM executions WHERE failure_class = 'QUOTA' AND ended_at > now() - interval '30 minutes'")
         blocked |= {r["provider"] for r in uow.cur.fetchall()}
+        blocked |= paused(uow, self.ctx.provider_identity)  # a person paused it in the Dashboard
         return [p for p in ("claude", "codex") if p not in blocked]
 
     def _route(self, uow: UnitOfWork, task: Row, kind: str, *, suggested: str | None = None, exclude: tuple[str, ...] = ()) -> str | None:

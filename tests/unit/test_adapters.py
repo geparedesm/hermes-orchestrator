@@ -261,3 +261,36 @@ def test_model_records_survive_resumed_sessions_and_malformed_reports():
     b = OutputBundle({"ho/events.jsonl": "\n".join(json.dumps(e) for e in events).encode()})
     usage = ClaudeAdapter().collect_usage(b).units
     assert usage["model"] == "claude-sonnet-5" and "models" not in usage
+
+
+def test_claude_keeps_only_the_plans_usage_windows_from_rate_limit_events():
+    import time
+
+    reset = int(time.time()) + 3600
+    events = "\n".join(json.dumps(e) for e in [
+        {"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "rateLimitType": "five_hour", "utilization": 0.3,
+                                                         "resetsAt": reset}, "session_id": "s"},
+        {"type": "rate_limit_event", "rate_limit_info": {"status": "allowed_warning", "rateLimitType": "five_hour",
+                                                         "utilization": 0.42, "resetsAt": reset,
+                                                         "unifiedWindows": {"seven_day": {"utilization": 0.18, "resetsAt": reset + 86400}}}},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "seven_day_opus", "utilization": 0.9, "resetsAt": reset}},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "five_hour", "utilization": "lots", "resetsAt": reset}},
+        {"type": "rate_limit_event", "rate_limit_info": {"rateLimitType": "seven_day", "utilization": 0.5, "resetsAt": 1}},
+    ])
+    result = ClaudeAdapter().collect_result(bundle(events_jsonl=events.encode()))
+    assert result.rate_limits == [{"window": "session", "used_percent": 42.0, "resets_at": reset},
+                                  {"window": "week", "used_percent": 18.0, "resets_at": reset + 86400}]
+
+
+def test_codex_reads_the_usage_the_runner_copied_from_the_session_log():
+    import time
+
+    now = int(time.time())
+    limits = {"primary": {"used_percent": 88.0, "window_minutes": 300, "resets_at": now + 1380, "resets_in_seconds": None},
+              "secondary": {"used_percent": 61.5, "window_minutes": 10080, "resets_at": None, "resets_in_seconds": 3600},
+              "observed_at": now}
+    result = CodexAdapter().collect_result(bundle("", **{"rate-limits.json": json.dumps(limits).encode()}))
+    assert result.rate_limits == [{"window": "session", "used_percent": 88.0, "resets_at": now + 1380},
+                                  {"window": "week", "used_percent": 61.5, "resets_at": now + 3600}]
+    for broken in (b"not json", b"[]", json.dumps({"primary": {"used_percent": 400, "window_minutes": 300, "resets_at": now}}).encode()):
+        assert CodexAdapter().collect_result(bundle("", **{"rate-limits.json": broken})).rate_limits == []

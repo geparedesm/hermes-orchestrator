@@ -116,6 +116,18 @@ def workers() -> Any:
     return _call(_api().workers)
 
 
+@router.get("/agents")
+def agents() -> Any:
+    return _call(_api().agents)
+
+
+@router.post("/agents/{provider}/{verb}")
+def agent_action(provider: str, verb: str) -> Any:
+    if verb not in ("pause", "resume"):
+        raise HTTPException(status_code=404, detail="unknown action")
+    return _call(_api().agent_action, provider, verb)
+
+
 @router.get("/projects/{slug}/children")
 def children(slug: str) -> Any:
     if not re.match(_SLUG, slug):

@@ -251,3 +251,38 @@ def test_secrets_are_granted_by_reference_only(api, services, projects_root, age
     assert spec["secret_env"] == ["demo/test/NPM_TOKEN"]
     reviewer = run_agent(api, key, role="REVIEWER", capabilities={"workspace": "READ"}, secrets=["TEST_DATABASE_URL"])
     assert api.get(f"/v1/executions/{reviewer.json()['id']}").json()["grant"]["capabilities"]["secrets"] == []
+
+
+def test_the_dashboard_shows_each_agents_plan_usage_and_a_person_can_pause_it(api, services, agents, task):
+    """docs/design/agents-dashboard.md: usage from the CLI's own events; pausing is a person's decision."""
+    import time
+
+    reset = int(time.time()) + 3600
+    limits = {"primary": {"used_percent": 88.0, "window_minutes": 300, "resets_at": reset},
+              "secondary": {"used_percent": 61.0, "window_minutes": 10080, "resets_at": reset + 86400}, "observed_at": int(time.time()),
+              "reasoning": "never kept"}
+    execution = run_agent(api, task).json()["id"]
+    agents.finish_agent(execution, (FIXTURES / "codex-success.jsonl").read_bytes(),
+                        extra={"ho/rate-limits.json": json.dumps(limits).encode()})
+    services.scheduler.run_once()
+    view = {a["provider"]: a for a in api.get("/v1/agents").json()["agents"]}
+    codex = view["codex"]
+    assert codex["session"]["used_percent"] == 88.0 and codex["week"]["used_percent"] == 61.0 and codex["status"] == "near_limit"
+    assert view["claude"]["session"] is None and view["claude"]["status"] in ("available", "login_needed")
+    with services.ctx.db.transaction() as cur:  # the raw file is never an artifact; only the numbers are kept
+        cur.execute("SELECT count(*) AS n FROM artifacts WHERE path LIKE '%%rate-limits%%'")
+        assert cur.fetchone()["n"] == 0
+
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+
+    assert api.post("/v1/agents/codex/pause", {}, token=PLUGIN_TOKEN, principal="telegram:12345").status_code == 403
+    paused = api.post("/v1/agents/codex/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    assert paused.status_code == 200 and paused.json()["status"] == "paused" and not paused.json()["enabled"]
+    from control_plane.agents import paused as paused_providers
+
+    with services.ctx.unit_of_work() as uow:  # what routing (Orchestration._available) skips: new work goes elsewhere
+        assert paused_providers(uow, services.ctx.provider_identity) == {"codex"}
+    api.post("/v1/agents/codex/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    with services.ctx.unit_of_work() as uow:
+        assert paused_providers(uow, services.ctx.provider_identity) == set()
+    assert api.post("/v1/agents/gemini/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 404

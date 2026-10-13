@@ -18,6 +18,7 @@ from ho_core.enums import Autonomy
 from ho_core.policy.engine import decide_command
 from pydantic import BaseModel, Field
 
+from .agents import Agents
 from .approvals import Approvals
 from .auth import PRINCIPAL_HEADER, Authenticator, Identity, Principal
 from .context import Context, UnitOfWork
@@ -66,6 +67,7 @@ class Services:
     maintenance: Maintenance | None = None
     updates: Updates | None = None
     children: Children | None = None
+    agents: Agents | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None,
@@ -99,7 +101,8 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     children = Children(ctx, projects, approvals)
     scheduler.hooks.append(children.sync)
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
-                    verifications, reviews, gate, orchestrator, recovery, outbox, maintenance, Updates(ctx, approvals), children)
+                    verifications, reviews, gate, orchestrator, recovery, outbox, maintenance, Updates(ctx, approvals), children,
+                    Agents(ctx))
 
 
 def _request_merge_when_ready(git: GitChanges, orchestrator: Any = None) -> Any:
@@ -289,9 +292,11 @@ def create_app(services: Services) -> FastAPI:
             out = []
             for row in rows:
                 config = services.projects.active_config(uow, row["id"])
-                settings = ((config or {}).get("effective_config") or {}).get("children")
+                effective = (config or {}).get("effective_config") or {}
+                settings = effective.get("children")
                 out.append({**project_view(row), "parent": slugs.get(row.get("parent_project_id")),
-                            "children": {"label": settings.get("label") or "child project"} if settings else None})
+                            "children": {"label": settings.get("label") or "child project"} if settings else None,
+                            "toolchain": list((effective.get("toolchain") or {}).get("profiles") or [])})
             return {"projects": out}
 
     @app.get("/v1/projects/{slug}/children")
@@ -800,6 +805,18 @@ def create_app(services: Services) -> FastAPI:
             queue = [e.as_json() for e in services.scheduler.queue(uow)]
             health = services.recovery.health.summary(uow) if services.recovery else {}
             return jsonable(dashboard.summary(uow, queue, health, ctx.platform.get("project_defaults") or {}))
+
+    @app.get("/v1/agents")
+    def agents_view(_: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return jsonable({"agents": services.agents.view(uow)})
+
+    @app.post("/v1/agents/{provider}/{verb}")
+    def agents_action(provider: str, verb: str, who: Principal = Depends(principal)) -> dict[str, Any]:
+        if verb not in ("pause", "resume"):
+            raise NotFound(f"unknown action {verb!r}")
+        with ctx.unit_of_work() as uow:
+            return jsonable(services.agents.set_enabled(uow, provider, verb == "resume", principal=who))
 
     @app.get("/v1/dashboard/board")
     def dashboard_board(_: Identity = Depends(identity)) -> dict[str, Any]:

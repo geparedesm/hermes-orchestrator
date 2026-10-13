@@ -135,6 +135,8 @@ class ExecutionResult:
     high_risk_commands: int = 0
     credential_refreshed: bool = False
     structured: dict[str, Any] | None = None  # the validated structured answer (any result schema)
+    # The provider plan's usage windows seen in this run: [{window: session|week, used_percent, resets_at (epoch s)}].
+    rate_limits: list[dict[str, Any]] = field(default_factory=list)
     events: list[AdapterEvent] = field(default_factory=list)
 
     def as_json(self) -> dict[str, Any]:
@@ -266,6 +268,26 @@ def command_event(event_type: str, command: str, **extra: Any) -> AdapterEvent:
         "blocked": classification.command_class == CommandClass.HIGH_RISK and provably_blocked(command),
         **extra,
     })
+
+
+USAGE_WINDOWS = ("session", "week")
+
+
+def usage_window(window: str, used_percent: Any, resets_at: Any, *, now: float | None = None) -> dict[str, Any] | None:
+    """One plan usage window, kept only when every value is a plain, plausible number (invariant 4: nothing else from
+    the provider is kept): a percentage from 0 to 100 and a reset time within 31 days."""
+    import time
+
+    if window not in USAGE_WINDOWS or isinstance(used_percent, bool) or isinstance(resets_at, bool):
+        return None
+    try:
+        percent, reset = float(used_percent), int(resets_at)
+    except (TypeError, ValueError):
+        return None
+    current = now if now is not None else time.time()
+    if not (0 <= percent <= 100) or not (current - 86400 <= reset <= current + 31 * 86400):
+        return None
+    return {"window": window, "used_percent": round(percent, 1), "resets_at": reset}
 
 
 def normalize_structured(provider: str, value: Any, result: ExecutionResult, schema: str = RESULT_SCHEMA) -> bool:

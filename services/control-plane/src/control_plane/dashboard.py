@@ -112,6 +112,7 @@ def summary(uow: UnitOfWork, queue: list[dict[str, Any]], health: dict[str, Any]
         "health": health,
         "pending_notifications": pending_notifications,
         "recent_activity": recent_activity(uow),
+        "decided_recently": decided_recently(uow),
     }
 
 
@@ -121,6 +122,14 @@ def _with_plain(approval: Row, uow: UnitOfWork | None = None, defaults: dict[str
     if uow is not None and approval.get("state", "PENDING") == "PENDING":
         out["details"] = approval_details.details(uow, approval, defaults)
     return out
+
+
+def decided_recently(uow: UnitOfWork, limit: int = 8) -> list[dict[str, Any]]:
+    """The person's latest decisions (Approvals tab): what, on which task, approved or not, and when."""
+    uow.cur.execute("SELECT a.action, a.summary, a.decided_at, a.decided_by, a.state = 'REJECTED' AS rejected, t.key AS task "
+                    "FROM approvals a LEFT JOIN tasks t ON t.id = a.task_id WHERE a.state IN ('APPROVED', 'REJECTED', 'CONSUMED') "
+                    "AND a.decided_at IS NOT NULL ORDER BY a.decided_at DESC LIMIT %s", (limit,))
+    return uow.cur.fetchall()
 
 
 def recent_activity(uow: UnitOfWork, limit: int = 25) -> list[dict[str, Any]]:
@@ -143,7 +152,10 @@ def board(uow: UnitOfWork, finished_days: int = 7, finished_limit: int = 50) -> 
                 AND s.state IN ('ACCEPTED', 'INTEGRATED')) AS subtasks_done,
                (SELECT count(*) FROM approvals a WHERE a.task_id = t.id AND a.state = 'PENDING') AS pending_approvals,
                (SELECT count(*) FROM executions e WHERE e.task_id = t.id
-                AND e.state IN ('REQUESTED', 'STARTING', 'RUNNING', 'STOPPING')) AS running
+                AND e.state IN ('REQUESTED', 'STARTING', 'RUNNING', 'STOPPING')) AS running,
+               (SELECT e.provider FROM executions e WHERE e.task_id = t.id AND e.role IN ('DEVELOPER', 'REVIEWER')
+                AND e.provider IS NOT NULL ORDER BY (e.state IN ('REQUESTED', 'STARTING', 'RUNNING', 'STOPPING')) DESC,
+                e.created_at DESC LIMIT 1) AS agent
         FROM tasks t JOIN projects p ON p.id = t.project_id
         WHERE t.id IN (SELECT id FROM tasks WHERE state <> ALL(%s))
            OR t.id IN (SELECT id FROM tasks WHERE state = ANY(%s) AND updated_at > now() - make_interval(days => %s)

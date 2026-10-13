@@ -705,6 +705,9 @@ class Executions:
         )
         if result.ok:
             self._set_credential(uow, row["provider"], row["provider_identity"] or "default", "READY", None)
+        if result.rate_limits:
+            from .agents import record_usage  # the plan's usage windows the CLI reported (Dashboard agents)
+            record_usage(uow, row, result.rate_limits)
         if result.high_risk_commands:
             # What the person deciding a gate exception needs (T-55): every rule and how many commands may have had an
             # effect, from all of them; the commands themselves (redacted, cut short) only as a bounded list to show.

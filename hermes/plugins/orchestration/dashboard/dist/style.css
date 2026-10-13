@@ -13,6 +13,8 @@
   --o-warn: var(--color-warning, #d4a020);
   --o-bad: var(--color-destructive, #d14a4a);
   --o-info: var(--color-primary, #6ea8fe);
+  --o-accent: var(--color-ring, var(--o-primary));
+  --o-track: color-mix(in srgb, var(--o-fg) 10%, transparent);
   --o-radius: var(--radius, 0.6rem);
   --o-soft: color-mix(in srgb, var(--o-fg) 6%, transparent);
   color: var(--o-fg);
@@ -68,10 +70,10 @@
 .orch-search kbd { font-size: 0.72rem; border: 1px solid var(--o-border); border-radius: 0.3rem; padding: 0 0.35rem; }
 .orch-search-clear { border: 0; background: transparent; color: var(--o-muted); cursor: pointer; display: flex; padding: 0; }
 .orch-nav { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--o-border); overflow-x: auto; }
-.orch-nav-item { border: 0; background: transparent; color: var(--o-muted); font: inherit; font-weight: 550; padding: 0.55rem 0.85rem;
+.orch-nav-item { display: inline-flex; align-items: center; gap: 0.45rem; border: 0; background: transparent; color: var(--o-muted); font: inherit; font-weight: 550; padding: 0.55rem 0.85rem;
   cursor: pointer; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
 .orch-nav-item:hover { color: var(--o-fg); }
-.orch-nav-on { color: var(--o-fg); border-bottom-color: var(--o-primary); }
+.orch-nav-on { color: var(--o-fg); border-bottom-color: var(--o-accent); }
 .orch-badge { background: var(--o-warn); color: #111; border-radius: 999px; font-size: 0.7rem; font-weight: 700; padding: 0 0.42rem; line-height: 1.25rem; }
 .orch-count { font-size: 0.75rem; color: var(--o-muted); background: var(--o-soft); border-radius: 999px; padding: 0 0.45rem; line-height: 1.25rem; }
 
@@ -82,8 +84,8 @@
 .orch-btn:hover:not(:disabled) { background: var(--o-soft); }
 .orch-btn:disabled { opacity: 0.55; cursor: default; }
 .orch-btn-sm { padding: 0.28rem 0.6rem; font-size: 0.82rem; }
-.orch-btn-primary { background: var(--o-primary); border-color: var(--o-primary); color: var(--o-primary-fg); }
-.orch-btn-primary:hover:not(:disabled) { background: var(--o-primary); filter: brightness(1.08); }
+.orch-btn-primary { background: var(--o-accent); border-color: var(--o-accent); color: var(--o-primary-fg); }
+.orch-btn-primary:hover:not(:disabled) { background: var(--o-accent); filter: brightness(1.08); }
 .orch-btn-good { background: var(--o-good); border-color: var(--o-good); color: #fff; }
 .orch-btn-good:hover:not(:disabled) { background: var(--o-good); filter: brightness(1.08); }
 .orch-btn-bad { background: var(--o-bad); border-color: var(--o-bad); color: #fff; }
@@ -196,12 +198,13 @@
 
 /* ---- task rows, stepper, progress ---- */
 .orch-list { display: flex; flex-direction: column; }
-.orch-taskrow { display: flex; align-items: center; gap: 1rem; width: 100%; text-align: left; font: inherit; color: inherit; background: transparent;
-  border: 0; border-top: 1px solid var(--o-border); padding: 0.7rem 0.25rem; cursor: pointer; }
-.orch-taskrow:first-child { border-top: 0; }
+.orch-taskrow { display: flex; flex-direction: column; gap: 0.45rem; width: 100%; text-align: left; font: inherit; color: inherit;
+  background: var(--o-card); border: 1px solid var(--o-border); border-radius: var(--o-radius); padding: 0.7rem 0.85rem; cursor: pointer; }
+.orch-list .orch-taskrow + .orch-taskrow { margin-top: 0.5rem; }
+.orch-taskrow-title { flex: 1; font-weight: 550; }
 .orch-taskrow:hover { background: var(--o-soft); }
 .orch-taskrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
-.orch-taskrow-top { display: flex; gap: 0.5rem; min-width: 0; }
+.orch-taskrow-top { display: flex; gap: 0.5rem; min-width: 0; align-items: center; }
 .orch-taskrow-side { display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem; flex: none; width: 11rem; }
 .orch-stepper { list-style: none; display: flex; margin: 0; padding: 0; gap: 0; width: 100%; }
 .orch-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; position: relative; font-size: 0.75rem; color: var(--o-muted); }
@@ -354,9 +357,69 @@
 .orch-disclosure { align-self: flex-start; border: 0; background: transparent; color: var(--o-muted); font: inherit; font-size: 0.85rem; cursor: pointer; padding: 0; }
 .orch-disclosure:hover { color: var(--o-fg); }
 
+/* ---- shared header: agent usage line (docs/design/agents-dashboard.md, ui/hermes-dashboard.pen) ---- */
+.orch-nav { align-items: center; }
+.orch-agentline { margin-left: auto; display: flex; align-items: center; gap: 1.1rem; padding: 0 0.25rem 0.2rem; flex: none; }
+.orch-agentline-item { display: inline-flex; align-items: center; gap: 0.5rem; border: 0; background: transparent; color: var(--o-fg);
+  font: inherit; font-size: 0.82rem; cursor: pointer; padding: 0.2rem 0; }
+.orch-agentline-item:hover .orch-agentline-name { text-decoration: underline; }
+.orch-agentline-name { font-weight: 550; }
+.orch-agentline-track { width: 3.5rem; height: 0.25rem; border-radius: 1rem; background: var(--o-track); overflow: hidden; display: inline-block; }
+.orch-agentline-track span { display: block; height: 100%; border-radius: 1rem; }
+.orch-agentline-pct { color: var(--o-muted); font-variant-numeric: tabular-nums; }
+.orch-agentline-reset { color: color-mix(in srgb, var(--o-muted) 75%, transparent); }
+.orch-agentline-add { border: 0; background: transparent; color: var(--o-muted); cursor: pointer; display: flex; padding: 0.2rem; }
+.orch-agentline-add:hover { color: var(--o-fg); }
+.orch-agent-dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; display: inline-block; flex: none; }
+.orch-agenttag { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--o-muted); font-size: 0.78rem; white-space: nowrap; }
+.orch-text-good { color: var(--o-good); }
+.orch-text-bad { color: var(--o-bad); }
+
+/* ---- sections ---- */
+.orch-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+.orch-section-head h2 { margin: 0; font-size: 1.1rem; font-weight: 650; }
+.orch-section-head h3 { margin: 0; font-size: 0.98rem; font-weight: 650; }
+.orch-section-head p { margin: 0.2rem 0 0; }
+.orch-section-head .orch-link { border: 0; background: transparent; font: inherit; font-size: 0.85rem; cursor: pointer; color: var(--o-accent); }
+.orch-side-section { display: flex; flex-direction: column; gap: 0.75rem; }
+.orch-side { gap: 1.75rem; }
+.orch-segments { display: inline-flex; gap: 0.2rem; padding: 0.2rem; border-radius: 0.6rem; background: var(--o-card); border: 1px solid var(--o-border); align-self: flex-start; }
+.orch-segment { border: 0; background: transparent; color: var(--o-muted); font: inherit; font-size: 0.85rem; padding: 0.3rem 0.8rem; border-radius: 0.45rem; cursor: pointer; }
+.orch-segment-on { background: var(--o-soft); color: var(--o-fg); font-weight: 600; }
+.orch-decided { list-style: none; margin: 0; padding: 0; }
+.orch-decided li { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0; border-bottom: 1px solid var(--o-border); font-size: 0.86rem; }
+.orch-decided-text { flex: 1; min-width: 0; }
+
+/* ---- System: agents, activity, services, capacity ---- */
+.orch-agentcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1rem; }
+.orch-agentcard { background: var(--o-card); border: 1px solid var(--o-border); border-radius: var(--o-radius); padding: 0.9rem 1rem;
+  display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.orch-agentcard-head { display: flex; align-items: center; gap: 0.55rem; }
+.orch-agentcard-head strong { font-size: 1rem; }
+.orch-agentcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.orch-agentcard-add { border-style: dashed; background: transparent; justify-content: center; }
+.orch-agentcard-addbtn { border: 0; background: transparent; color: var(--o-muted); font: inherit; cursor: pointer; display: flex;
+  flex-direction: column; align-items: center; gap: 0.4rem; padding: 1rem; }
+.orch-agentcard-addbtn:hover { color: var(--o-fg); }
+.orch-code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.8rem; padding: 0.35rem 0.5rem; border-radius: 0.4rem; background: var(--o-soft) !important; }
+.orch-usage { display: flex; flex-direction: column; gap: 0.35rem; }
+.orch-usage-row { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.82rem; }
+.orch-usage-track { height: 0.35rem; border-radius: 1rem; background: var(--o-track); overflow: hidden; }
+.orch-usage-track > div { height: 100%; border-radius: 1rem; }
+.orch-usage-mini { width: 3.5rem; height: 0.25rem; display: inline-block; }
+.orch-grid-even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.orch-services { list-style: none; margin: 0; padding: 0; }
+.orch-services li { display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 1rem; border-bottom: 1px solid var(--o-border); min-width: 0; }
+.orch-services li:last-child { border-bottom: 0; }
+.orch-capacity-line { display: flex; align-items: center; gap: 1.5rem; }
+.orch-capacity-workers { flex: 1; display: flex; flex-direction: column; gap: 0.35rem; }
+.orch-system { gap: 2rem; }
+
 /* ---- small screens ---- */
 @media (max-width: 1100px) {
-  .orch-grid { grid-template-columns: minmax(0, 1fr); }
+  .orch-grid, .orch-grid-even { grid-template-columns: minmax(0, 1fr); }
+  .orch-nav { flex-wrap: wrap; }
+  .orch-agentline { margin-left: 0; width: 100%; padding: 0.4rem 0.25rem; flex-wrap: wrap; }
   .orch-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
@@ -367,4 +430,21 @@
   .orch-taskrow { flex-direction: column; align-items: stretch; }
   .orch-taskrow-side { width: 100%; align-items: stretch; }
   .orch-approval-grid, .orch-outcomes { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- Projects table ---- */
+.orch-ptable { padding: 0; overflow: hidden; }
+.orch-prow { display: grid; grid-template-columns: minmax(14rem, 2fr) 7rem 11rem 13rem 8rem 19rem; gap: 1rem; align-items: center;
+  padding: 0.8rem 1.1rem; border-bottom: 1px solid var(--o-border); font-size: 0.88rem; }
+.orch-prow:last-child { border-bottom: 0; }
+.orch-prow-head { font-size: 0.7rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--o-muted); padding: 0.6rem 1.1rem; }
+.orch-prow-name { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.orch-prow-child .orch-prow-name { padding-left: 1.6rem; }
+.orch-prow-actions { justify-content: flex-end; flex-wrap: nowrap; }
+.orch-ptable .orch-creations { padding: 0.5rem 1.1rem 0.8rem 2.8rem; border-bottom: 1px solid var(--o-border); }
+@media (max-width: 1100px) {
+  .orch-prow { grid-template-columns: minmax(0, 1fr) auto; }
+  .orch-prow > :nth-child(2), .orch-prow > :nth-child(4), .orch-prow > :nth-child(5) { display: none; }
+  .orch-prow-actions { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; }
+  .orch-prow-head { display: none; }
 }

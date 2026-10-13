@@ -785,3 +785,11 @@ def test_accepted_work_still_integrates_after_a_resolution_that_could_not_start(
         uow.cur.execute("UPDATE executions SET state = 'SUCCEEDED', ended_at = now() WHERE id = %s", (resolver["id"],))
         result = services.git.integrate(uow, task, retest=False)
     assert not result["ok"] and result["conflicts"] == ["a.py"]  # the real conflict, not "no committed work"
+
+
+def test_a_paused_agent_gets_no_new_work(api, services, agents, task):
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+
+    assert api.post("/v1/agents/codex/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 200
+    with services.ctx.unit_of_work() as uow:
+        assert services.orchestration._available(uow) == ["claude"]

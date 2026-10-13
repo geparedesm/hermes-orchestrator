@@ -41,6 +41,8 @@ from .base import (
     normalize_structured,
     result_schema,
     runner_state,
+    USAGE_WINDOWS,
+    usage_window,
 )
 
 _MODEL_USAGE_KEYS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")
@@ -127,6 +129,32 @@ class ClaudeAdapter:
 
     # ------------------------------------------------------------------ results
 
+    @staticmethod
+    def _rate_limits(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The plan's usage from `rate_limit_event`s (Claude Code 2.1.280 schema: rate_limit_info with status, resetsAt in
+        epoch seconds, rateLimitType five_hour or seven_day*, utilization as a fraction; unifiedWindows when present).
+        The last value per window wins."""
+        windows: dict[str, dict[str, Any]] = {}
+
+        def keep(kind: Any, utilization: Any, resets_at: Any) -> None:
+            window = "session" if kind == "five_hour" else "week" if kind == "seven_day" else None
+            if window is None or isinstance(utilization, bool) or not isinstance(utilization, (int, float)):
+                return
+            percent = utilization * 100 if utilization <= 1 else utilization  # a fraction in the CLI's schema
+            usage = usage_window(window, percent, resets_at)
+            if usage:
+                windows[window] = usage
+
+        for event in raw:
+            if event.get("type") != "rate_limit_event" or not isinstance(event.get("rate_limit_info"), dict):
+                continue
+            info = event["rate_limit_info"]
+            keep(info.get("rateLimitType"), info.get("utilization"), info.get("resetsAt"))
+            for kind, window in (info.get("unifiedWindows") or {}).items() if isinstance(info.get("unifiedWindows"), dict) else ():
+                if isinstance(window, dict):
+                    keep(kind, window.get("utilization"), window.get("resetsAt"))
+        return [windows[w] for w in USAGE_WINDOWS if w in windows]
+
     def collect_result(self, bundle: OutputBundle, schema: str = "agent-result") -> ExecutionResult:
         raw, final = self._events(bundle)
         result = ExecutionResult(provider=self.provider, ok=False)
@@ -137,6 +165,7 @@ class ClaudeAdapter:
             result.events.append(parsed)
             if parsed.type == "COMMAND_STARTED" and parsed.data["class"] == "HIGH_RISK":
                 result.high_risk_commands += 1
+        result.rate_limits = self._rate_limits(raw)
         result.session_id = next((e.get("session_id") for e in raw if e.get("session_id")), None)
         if final is not None:
             result.session_id = final.get("session_id") or result.session_id
