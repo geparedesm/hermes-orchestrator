@@ -1623,6 +1623,8 @@ class Orchestration:
     def _integration_review_later(self, task_key: str, provider: str) -> None:
         try:
             with self.ctx.unit_of_work() as uow:
+                if provider in paused(uow, self.ctx.provider_identity):
+                    return  # no Git work while its reviewer is paused; heal_reviews asks again once it is resumed
                 task = self.tasks.get(uow, task_key, lock=True)  # one request per provider, however many paths ask
                 if task["state"] != S.REVIEW or self._integration_review_pending(uow, task["id"], provider):
                     return

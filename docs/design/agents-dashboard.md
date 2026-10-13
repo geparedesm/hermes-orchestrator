@@ -46,7 +46,11 @@ are never Hermes LLM tools (AD-10).
 - routing gives it no new work, and no execution of it is created or dispatched (the launches queue);
 - running work finishes; an unstarted execution keeps its worker slot and waits (rare: a pause right after it was created);
 - its queued launches never hold back other work by priority;
-- tasks it leads wait until it is resumed. Pausing never moves a lead: that would invalidate queued launches.
+- tasks it leads wait until it is resumed. The pause itself never moves a lead (that would invalidate queued
+  launches), and failback leaves a paused lead alone. The existing recovery paths still apply as for an exhausted
+  quota: a failed step or an orphaned lease may hand the lead to the other agent;
+- renewing its login still works: the login becomes READY, and its interrupted work waits for the resume;
+- an integration review it should give is not prepared (no Git work) until it is resumed.
 and running work finishes.
 
 **Disconnect:** after a confirmation, the Agent Manager removes `cred-<provider>-<identity>` and the credential becomes

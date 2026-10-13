@@ -549,6 +549,9 @@ class Executions:
             return None
         if ((row["spec"] or {}).get("purpose") or {}).get("orchestrator_step"):
             return None  # orchestration asks for a fresh step instead (its context and epoch would be stale)
+        from .agents import paused
+        if row["provider"] in paused(uow, row["provider_identity"] or self.ctx.provider_identity):
+            return None  # the login is renewed either way; the agent's work waits until a person resumes it
         uow.cur.execute("SELECT requested FROM capability_grants WHERE execution_id = %s", (row["id"],))
         requested = uow.cur.fetchone()["requested"]  # type: ignore[index]
         uow.cur.execute("SELECT key FROM tasks WHERE id = %s", (row["task_id"],))
