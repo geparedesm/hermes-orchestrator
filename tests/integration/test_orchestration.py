@@ -793,3 +793,20 @@ def test_a_paused_agent_gets_no_new_work(api, services, agents, task):
     assert api.post("/v1/agents/codex/pause", {}, token=PLUGIN_TOKEN, principal="dashboard:operator").status_code == 200
     with services.ctx.unit_of_work() as uow:
         assert services.orchestration._available(uow) == ["claude"]
+
+
+def test_a_review_that_cannot_start_for_budget_asks_the_person_once(api, services, agents, repo, task):
+    """T-56: the integration review could not start (budget used up); the heal retried every few seconds for hours and
+    the person was never asked to raise the budget."""
+    review = _to_integration_review(services, agents, repo, task)
+    with services.ctx.db.transaction() as cur:  # stand-in: the review was lost and the budget is used up
+        cur.execute("UPDATE executions SET state = 'FAILED', ended_at = now() WHERE id = %s", (review["id"],))
+        cur.execute("UPDATE tasks SET updated_at = now() - interval '5 minutes' WHERE key = %s", (task,))
+        cur.execute("UPDATE budgets SET limits = jsonb_set(limits, '{agent_launches}', to_jsonb((consumed->>'agent_launches')::int)) "
+                    "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", (task,))
+    for _ in range(3):
+        services.orchestration.heal_reviews()
+    assert state(api, task) == "PAUSED_BUDGET"  # the person is asked (notification, Raise budget)
+    [row] = q(services, "SELECT count(*) AS n FROM events e JOIN tasks t ON t.id = e.task_id WHERE t.key = %s "
+                        "AND e.type = 'RETRY_SCHEDULED'", task)
+    assert row["n"] == 1

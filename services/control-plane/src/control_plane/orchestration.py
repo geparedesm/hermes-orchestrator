@@ -1434,6 +1434,8 @@ class Orchestration:
             uow.cur.execute(
                 "SELECT s.id, s.task_id FROM subtasks s JOIN tasks t ON t.id = s.task_id WHERE s.state = 'IN_REVIEW' "
                 "AND t.state IN ('RUNNING', 'FIX_REQUIRED') AND s.updated_at < now() - interval '2 minutes' "
+                "AND NOT EXISTS (SELECT 1 FROM events r WHERE r.task_id = t.id AND r.type = 'RETRY_SCHEDULED' "
+                "AND r.occurred_at > now() - interval '5 minutes') "
                 "AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.subtask_id = s.id AND e.role = 'REVIEWER' AND e.state = ANY(%s)) "
                 "AND NOT EXISTS (SELECT 1 FROM pending_launches p WHERE p.subtask_id = s.id)", (list(ACTIVE),))
             stuck = uow.cur.fetchall()
@@ -1444,7 +1446,10 @@ class Orchestration:
         with self.ctx.unit_of_work() as uow:
             uow.cur.execute(
                 "SELECT t.id FROM tasks t JOIN git_changes g ON g.task_id = t.id WHERE t.state = 'REVIEW' "
-                "AND t.updated_at < now() - interval '2 minutes' AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = t.id "
+                "AND t.updated_at < now() - interval '2 minutes' "
+                # One attempt every few minutes at most: a review that cannot start must not flood the task (T-56).
+                "AND NOT EXISTS (SELECT 1 FROM events r WHERE r.task_id = t.id AND r.type = 'RETRY_SCHEDULED' "
+                "AND r.occurred_at > now() - interval '5 minutes') AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = t.id "
                 "AND e.role = 'REVIEWER' AND e.subtask_id IS NULL AND e.state = ANY(%s)) "
                 "AND NOT EXISTS (SELECT 1 FROM pending_launches p WHERE p.task_id = t.id AND p.kind = 'INTEGRATION_REVIEW')", (list(ACTIVE),))
             waiting = [r["id"] for r in uow.cur.fetchall()]
@@ -1631,6 +1636,10 @@ class Orchestration:
                 if task["state"] != S.REVIEW or self._integration_review_pending(uow, task["id"], provider):
                     return
                 self.reviews.request(uow, task_key, provider=provider, principal=ORCHESTRATOR)
+        except BudgetExhausted as exc:
+            # The person decides whether to give it more (T-56): the task waits in PAUSED_BUDGET, which notifies them
+            # and offers Raise budget; the raise returns it to REVIEW and the review is requested again.
+            self.executions.pause_for_budget(task_key, str(exc))
         except ApiError as exc:
             with self.ctx.unit_of_work() as uow:
                 task = self.tasks.get(uow, task_key, lock=True)
