@@ -215,6 +215,10 @@ class Orchestration:
         """Start an execution now, or queue it when capacity, budget, a scope conflict, or a
         higher-priority task stands in the way (design changes 3 and 6)."""
         blocker = self._blocker(uow, task, kind, subtask)
+        agent = request.get("provider") or request.get("reviewer")
+        if blocker is None and agent in paused(uow, self.ctx.provider_identity):
+            # Held before any Git work (a review would otherwise prepare a workspace on every retry).
+            blocker = f"{agent} is paused; the work waits until it is resumed"
         if blocker is None:
             try:
                 with uow.cur.connection.transaction():
@@ -1799,8 +1803,8 @@ class Orchestration:
             return 0
         moved = 0
         with self.ctx.unit_of_work() as uow:
-            if "claude" not in self._available(uow):
-                return 0
+            if "claude" not in self._available(uow) or "codex" in paused(uow, self.ctx.provider_identity):
+                return 0  # a person paused the current lead: its tasks wait for it, the lead never moves
             uow.cur.execute(
                 "SELECT t.* FROM tasks t JOIN task_leases l ON l.task_id = t.id WHERE l.provider = 'codex' AND t.state = ANY(%s) "
                 "AND NOT EXISTS (SELECT 1 FROM events e WHERE e.task_id = t.id AND e.type = 'FAILOVER_COMPLETED' "
