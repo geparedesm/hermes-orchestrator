@@ -675,22 +675,41 @@ class Orchestration:
             return self._integrate_if_ready(uow, task, explicit=True)
         if kind == "REPORT_BLOCKED":
             ready = [x["local_key"] for x in self._subtasks(uow, task) if x["state"] == "READY"]
-            if ready and not self._start_refused_since_retry(uow, task):
+            if ready and not self._refused_since_retry(uow, task, "REQUEST_EXECUTION"):
                 # T-50: blocked on a conflict the platform now reconciles, without ever asking to start the work.
                 raise ValueError(f"{', '.join(ready)} {'is' if len(ready) == 1 else 'are'} READY: request the execution first. "
                                  "The platform prepares its base from the accepted work it depends on, reconciling conflicts "
                                  "between those dependencies through its developer; report blocked only if that request fails")
+            if self._integration_pending(uow, task) and not self._tried_since_retry(uow, task, "SUBMIT_FOR_QUALITY_GATE"):
+                # T-53: every subtask accepted, blocked on an integration conflict the platform resolves itself.
+                raise ValueError("every subtask is ACCEPTED: use SUBMIT_FOR_QUALITY_GATE. Integrating onto the target and "
+                                 "resolving its conflicts (through an agent, within the task's budget) is the platform's job; "
+                                 "report blocked only if that submission does not get the task integrated")
             self._move(uow, task, S.BLOCKED, reason=(action.get("text") or "reported blocked by the orchestrator")[:300])
             return None
         raise ValueError(f"unknown action {kind!r}")
 
-    def _start_refused_since_retry(self, uow: UnitOfWork, task: Row) -> bool:
-        """Whether a REQUEST_EXECUTION was refused since the person last retried or resumed the task (or ever)."""
+    def _refused_since_retry(self, uow: UnitOfWork, task: Row, action: str) -> bool:
+        """Whether an action of this type was refused since the person last retried or resumed the task (or ever)."""
+        return self._tried_since_retry(uow, task, action, outcome="REJECTED")
+
+    def _tried_since_retry(self, uow: UnitOfWork, task: Row, action: str, *, outcome: str | None = None) -> bool:
+        """Whether the orchestrator proposed this action (with this outcome) since the person last retried or resumed
+        the task (or ever). A submission's integration runs after it is accepted, so its failure is not an outcome."""
         uow.cur.execute(
-            "SELECT 1 FROM orchestrator_actions WHERE task_id = %s AND type = 'REQUEST_EXECUTION' AND outcome = 'REJECTED' "
+            "SELECT 1 FROM orchestrator_actions WHERE task_id = %s AND type = %s AND (%s::text IS NULL OR outcome = %s) "
             "AND created_at > coalesce((SELECT max(occurred_at) FROM events WHERE task_id = %s AND type = 'TASK_STATE_CHANGED' "
-            "AND data->>'trigger' = 'USER'), '-infinity') LIMIT 1", (task["id"], task["id"]))
+            "AND data->>'trigger' = 'USER'), '-infinity') LIMIT 1", (task["id"], action, outcome, outcome, task["id"]))
         return uow.cur.fetchone() is not None
+
+    def _integration_pending(self, uow: UnitOfWork, task: Row) -> bool:
+        """Every subtask is accepted and agent-assisted conflict resolutions remain: integration is still possible."""
+        states = {x["state"] for x in self._subtasks(uow, task)}
+        if "ACCEPTED" not in states or not states <= {"ACCEPTED", "INTEGRATED", "CANCELLED"}:
+            return False
+        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE'",
+                        (task["id"],))
+        return int(uow.cur.fetchone()["n"]) < RESOLVE_ATTEMPTS  # type: ignore[index]
 
     def _set_requirements(self, uow: UnitOfWork, task: Row, text: str, *, source: str, reason: str) -> str:
         if not text.strip():

@@ -148,3 +148,22 @@ def test_ready_work_is_requested_before_reporting_blocked(api, services, agents,
     assert (kind, outcome) == ("REPORT_BLOCKED", "REJECTED") and "a is READY: request the execution first" in reason
     assert state(api, task) != "BLOCKED"
     assert "Start READY subtasks with REQUEST_EXECUTION" in bundle(services, task)
+
+
+def test_accepted_work_is_submitted_before_reporting_blocked(api, services, agents, task):
+    """T-53: every subtask accepted, the orchestrator reported blocked on an integration conflict the platform resolves."""
+    step(services, agents, task, {"type": "SET_REQUIREMENTS", "text": "Contract PDF."}, {"type": "SET_PLAN", "subtasks": [plan_item("a")]},
+         {"type": "WAIT"})
+    with services.ctx.db.transaction() as cur:  # stand-in: the subtask was developed, reviewed, and accepted
+        cur.execute("UPDATE subtasks SET state = 'ACCEPTED' WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", (task,))
+    step(services, agents, task, {"type": "REPORT_BLOCKED", "text": "the workspace conflicts with main in __manifest__.py"})
+    kind, outcome, reason = actions(services, task)[-1]
+    assert (kind, outcome) == ("REPORT_BLOCKED", "REJECTED") and "use SUBMIT_FOR_QUALITY_GATE" in reason
+    assert state(api, task) != "BLOCKED"
+    # Once it has submitted (the integration then failed asynchronously), it may report a genuine block.
+    step(services, agents, task, {"type": "SUBMIT_FOR_QUALITY_GATE"})
+    with services.ctx.db.transaction() as cur:  # stand-in: the integration failed and the task went back to RUNNING
+        cur.execute("UPDATE tasks SET state = 'RUNNING' WHERE key = %s", (task,))
+    step(services, agents, task, {"type": "REPORT_BLOCKED", "text": "still conflicts after the resolution attempt"})
+    assert actions(services, task)[-1][:2] == ("REPORT_BLOCKED", "ACCEPTED")
+    assert state(api, task) == "BLOCKED"

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -363,6 +364,63 @@ def _merge_tree(repo: Path, ours: str, theirs: str) -> tuple[str | None, list[st
     return None, sorted({line for line in lines[1:] if line.strip()})
 
 
+_MANIFEST_VERSION = re.compile(r"""^(\s*["']version["']\s*:\s*["'])([0-9]+(?:\.[0-9]+)*)(["'])""", re.M)
+
+
+def _blob_text(repo: Path, commit: str, path: str) -> str | None:
+    result = run(repo, "cat-file", "blob", f"{commit}:{path}", ok_codes=(0, 128))
+    return result.stdout if result.returncode == 0 else None
+
+
+def _with_version(text: str, version: str) -> str:
+    return _MANIFEST_VERSION.sub(lambda m: f"{m.group(1)}{version}{m.group(3)}", text, count=1)
+
+
+def _edit_tree(repo: Path, tree: str, files: dict[str, str]) -> str:
+    """`tree` with these files' contents replaced, through a throwaway index (no working tree)."""
+    with tempfile.TemporaryDirectory() as scratch:
+        env = {"GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        run(repo, "read-tree", tree, env=env)
+        for path, text in files.items():
+            mode = git(repo, "ls-tree", tree, "--", path).split(" ", 1)[0] or "100644"
+            blob = git(repo, "hash-object", "-w", "--stdin", input_text=text)
+            run(repo, "update-index", "--cacheinfo", f"{mode},{blob},{path}", env=env)
+        return git(repo, "write-tree", env=env)
+
+
+def _merge_aligning_versions(repo: Path, ours: str, theirs: str, conflicts: list[str]) -> str | None:
+    """The merged tree when the only conflicts are Odoo manifests whose `version` both sides changed (parallel
+    bumps, T-53): each manifest merges with its version line held at the base's, then takes the higher version.
+    None when anything else conflicts. Files are merged as text; nothing is checked out or run."""
+    if not conflicts or any(PurePosixPath(path).name != "__manifest__.py" for path in conflicts):
+        return None
+    base = try_git(repo, "merge-base", ours, theirs)
+    if base is None:
+        return None
+    resolved = {}
+    with tempfile.TemporaryDirectory() as scratch:
+        for path in conflicts:
+            texts = [_blob_text(repo, commit, path) for commit in (base, ours, theirs)]
+            if any(text is None for text in texts):
+                return None
+            found = [_MANIFEST_VERSION.findall(text or "") for text in texts]
+            if any(len(match) != 1 for match in found):
+                return None
+            v_base, v_ours, v_theirs = (match[0][1] for match in found)
+            files = []
+            for name, text in zip(("base", "ours", "theirs"), texts, strict=True):
+                file = Path(scratch) / name
+                file.write_text(_with_version(text or "", v_base))
+                files.append(str(file))
+            merged = run(repo, "merge-file", "-p", files[1], files[0], files[2], ok_codes=tuple(range(128)))  # exit code = conflicts
+            if merged.returncode != 0:
+                return None
+            final = max(v_ours, v_theirs, key=lambda v: tuple(map(int, v.split("."))))
+            resolved[path] = _with_version(merged.stdout, final)
+    tree = run(repo, "merge-tree", "--write-tree", "--name-only", "--no-messages", ours, theirs, ok_codes=(0, 1)).stdout
+    return _edit_tree(repo, tree.splitlines()[0].strip(), resolved)
+
+
 def _is_ancestor(repo: Path, a: str, b: str) -> bool:
     return run(repo, "merge-base", "--is-ancestor", a, b, ok_codes=(0, 1)).returncode == 0
 
@@ -398,10 +456,14 @@ def integrate(repo: Path, *, task: str, target_branch: str, heads: list[str], ta
             merged.append({"ref": ref, "sha": head, "result": "fast-forward"})
             continue
         tree, conflicts = _merge_tree(repo, current, head)
+        result = "merged"
+        if tree is None:
+            tree = _merge_aligning_versions(repo, current, head, conflicts)
+            result = f"merged (manifest version aligned: {', '.join(conflicts)})"
         if tree is None:
             return {"ok": False, "target_sha": target_sha, "conflicts": conflicts, "conflicting_ref": ref, "merged": merged}
         current = git(repo, "commit-tree", tree, "-p", current, "-p", head, "-m", f"Integrate {ref} for {task}")
-        merged.append({"ref": ref, "sha": head, "result": "merged"})
+        merged.append({"ref": ref, "sha": head, "result": result})
     ref = f"refs/hermes/tasks/{task}/integration"
     run(repo, "update-ref", ref, current)
     return {"ok": True, "target_sha": target_sha, "integration_ref": ref, "integration_sha": current, "merged": merged,
