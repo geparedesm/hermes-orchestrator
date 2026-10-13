@@ -24,8 +24,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable, Protocol
 
 from .. import schemas
-from ..enums import Role, StrEnum
-from ..policy.commands import classify
+from ..enums import CommandClass, Role, StrEnum
+from ..policy.commands import classify, provably_blocked
 
 RESULT_SCHEMA = "agent-result"
 RUNNER = "/opt/ho/bin/ho-agent-run"
@@ -226,6 +226,9 @@ def compose_prompt(assignment: AgentAssignment) -> str:
         lines.append("- There is no Internet access apart from your model provider.")
     lines += [
         "- Never read, print, or copy credentials or files under /run/ho-credentials or /run/ho/secrets into output.",
+        ("- You run as an unprivileged user without sudo, Docker, or other containers: do not try them (they are blocked "
+         "and flagged to the person). The project's test services, when it has them, are already reachable: use the "
+         "project's test command."),
         ("- Finish with the structured review: verdict, summary, whether the task's requirements are met, and findings "
          "with severity, category, path, and line." if assignment.result_schema == "review-result" else
          "- Finish with the structured result: status, a short summary, changed files, tests, local commits, follow-ups."),
@@ -259,6 +262,8 @@ def command_event(event_type: str, command: str, **extra: Any) -> AdapterEvent:
         "command": command[:500],
         "class": classification.command_class.value,
         "rule": classification.rule_id,
+        # Decided on the whole command, before it is cut short (T-55, Codex review).
+        "blocked": classification.command_class == CommandClass.HIGH_RISK and provably_blocked(command),
         **extra,
     })
 

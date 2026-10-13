@@ -229,6 +229,13 @@
         })),
         changes.length > 5 ? h("button", { type: "button", className: "orch-disclosure", onClick: function () { setAll(!all); } },
           all ? "▾ Show fewer" : "▸ Show all " + changes.length + " changes") : null) : null,
+      (d.commands || []).length ? h("div", null,
+        h("div", { className: "orch-approval-label" }, "Commands flagged (" + d.commands.length + ")"),
+        h("ul", { className: "orch-commands" }, d.commands.map(function (c, i) {
+          return h("li", { key: i },
+            h("span", { className: "orch-muted orch-small" }, capital(c.who) + " · tried to " + c.meaning + (c.rule ? " (" + c.rule + ")" : "")),
+            h("code", null, c.command));
+        }))) : null,
       d.why ? h("div", { className: "orch-approval-why" }, h("span", { className: "orch-approval-label" }, "Why you"), h("span", null, d.why)) : null,
       d.if_yes || d.if_no ? h("div", { className: "orch-outcomes" },
         d.if_yes ? h("div", { className: "orch-outcome orch-outcome-yes" }, h("strong", null, "If yes"), h("span", null, d.if_yes)) : null,
@@ -242,6 +249,23 @@
         })) : null);
   }
 
+  // Whether the person keeps technical details open (this browser only; the page works without storage).
+  const DETAILS_KEY = "orch.approval.details";
+  function detailsOpen() { try { return window.localStorage.getItem(DETAILS_KEY) === "open"; } catch (e) { return false; } }
+  function rememberDetails(open) { try { window.localStorage.setItem(DETAILS_KEY, open ? "open" : "closed"); } catch (e) { /* none */ } }
+
+  // The platform's advice, from fixed rules on the server (approval_details.recommendation), never a model's.
+  const ADVICE = { approve: ["good", "check", "Recommended: "], reject: ["bad", "x", "Recommended: "], look: ["warn", "alert", ""] };
+  function Advice(props) {
+    const r = props.recommendation;
+    if (!r || !ADVICE[r.action]) return null;
+    const style = ADVICE[r.action];
+    const lead = r.action === "look" ? "Look at the details before deciding" : style[2] + capital(r.action === "approve" ? props.yes : props.no);
+    return h("div", { className: "orch-advice orch-advice-" + style[0] },
+      h(Icon, { name: style[1], size: 15 }),
+      h("div", null, h("strong", null, lead), r.text ? h("span", null, " — " + r.text) : null));
+  }
+
   // One decision, explained the way the chat explains it, with the two outcomes as the buttons.
   function ApprovalCard(props) {
     const a = props.approval;
@@ -251,6 +275,8 @@
     const [error, setError] = useState(null);
     const [rejecting, setRejecting] = useState(false);
     const [note, setNote] = useState("");
+    const [technical, setTechnical] = useState(detailsOpen);
+    function toggleTechnical() { setTechnical(!technical); rememberDetails(!technical); }
     function decide(decision) {
       setBusy(decision);
       setError(null);
@@ -272,10 +298,10 @@
       a.task ? h("div", { className: "orch-approval-task" }, h(TaskLink, { task: a.task, open: props.open }),
         a.task_title ? h("span", null, a.task_title) : null, a.project ? h(Pill, null, a.project) : null)
         : a.project ? h("div", { className: "orch-approval-task" }, h(Pill, null, a.project)) : null,
-      h("p", { className: "orch-approval-question" }, plain.question),
-      h(ApprovalDetails, { details: d }),
-      who || (d && d.requested_at) ? h("div", { className: "orch-muted orch-small" },
-        "Asked" + (who ? " by " + who : "") + (d && d.requested_at ? " · " + ago(d.requested_at) : "")) : null,
+      h("p", { className: "orch-approval-question" }, (d && d.headline) || plain.question),
+      d && (d.highlights || []).length ? h("ul", { className: "orch-highlights" },
+        d.highlights.map(function (x, i) { return h("li", { key: i }, x); })) : null,
+      d ? h(Advice, { recommendation: d.recommendation, yes: plain.yes, no: plain.no }) : null,
       rejecting ? h("div", { className: "orch-reject" },
         h("label", { className: "orch-reject-label" }, "Why? (optional — the agents read it and act on it)",
           h("textarea", { value: note, rows: 3, maxLength: 1000, autoFocus: true,
@@ -288,7 +314,14 @@
           h(Button, { kind: "good", icon: "check", disabled: !!busy, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : capital(plain.yes)),
           h(Button, { kind: "bad-outline", icon: "x", disabled: !!busy, onClick: function () { setRejecting(true); } }, capital(plain.no) + "…"),
           a.task && props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Open task") : null),
-      error ? h("div", { className: "orch-alert" }, error) : null);
+      error ? h("div", { className: "orch-alert" }, error) : null,
+      d ? h("button", { type: "button", className: "orch-disclosure", "aria-expanded": technical, onClick: toggleTechnical },
+        technical ? "▾ Hide technical details" : "▸ Show technical details") : null,
+      d && technical ? h("div", { className: "orch-technical" },
+        d.headline && d.headline !== plain.question ? h("p", { className: "orch-muted orch-small" }, plain.question) : null,
+        h(ApprovalDetails, { details: d }),
+        who || d.requested_at ? h("div", { className: "orch-muted orch-small" },
+          "Asked" + (who ? " by " + who : "") + (d.requested_at ? " · " + ago(d.requested_at) : "")) : null) : null);
   }
 
   // A round of planning questions: pick an option per question (the recommended one is preselected), or write

@@ -45,6 +45,8 @@ _RULES: tuple[_Rule, ...] = (
     _rule("CMD-H04", H, r"\bgh\s+(repo\s+delete|pr\s+merge|api\b.*-X\s*DELETE)", "GitHub destructive or merge operation"),
     _rule("CMD-H05", H, r"\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)[a-z]*\s+(/|~|\$HOME|\.\.|\*)(\s|/?$)", "Mass deletion outside the workspace"),
     _rule("CMD-H06", H, r"\b(drop\s+(database|schema|table)|truncate\s+table|delete\s+from\s+\w+\s*;?\s*$)", "Destructive database statement"),
+    # Container tools anywhere in the line (wrappers, shell scripts), or their socket; except in a line that only
+    # searches or reads (`git log | grep -i docker`, `find -iname "docker-compose*"`: T-55), see `_search_only`.
     _rule("CMD-H07", H, r"\b(docker|podman|nerdctl|kubectl|helm)\b", "Container or cluster control"),
     _rule("CMD-H08", H, r"\b(terraform\s+(apply|destroy)|pulumi\s+(up|destroy)|cdk\s+deploy|serverless\s+deploy)\b", "Infrastructure change"),
     _rule("CMD-H09", H, r"\b(sudo|su\s|chmod\s+(-R\s+)?[0-7]*7[0-7]{2}\b|chown\s+-R|setcap|mount\s)", "Privilege or permission change"),
@@ -68,8 +70,58 @@ _SEPARATORS = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
 _ORDER = {S: 0, C: 1, H: 2}
 
 
+CONTAINER_TOOLS = frozenset({"docker", "docker-compose", "podman", "nerdctl", "kubectl", "helm"})
+_READ_ONLY = frozenset({"ls", "cat", "head", "tail", "wc", "grep", "echo", "pwd", "true", "which", "stat", "cut"})
+
+
+_COMMAND_BREAKS = frozenset({";", "&&", "||", "|", "&", "\n", "(", ")", "|&", ";;"})
+
+
+def _commands(text: str) -> list[list[str]]:
+    """The simple commands of a line as token lists, quoting preserved (`bash -lc "exec docker ps"` keeps its script)."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    commands: list[list[str]] = [[]]
+    try:
+        for token in lexer:
+            if token in _COMMAND_BREAKS or set(token) <= set(";&|()"):
+                commands.append([])
+            else:
+                commands[-1].append(token)
+    except ValueError:  # unbalanced quotes: fall back to words
+        commands = [text.split()]
+    return [c for c in commands if c]
+
+
+# Programs whose options cannot run other programs (not rg: --pre; not git diff: external diff and textconv).
+_SEARCH = frozenset({"grep", "ls", "cat", "head", "tail", "wc", "echo", "fc-list", "which"})
+_GIT_READ = frozenset({"log", "status", "ls-files"})
+_GIT_SAFE_OPTION = re.compile(r"^(--all|--oneline|--graph|--decorate|--short|--porcelain|-s|-n|-\d+|--max-count=\d+|"
+                              r"--format=\S*|--pretty=\S*|--)$")
+
+
+def _search_only(text: str) -> bool:
+    """A line made only of searches and reads, where container words can only be arguments (no wrapper, shell,
+    substitution, or `find -exec`)."""
+    if re.search(r"\$\(|`|<\(|>\(|\beval\b|[\n\r]|docker\.sock|/var/run/docker", text):  # the socket is never an argument
+        return False
+    commands = _commands(text)
+    for tokens in commands:
+        name = tokens[0]
+        if name == "find" and not set(tokens) & {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf", "-fls"}:
+            continue
+        if name == "git" and len(tokens) > 1 and tokens[1] in _GIT_READ \
+                and all(_GIT_SAFE_OPTION.match(t) or not t.startswith("-") for t in tokens[2:]):
+            continue
+        if name not in _SEARCH:
+            return False
+    return bool(commands)
+
+
 def _classify_segment(segment: str) -> Classification:
     for rule in _RULES:
+        if rule.rule_id == "CMD-H07" and _search_only(segment):
+            continue
         if rule.pattern.search(segment):
             return Classification(rule.command_class, rule.rule_id, rule.summary)
     return Classification(C, "CMD-C99", "Unrecognized command")
@@ -89,6 +141,27 @@ def classify(command: str) -> Classification:
     if worst.command_class == S and re.search(r"\$\(|`|\beval\b|\bsource\b|\b(ba)?sh\s+-c\b", text):
         return Classification(C, "CMD-C98", "Command substitution or eval")
     return worst
+
+
+def provably_blocked(command: str) -> bool:
+    """Whether a flagged command can have had no effect: each of its simple commands either runs a program absent from
+    every worker image (a container tool, or sudo: AD-14) or is a read-only inspection. Anything else in the line
+    (chmod, su, a database client, an unknown program, a substitution, a redirection to a file, a background job)
+    may have had an effect, so the command is not provably blocked (T-55, Codex review)."""
+    text = re.sub(r"\s[12]?>&[12]|\s[12]?>\s*/dev/null", " ", command)  # harmless redirections
+    if re.search(r"\$\(|`|<\(|>\(|>|<|(?<!&)&(?!&)|\beval\b|\bsource\b|[\n\r]", text):  # a newline separates commands
+        return False
+    absent = False
+    for tokens in _commands(text):
+        # The command itself is the absent program, by bare name: no wrapper (whose options can run programs) and no
+        # path (`/workspace/docker` could exist). Whatever follows sudo never runs, since sudo is absent.
+        if tokens[0] in CONTAINER_TOOLS | {"sudo"}:
+            absent = True
+            continue
+        # Only programs that never write, with nothing flagged in their arguments (not `find`, which can -delete).
+        if tokens[0] not in _READ_ONLY or _classify_segment(_strip_prefix(shlex.join(tokens))).command_class != S:
+            return False
+    return absent
 
 
 def _strip_prefix(segment: str) -> str:

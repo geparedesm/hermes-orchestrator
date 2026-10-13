@@ -41,6 +41,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "digest": "{emoji} *Progress* ({count})",
         "more": "… and {count} more (/orch tasks)",
         "changes": "*What changes:*", "more_changes": "… and {count} more in the Dashboard",
+        "advice": "💡 Recommended: *{answer}*", "look": "💡 Look at the details in the Dashboard before deciding",
         "questions": "{emoji} *{count} question(s) before planning*", "recommended": "recommended",
         "your_words": "your own answer (write it after the colon)",
         "answer_how": "Reply with one message, for example: *r {number} 1a 2b 3: only remote jobs*",
@@ -65,6 +66,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "digest": "{emoji} *Avances* ({count})",
         "more": "… y {count} más (/orch tasks)",
         "changes": "*Qué cambia:*", "more_changes": "… y {count} más en el Dashboard",
+        "advice": "💡 Recomendado: *{answer}*", "look": "💡 Mira los detalles en el Dashboard antes de decidir",
         "questions": "{emoji} *{count} pregunta(s) antes de planificar*", "recommended": "recomendada",
         "your_words": "tu propia respuesta (escríbela después de los dos puntos)",
         "answer_how": "Responde con un solo mensaje, por ejemplo: *r {number} 1a 2b 3: solo empleos remotos*",
@@ -265,13 +267,21 @@ def _approval(ctx: Context, lang: str, now: datetime) -> str:
     text, words, number = _TEXT[lang], _WORDS[lang], approval.get("number")
     ref = number if number is not None else approval.get("id")
     who = f" · {ctx.task}" + (f" «{ctx.title}»" if lang == "es" and ctx.title else f" “{ctx.title}”" if ctx.title else "") if ctx.task else ""
-    lines = [text["decide"].format(emoji=EMOJI["APPROVAL_REQUIRED"]) + who, question.format(**fields)]
-    changes = (ctx.details or {}).get("changes") or []
+    # The plain one-sentence headline (English, like the Dashboard) where the chat speaks English.
+    asked = details_headline if lang == "en" and (details_headline := (ctx.details or {}).get("headline")) else question.format(**fields)
+    lines = [text["decide"].format(emoji=EMOJI["APPROVAL_REQUIRED"]) + who, asked]
+    details = ctx.details or {}
+    changes = details.get("changes") or []  # the flagged commands are not among them: they stay in the Dashboard
     if changes and approval.get("action") != "CREATE_CHILD":  # a module request already says what it creates
         marks = {"+": "➕", "-": "➖", "~": "✏️", "!": "⚠️", "?": "❓"}
         lines += ["", text["changes"]] + [f"{marks.get(c.get('kind'), '•')} {c['text'][:200]}" for c in changes[:3]]
         if len(changes) > 3:
             lines.append(text["more_changes"].format(count=len(changes) - 3))
+    advice = (details.get("recommendation") or {}).get("action")
+    if advice in ("approve", "reject"):
+        lines += ["", text["advice"].format(answer=(yes if advice == "approve" else no).format(**fields))]
+    elif advice == "look":
+        lines += ["", text["look"]]
     lines += ["", text["reply"],
              f"✅ *{words['yes']} {ref}*: {yes.format(**fields)}", f"❌ *{words['no']} {ref}*: {no.format(**fields)}"]
     if ctx.task:

@@ -1,5 +1,7 @@
-"""What a pending approval is about, for the person deciding it: what changes, why it needs them, what yes and no
-do, and the facts behind it (Dashboard cards; the first changes also go into chat notifications).
+"""What a pending approval is about, for the person deciding it. Two levels: a plain `headline` (one sentence a
+non-developer can read), up to three `highlights`, and a `recommendation` computed from fixed rules (never by a
+model); then the technical details behind them: what changes, why it needs a person, what yes and no do, and the
+facts (Dashboard cards; the headline and first changes also go into chat notifications).
 
 Read-only and computed on request from the approval's subject and the current state. A failure to describe an
 approval never hides it: `details` falls back to the approval's own summary.
@@ -8,6 +10,7 @@ approval never hides it: `details` falls back to the approval's own summary.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from . import budgets
@@ -98,6 +101,9 @@ def _config(uow: UnitOfWork, approval: Row, defaults: dict[str, Any]) -> dict[st
     changes = config_changes(defaults if first else active["effective_config"], proposed["effective_config"] if proposed else {})
     head = subject.get("head_commit") or ""
     return {
+        "headline": "Get this project ready for tasks, with the settings found in it?" if first
+                    else f"The project's settings changed ({len(changes) or 'internal values only'}). Use the new settings?",
+        "highlights": [], "recommendation": None,
         "changes": changes or [{"kind": "~", "text": "Only internal values changed (the effective configuration hash)"}],
         "why": "Project configurations decide what agents may run, test, and reach, so each one needs a person."
                + (" This is the project's first configuration." if first else ""),
@@ -108,6 +114,41 @@ def _config(uow: UnitOfWork, approval: Row, defaults: dict[str, Any]) -> dict[st
                   ["Commit", head[:12] or "—"], ["Compared with", "the platform defaults (first configuration)" if first else "the active configuration"]],
         "links": [],
     }
+
+
+# High-risk command rules in plain words. Whether a command could have had an effect is decided when it is recorded
+# (ho_core.policy.commands.provably_blocked: only tools absent from every worker image count as blocked).
+RULE_WORDS = {"CMD-H01": "force-push code", "CMD-H02": "delete a branch on GitHub", "CMD-H03": "rewrite the code history",
+              "CMD-H04": "merge or delete on GitHub", "CMD-H05": "delete files outside their work folder",
+              "CMD-H06": "delete database data", "CMD-H07": "control containers (Docker)", "CMD-H08": "change infrastructure",
+              "CMD-H09": "use administrator permissions or change permissions", "CMD-H10": "change cloud services",
+              "CMD-H11": "read passwords or keys"}
+
+
+GATE_REASONS = {"without running any test": "code changed without running any test", "critical change": "it is a critical change",
+                "inadequate tests": "a sensitive change has too few tests"}
+
+
+def _plain_reason(reason: str) -> str:
+    return next((words for key, words in GATE_REASONS.items() if key in reason), reason)
+
+
+def _recommend(action: str, text: str) -> dict[str, str]:
+    """`approve`, `reject`, or `look` (no clear answer: read the details)."""
+    return {"action": action, "text": text}
+
+
+def _checks(uow: UnitOfWork, task_id: Any, commit: str | None) -> tuple[str | None, list[Row]]:
+    """The integration verification and the latest review per provider of this exact commit (as the Quality Gate
+    reads them): checks of an earlier commit never back a recommendation."""
+    if not commit:
+        return None, []
+    uow.cur.execute("SELECT state FROM verifications WHERE task_id = %s AND purpose = 'INTEGRATION' AND commit_sha = %s "
+                    "ORDER BY created_at DESC LIMIT 1", (task_id, commit))
+    tests = (uow.cur.fetchone() or {}).get("state")
+    uow.cur.execute("SELECT DISTINCT ON (reviewer_provider) reviewer_provider, outcome FROM reviews WHERE task_id = %s "
+                    "AND commit_sha = %s AND subtask_id IS NULL ORDER BY reviewer_provider, created_at DESC", (task_id, commit))
+    return tests, uow.cur.fetchall()
 
 
 def _task(uow: UnitOfWork, approval: Row) -> Row | None:
@@ -126,13 +167,20 @@ def _merge(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     included = [{"kind": "+", "text": f"{r['local_key']}: {r['title']}"} for r in uow.cur.fetchall()]
     uow.cur.execute("SELECT summary FROM events WHERE task_id = %s AND type = 'INTEGRATION_COMPLETED' ORDER BY seq DESC LIMIT 1", (tid,))
     integrated = (uow.cur.fetchone() or {}).get("summary")
-    uow.cur.execute("SELECT state FROM verifications WHERE task_id = %s ORDER BY created_at DESC LIMIT 1", (tid,))
-    tests = (uow.cur.fetchone() or {}).get("state")
-    uow.cur.execute("SELECT reviewer_provider, outcome FROM reviews WHERE task_id = %s AND subtask_id IS NULL ORDER BY created_at DESC LIMIT 2", (tid,))
-    reviews = ", ".join(f"{r['outcome'].lower()} by {r['reviewer_provider']}" for r in uow.cur.fetchall()) or "—"
+    # The merge's own commit: the integrated change (the pull request head is the same commit, checked when requested).
+    tests, review_rows = _checks(uow, tid, git.get("integration_sha") or subject.get("head_sha"))
+    reviews = ", ".join(f"{r['outcome'].lower()} by {r['reviewer_provider']}" for r in review_rows) or "—"
     branch = subject.get("target_branch") or "main"
     pr = subject.get("pr_number")
+    approved = bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
+    good = tests == "PASSED" and approved and subject.get("quality_gate")
     return {
+        "headline": f"The work is finished and checked. Add it to {branch}?",
+        "highlights": [("Tests passed" if tests == "PASSED" else f"Tests: {(tests or 'not run').lower()}"),
+                       ("Reviewed and approved" if approved else "Review: " + reviews),
+                       f"{len(included)} part(s) included" if included else "One change"],
+        "recommendation": _recommend("approve", "Tests passed and the review approved it.") if good
+        else _recommend("look", "Not every check passed: see the technical details."),
         "changes": included or [{"kind": "~", "text": integrated or "the task's integrated change"}],
         "why": f"Nothing enters {branch} without your approval, bound to these exact commits.",
         "if_yes": f"{'Pull request #' + str(pr) if pr else 'The change'} is merged into {branch}, then verified after the merge.",
@@ -149,6 +197,8 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     if subject.get("kind") == "human_change_conflict":
         files = subject.get("overlapping") or []
         return {
+            "headline": f"You and the agents changed the same file(s) ({len(files) or 'some'}). Let the task continue on top of your changes?",
+            "highlights": [], "recommendation": None,
             "changes": [{"kind": "~", "text": f"{f.get('path', f) if isinstance(f, dict) else f}"} for f in files][:MAX_CHANGES]
             or [{"kind": "~", "text": "files changed by both you and the task"}],
             "why": "Your own changes on the target branch overlap the task's changes in these files.",
@@ -157,18 +207,64 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
             "facts": [["Target commit", str(subject.get("target_sha") or "")[:12]], ["Task commit", str(subject.get("head_sha") or "")[:12]]],
             "links": [],
         }
-    changes = []
-    uow.cur.execute("SELECT summary FROM events WHERE task_id = %s AND type = 'COMMAND_HIGH_RISK' ORDER BY seq", (tid,))
-    changes += [{"kind": "!", "text": r["summary"]} for r in uow.cur.fetchall()]
+    changes, commands, count, unproven, rules = [], [], 0, 0, set()
+    uow.cur.execute("SELECT summary, data FROM events WHERE task_id = %s AND type = 'COMMAND_HIGH_RISK' ORDER BY seq", (tid,))
+    for row in uow.cur.fetchall():
+        data = row["data"] or {}
+        found = re.match(r"(\d+) ", row["summary"])
+        observed = int(data.get("count") or (found.group(1) if found else 1))
+        count += observed
+        # Recorded before the platform knew which commands could not run: none of them is taken as blocked.
+        unproven += int(data["unproven"]) if "unproven" in data else observed
+        who = " ".join(str(x).lower() for x in (data.get("role"), data.get("provider")) if x) or "an agent"
+        rules |= set(data.get("rules") or []) | {i.get("rule") for i in data.get("commands") or []}
+        if data.get("commands") and observed > len(data["commands"]):
+            changes.append({"kind": "!", "text": f"{observed - len(data['commands'])} more command(s) by {who} not shown: "
+                                                 + ", ".join(sorted(RULE_WORDS.get(r, r) for r in data.get("rules") or []))})
+        for item in data.get("commands") or []:
+            commands.append({"who": who, "command": item.get("command"), "rule": item.get("rule"),
+                             "meaning": RULE_WORDS.get(item.get("rule"), "run a risky command")})
+        if not data.get("commands"):
+            changes.append({"kind": "!", "text": row["summary"]})
     uow.cur.execute("SELECT summary FROM policy_decisions WHERE task_id = %s AND decision = 'DENY'", (tid,))
-    changes += [{"kind": "!", "text": f"refused by policy: {r['summary']}"} for r in uow.cur.fetchall()]
+    denied = [r["summary"] for r in uow.cur.fetchall()]
+    changes += [{"kind": "!", "text": f"refused by policy: {d}"} for d in denied]
     uow.cur.execute("SELECT requirements FROM quality_gate_evaluations WHERE task_id = %s ORDER BY evaluated_at DESC LIMIT 1", (tid,))
     gate = uow.cur.fetchone()
-    failing = [r for r in (gate or {}).get("requirements") or [] if r.get("status") in ("FAIL", "APPROVAL_REQUIRED")
-               and r.get("name") != "exception_approval"]
+    # The gate's own line for policy violations only repeats the commands above.
+    failing = [r for r in (gate or {}).get("requirements") or [] if r.get("status") != "PASS"  # PENDING blocks the gate too
+               and r.get("name") not in ("exception_approval", "no_policy_violations")]
     changes += [{"kind": "!", "text": f"{r['name'].replace('_', ' ')}: {r.get('detail') or r['status'].lower()}"} for r in failing]
+    reasons = list(subject.get("reasons") or [])
+    other = [r for r in reasons if not r.startswith("policy violations")]
+    blocked = bool(count or denied) and unproven == 0  # policy denials were refused, so had no effect
+    tests, review_rows = _checks(uow, tid, subject.get("commit"))
+    # Every other gate requirement passes too (reviewer coverage, CI, requirements met): only the exception is left.
+    checked = (tests == "PASSED" and bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
+               and gate is not None and not failing)
+    # Every rule, shown or not; the example is the most serious one (credentials and data before blocked tools).
+    severity = ["CMD-H11", "CMD-H06", "CMD-H05", "CMD-H03", "CMD-H01", "CMD-H02", "CMD-H04", "CMD-H10", "CMD-H08", "CMD-H09", "CMD-H07"]
+    words = [RULE_WORDS.get(r, "run a risky command") for r in sorted((r for r in rules if r),
+                                                                      key=lambda r: severity.index(r) if r in severity else 0)]
+    example = f" (for example, {words[0]})" if words else ""
+    if other:
+        headline = "This change needs a closer look before it is added: " + "; ".join(_plain_reason(r) for r in other) + "."
+        recommendation = _recommend("look", "Read the technical details, or ask the agents to fix it.")
+    elif blocked:
+        headline = (f"The agents tried {count} action(s) they are not allowed to do{example}. "
+                    "They were blocked and changed nothing.")
+        recommendation = (_recommend("approve", "Nothing happened, the tests passed, and the review approved the change.")
+                          if checked else _recommend("look", "Nothing happened, but not every check passed."))
+    else:
+        headline = f"The agents ran {count} risky command(s){example}. Check what they did before continuing."
+        recommendation = _recommend("look", "Some of these commands may have had an effect: see the technical details.")
     return {
-        "changes": changes[:MAX_CHANGES] or [{"kind": "!", "text": "; ".join(subject.get("reasons") or []) or approval["summary"]}],
+        "headline": headline,
+        "highlights": [],
+        "recommendation": recommendation,
+        "display_risk": "low" if blocked and not other else None,
+        "commands": commands[:MAX_CHANGES],
+        "changes": changes[:MAX_CHANGES],
         "why": "The quality gate found something that normally stops a merge: " + "; ".join(subject.get("reasons") or ["see the list"]) + ".",
         "if_yes": "The gate accepts this exception for this exact commit and the task moves on to the merge decision.",
         "if_no": "The task goes back to the agents to fix it.",
@@ -191,7 +287,12 @@ def _budget(uow: UnitOfWork, approval: Row, unlimited: bool) -> dict[str, Any]:
         changes = [{"kind": "~", "text": f"{COUNTERS.get(k, k)}: {budget['consumed'].get(k, 0)} used of "
                                          f"{budget['limits'].get(k)} → limit {(budget['limits'].get(k) or 0) + int(n)}"}
                    for k, n in add.items()]
+    plain = ", ".join(f"+{n} {COUNTERS.get(k, k)}" for k, n in add.items())
     return {
+        "headline": f"The task ran out of budget. Give it more ({plain}) so it can finish?" if not unlimited
+                    else "Remove every budget limit from this task?",
+        "highlights": [],
+        "recommendation": None if not unlimited else _recommend("reject", "A fixed raise is safer than no limit."),
         "changes": changes,
         "why": "The task used up part of its budget; giving it more is your decision." if not unlimited
                else "An unlimited budget removes every limit on this task; only a person may allow it.",
@@ -219,7 +320,12 @@ def _waiting(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
         change = subject.get("text") or approval["summary"]
         why = "The orchestrator asked you directly."
         yes, no = "The orchestrator goes ahead.", "The task stops."
-    return {"changes": [{"kind": "?", "text": str(change)[:600]}], "why": why, "if_yes": yes, "if_no": no,
+    text = str(change)
+    # The question in full: its first sentence may be only the context of what is asked.
+    headline = text[:600] if subject.get("kind") != "plan_expansion" \
+        else f"The plan grew to {subject.get('added')} new subtasks (limit {subject.get('limit')}). Let the agents do the bigger plan?"
+    return {"headline": headline, "highlights": [], "recommendation": None,
+            "changes": [{"kind": "?", "text": text[:600]}], "why": why, "if_yes": yes, "if_no": no,
             "facts": [["Task", f"{task['key']}: {task['title']}" if task else "—"], ["Level", str(subject.get("level") or "—").lower()]],
             "links": []}
 
@@ -228,6 +334,8 @@ def _create_child(approval: Row) -> dict[str, Any]:
     s = approval["subject"] or {}
     repo, visibility = f"{s.get('owner')}/{s.get('repo')}", "private" if s.get("private", True) else "public"
     return {
+        "headline": f"Create the new module {s.get('name')} with its own {visibility} GitHub repository?",
+        "highlights": [], "recommendation": None,
         "changes": [{"kind": "+", "text": f"Folder {s.get('children_path')}/{s.get('name')} with the module skeleton and its rules"},
                     {"kind": "+", "text": f"{visibility.capitalize()} GitHub repository {repo}"},
                     {"kind": "+", "text": f"First commit: {str(s.get('commit_message') or '').replace('{name}', s.get('name', ''))}"},
@@ -252,7 +360,11 @@ def _plan(approval: Row) -> dict[str, Any]:
                                              f"risk {str(item.get('risk') or '').lower()}"
                                              + (f", by {item['preferred_provider']}" if item.get("preferred_provider") else "")
                                              + (f", after {deps}" if deps else "") + (f" · {files}" if files else "")})
+    titles = [str(item.get("title") or item.get("local_key")) for item in items]
     return {
+        "headline": f"The agents plan to do this in {len(items)} step(s). Start?",
+        "highlights": titles[:3] + ([f"and {len(titles) - 3} more"] if len(titles) > 3 else []),
+        "recommendation": None,
         "changes": changes,
         "why": "This task (or project) asks for your review of each plan before any subtask starts.",
         "if_yes": "The agents start on the plan's ready subtasks.",
@@ -281,7 +393,8 @@ def details(uow: UnitOfWork, approval: Row, defaults: dict[str, Any] | None = No
         elif action == "PLAN":
             out = _plan(approval)
         elif action == "UPDATE":
-            out = {"changes": [{"kind": "~", "text": f"platform {subject.get('from_version')} → {subject.get('to_version')}"}],
+            out = {"headline": f"Update the platform from {subject.get('from_version')} to {subject.get('to_version')}?",
+                   "changes": [{"kind": "~", "text": f"platform {subject.get('from_version')} → {subject.get('to_version')}"}],
                    "why": "Platform updates need a person.", "if_yes": "The platform is updated (with a rollback point).",
                    "if_no": "The platform stays on its current version.", "facts": [], "links": []}
         else:
@@ -290,5 +403,7 @@ def details(uow: UnitOfWork, approval: Row, defaults: dict[str, Any] | None = No
     except Exception:  # noqa: BLE001 - a description must never hide the decision itself
         log.exception("details of approval %s failed", approval.get("id"))
         out = {"changes": [], "why": approval["summary"], "if_yes": "", "if_no": "", "facts": [], "links": []}
-    return {**out, "risk": str(approval.get("risk") or "MEDIUM").lower(), "requested_by": approval.get("requested_by"),
+    risk = str(approval.get("risk") or "MEDIUM").lower()
+    return {"highlights": [], "recommendation": None, **out, "headline": out.get("headline"),  # None: the plain question stands
+            "risk": out.pop("display_risk", None) or risk, "requested_by": approval.get("requested_by"),
             "requested_at": approval.get("requested_at")}
