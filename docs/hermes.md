@@ -20,6 +20,18 @@ Phase 9 makes official Hermes (`nousresearch/hermes-agent`, pinned by digest, un
 2. `make up` starts `hermes` with the plugin enabled. The Dashboard listens on `http://127.0.0.1:9119` (`HO_HERMES_DASHBOARD_PORT`); log in as `operator` with the password in `secrets/ho_hermes_dashboard_password`.
 3. Hermes needs a model provider for its own agent (not for `/orch`): configure it with Hermes's own tools, for example `docker compose exec hermes hermes model`.
 
+## Cloudflare Tunnel returns 502 on Linux
+
+The Compose service publishes the Dashboard on the Linux host's loopback interface as `127.0.0.1:${HO_HERMES_DASHBOARD_PORT:-9119}:9119`. If `docker compose ps hermes` shows only `9119/tcp` without a host mapping, the existing container was created before the port mapping was applied. From this repository, run:
+
+```bash
+make hermes-dashboard
+docker compose ps hermes
+curl -i --max-time 5 http://127.0.0.1:9119/
+```
+
+The port listing should include `127.0.0.1:9119->9119/tcp`; `curl` should return `302` with `Location: /login`. When `cloudflared` runs as a service on the Linux host, keep the Published application service URL as `http://localhost:9119`. If `cloudflared` runs in a container instead, `localhost` refers to that container: attach it to a Docker network shared with Hermes and use `http://hermes:9119` as the service URL. The host mapping stays bound to loopback and should not be opened on the public interface.
+
 ## Connect a chat channel (Telegram example)
 
 Add to `.env`, then `make up`:
