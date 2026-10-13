@@ -23,7 +23,7 @@ ho health                  # control plane readiness
 | `postgres.dump` | the whole platform database (`pg_dump --format=custom`) |
 | `hermes-data.tar.gz` | Hermes's state: SQLite databases copied with SQLite's online backup API, skills, memories, configuration with secret values removed |
 | `artifacts.tar.gz` | execution evidence (skip with `HO_BACKUP_ARTIFACTS=0`) |
-| `config/`, `env.settings` | platform configuration; `.env` without values whose names contain TOKEN, PASSWORD, SECRET, or KEY |
+| `config/`, `env.settings` | platform configuration; known single-line Compose settings only (allowlist in `scripts/backup_settings.py`; credentials, unknown keys, and multiline assignments are omitted) |
 | `MANIFEST.json`, `SHA256SUMS` | Git commit, `HO_VERSION`, schema revision; checksums verified on restore |
 
 Never included: `./secrets`, provider logins (`cred-*` volumes), the GitHub login (`gh-config`), Redis, workers, test environments. Projects live in Git. The newest `HO_BACKUP_KEEP` backups (14) are kept.
