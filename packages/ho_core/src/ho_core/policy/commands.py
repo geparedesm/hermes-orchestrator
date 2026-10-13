@@ -45,7 +45,10 @@ _RULES: tuple[_Rule, ...] = (
     _rule("CMD-H04", H, r"\bgh\s+(repo\s+delete|pr\s+merge|api\b.*-X\s*DELETE)", "GitHub destructive or merge operation"),
     _rule("CMD-H05", H, r"\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)[a-z]*\s+(/|~|\$HOME|\.\.|\*)(\s|/?$)", "Mass deletion outside the workspace"),
     _rule("CMD-H06", H, r"\b(drop\s+(database|schema|table)|truncate\s+table|delete\s+from\s+\w+\s*;?\s*$)", "Destructive database statement"),
-    _rule("CMD-H07", H, r"\b(docker|podman|nerdctl|kubectl|helm)\b", "Container or cluster control"),
+    # A container tool run as a command (also through a wrapper or `sh -c`), or its socket; not the word inside an
+    # argument such as `grep -i docker` or `find -iname "docker-compose*"` (T-55).
+    _rule("CMD-H07", H, r"(^|\b(?:xargs|exec|env|nohup|sudo|watch)\s+(?:-\S+\s+)*|\b(?:ba)?sh\s+-c\s+['\"]?)(?:\S*/)?"
+                        r"(?:docker(?:-compose)?|podman|nerdctl|kubectl|helm)\b|docker\.sock", "Container or cluster control"),
     _rule("CMD-H08", H, r"\b(terraform\s+(apply|destroy)|pulumi\s+(up|destroy)|cdk\s+deploy|serverless\s+deploy)\b", "Infrastructure change"),
     _rule("CMD-H09", H, r"\b(sudo|su\s|chmod\s+(-R\s+)?[0-7]*7[0-7]{2}\b|chown\s+-R|setcap|mount\s)", "Privilege or permission change"),
     _rule("CMD-H10", H, r"\b(aws|gcloud|az)\s+\S*\s*(delete|remove|rm|destroy|deploy)\b", "Cloud destructive or deploy operation"),

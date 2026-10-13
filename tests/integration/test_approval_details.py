@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from conftest import PLUGIN_TOKEN, git_repo  # type: ignore[import-not-found]
@@ -141,3 +143,35 @@ def test_budget_details_show_computed_runtime_and_unlimited_outcomes(api, servic
     runtime = next(t for t in texts(approval) if t.startswith("working time"))
     assert runtime.startswith("working time (min): 90 used of ") or runtime.startswith("working time (min): 89 used of ")
     assert approval["details"]["if_no"] == "The task continues with its current, limited budget."
+
+
+@pytest.mark.parametrize(("rule", "blocked"), [("CMD-H09", True), ("CMD-H11", False)])
+def test_a_gate_exception_says_in_plain_words_what_the_agents_tried(api, services, projects_root, rule, blocked):
+    """T-55: four near-identical technical lines with execution ids; a person with little development background
+    needs one sentence, whether it matters, and the commands only on request."""
+    from ho_core.enums import ApprovalAction, Risk
+
+    key, row = _task(api, services, projects_root)
+    data = {"execution_id": "01a1", "role": "REVIEWER", "provider": "claude",
+            "commands": [{"command": "sudo -u postgres psql -c '\\l'", "rule": rule}]}
+    with services.ctx.db.transaction() as cur:
+        cur.execute("INSERT INTO events (task_id, project_id, type, actor, summary, data, audit) VALUES "
+                    "(%s, %s, 'COMMAND_HIGH_RISK', 'agent-manager', '1 high-risk command(s) observed in execution 01a1 (advisory)', %s, false)",
+                    (row["id"], row["project_id"], json.dumps(data)))
+    with services.ctx.unit_of_work() as uow:
+        services.approvals.request(uow, action=ApprovalAction.HIGH_RISK_OPERATION, project_id=row["project_id"], task_id=row["id"],
+                                   subject={"kind": "quality_gate_exception", "commit": "a" * 40,
+                                            "reasons": ["policy violations were observed (section 58)"]},
+                                   config_hash="0" * 64, summary=f"{key}: Quality Gate exception needed", requested_by="quality-gate",
+                                   risk=Risk.CRITICAL)
+    [approval] = pending(api, "HIGH_RISK_OPERATION")
+    d = approval["details"]
+    assert d["commands"] == [{"who": "reviewer claude", "command": "sudo -u postgres psql -c '\\l'", "rule": rule,
+                              "meaning": "use administrator permissions" if blocked else "read passwords or keys"}]
+    assert "01a1" not in d["headline"] and texts(approval) == []  # the commands are listed once, not repeated as lines
+    if blocked:
+        assert d["headline"] == ("The agents tried 1 action(s) they are not allowed to do (for example, use administrator "
+                                 "permissions). They were blocked and changed nothing.")
+        assert d["risk"] == "low" and d["recommendation"]["action"] == "look"  # no passing tests or review recorded here
+    else:
+        assert "Check what they did" in d["headline"] and d["risk"] == "critical" and d["recommendation"]["action"] == "look"

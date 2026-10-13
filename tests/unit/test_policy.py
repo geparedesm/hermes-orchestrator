@@ -80,6 +80,10 @@ def test_high_risk_commands(command):
 
 def test_riskiest_segment_wins():
     assert classify("ls && docker ps").command_class == CommandClass.HIGH_RISK
+    for command in ("xargs docker rm", "/usr/bin/docker ps", "sh -c 'docker ps'", "nohup kubectl apply -f x", "docker-compose up"):
+        assert classify(command).command_class == CommandClass.HIGH_RISK, command
+    for command in ("git log --all --oneline | grep -i docker", "find . -iname 'docker-compose*' | head"):
+        assert classify(command).rule_id != "CMD-H07", command  # the word in an argument is not container control
     assert classify("ls; npm install x").command_class == CommandClass.CONTROLLED
 
 

@@ -140,6 +140,16 @@
 .orch-approval-task { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .orch-approval-question { margin: 0; white-space: pre-wrap; line-height: 1.45; font-size: 0.97rem; }
 .orch-approval-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.orch-highlights { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.9rem; }
+.orch-advice { display: flex; gap: 0.5rem; align-items: flex-start; border-radius: 8px; padding: 0.55rem 0.7rem; font-size: 0.9rem; line-height: 1.4; }
+.orch-advice svg { flex: none; margin-top: 0.15rem; }
+.orch-advice-good { background: color-mix(in srgb, var(--o-good) 14%, transparent); }
+.orch-advice-bad { background: color-mix(in srgb, var(--o-bad) 14%, transparent); }
+.orch-advice-warn { background: color-mix(in srgb, var(--o-warn) 14%, transparent); }
+.orch-technical { display: flex; flex-direction: column; gap: 0.6rem; }
+.orch-commands { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.45rem; }
+.orch-commands li { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.orch-commands code { font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--o-subtle, rgba(127,127,127,0.12)); border-radius: 6px; padding: 0.3rem 0.45rem; }
 .orch-approval-details { display: flex; flex-direction: column; gap: 0.6rem; border-top: 1px solid var(--o-border); padding-top: 0.6rem; }
 .orch-approval-label { font-size: 0.74rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--o-muted); }
 .orch-changes { list-style: none; margin: 0.3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }

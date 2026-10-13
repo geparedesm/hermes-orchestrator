@@ -706,9 +706,13 @@ class Executions:
         if result.ok:
             self._set_credential(uow, row["provider"], row["provider_identity"] or "default", "READY", None)
         if result.high_risk_commands:
+            # The commands themselves (redacted, cut short), so the person deciding a gate exception sees them (T-55).
+            commands = [{"command": redact(str(e.data.get("command") or ""))[0][:200], "rule": e.data.get("rule")}
+                        for e in result.events if e.type == "COMMAND_STARTED" and e.data.get("class") == "HIGH_RISK"][:10]
             record_event(uow.cur, "COMMAND_HIGH_RISK", actor="agent-manager", project_id=row["project_id"], task_id=row["task_id"],
                          summary=f"{result.high_risk_commands} high-risk command(s) observed in execution {str(row['id'])[:8]} (advisory)",
-                         data={"execution_id": str(row["id"])}, pending=uow.events)
+                         data={"execution_id": str(row["id"]), "role": row["role"], "provider": row["provider"],
+                               "commands": commands}, pending=uow.events)
 
     def _set_credential(self, uow: UnitOfWork, provider: str, identity: str, status: str, error: str | None) -> None:
         uow.cur.execute(

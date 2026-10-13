@@ -226,6 +226,9 @@ def compose_prompt(assignment: AgentAssignment) -> str:
         lines.append("- There is no Internet access apart from your model provider.")
     lines += [
         "- Never read, print, or copy credentials or files under /run/ho-credentials or /run/ho/secrets into output.",
+        ("- You run as an unprivileged user without sudo, Docker, or other containers: do not try them (they are blocked "
+         "and flagged to the person). The project's test services, when it has them, are already reachable: use the "
+         "project's test command."),
         ("- Finish with the structured review: verdict, summary, whether the task's requirements are met, and findings "
          "with severity, category, path, and line." if assignment.result_schema == "review-result" else
          "- Finish with the structured result: status, a short summary, changed files, tests, local commits, follow-ups."),
