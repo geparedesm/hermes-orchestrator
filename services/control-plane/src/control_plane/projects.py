@@ -105,7 +105,45 @@ class Projects:
             summary=f"Registered {project_slug} at {relative}",
             data={"slug": project_slug, "relative_path": relative, "remote": info.get("remote")}, pending=uow.events,
         )
-        return row
+        self.link_family(uow, row)
+        return self.get(uow, project_slug)
+
+    def _children_path(self, uow: UnitOfWork, project_id: Any) -> PurePosixPath | None:
+        """Where a project keeps its child projects (`children.path`), from its active or proposed configuration."""
+        uow.cur.execute("SELECT effective_config FROM project_configs WHERE project_id = %s AND status IN ('ACTIVE', 'PROPOSED') "
+                        "ORDER BY (status = 'ACTIVE') DESC, created_at DESC LIMIT 1", (project_id,))
+        row = uow.cur.fetchone()
+        path = (((row or {}).get("effective_config") or {}).get("children") or {}).get("path")
+        if not isinstance(path, str) or not path or path.startswith("/") or ".." in PurePosixPath(path).parts:
+            return None
+        return PurePosixPath(path)
+
+    def link_family(self, uow: UnitOfWork, project: Row) -> None:
+        """Link a project to its parent when it lives directly in the parent's `children.path` (a module cloned by hand,
+        not created from the template), and a parent to such projects registered before it. Either order works."""
+        here = PurePosixPath(project["relative_path"])
+        if project.get("parent_project_id") is None:
+            uow.cur.execute("SELECT * FROM projects WHERE id <> %s AND status <> 'UNREGISTERED'", (project["id"],))
+            for parent in uow.cur.fetchall():
+                path = self._children_path(uow, parent["id"])
+                if path is not None and here.parent == PurePosixPath(parent["relative_path"]) / path:
+                    self._link(uow, project, parent)
+                    break
+        path = self._children_path(uow, project["id"])
+        if path is not None:
+            base = PurePosixPath(project["relative_path"]) / path
+            uow.cur.execute("SELECT * FROM projects WHERE parent_project_id IS NULL AND status <> 'UNREGISTERED' AND id <> %s",
+                            (project["id"],))
+            for child in uow.cur.fetchall():
+                if PurePosixPath(child["relative_path"]).parent == base:
+                    self._link(uow, child, project)
+
+    def _link(self, uow: UnitOfWork, child: Row, parent: Row) -> None:
+        uow.cur.execute("UPDATE projects SET parent_project_id = %s, updated_at = now() WHERE id = %s AND parent_project_id IS NULL",
+                        (parent["id"], child["id"]))
+        record_event(uow.cur, "PROJECT_LINKED", actor="control-plane", project_id=child["id"],
+                     summary=f"{child['slug']} is a child of {parent['slug']} (it lives in its children folder)",
+                     data={"parent": parent["slug"]}, pending=uow.events)
 
     def scan(self, uow: UnitOfWork, *, slug: str, principal: Principal) -> dict[str, Any]:
         project = self.get(uow, slug, lock=True)
@@ -155,6 +193,7 @@ class Projects:
         uow.cur.execute("UPDATE projects SET head_commit = %s, updated_at = now() WHERE id = %s", (head, project["id"]))
 
         if active and active["effective_hash"] == effective.hash:
+            self.link_family(uow, self.get(uow, slug))
             return {"project": self.get(uow, slug), "config": active, "approval": None, "notes": notes, "changed": False}
 
         # A new proposal supersedes any open one.
@@ -198,6 +237,7 @@ class Projects:
             "UPDATE projects SET status = %s, updated_at = now(), version = version + 1 WHERE id = %s",
             (new_status.value, project["id"]),
         )
+        self.link_family(uow, self.get(uow, slug))  # its children path may be new: link modules registered before
         return {"project": self.get(uow, slug), "config": config, "approval": approval, "notes": notes, "changed": True}
 
     def unregister(self, uow: UnitOfWork, *, slug: str, principal: Principal) -> Row:
