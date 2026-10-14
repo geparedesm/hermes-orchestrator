@@ -155,3 +155,20 @@ def test_an_expired_request_can_be_asked_again_or_abandoned(api, services, paren
     stale = creation(api)
     assert api.post(f"/v1/projects/odoo-base/children/{stale['id']}/abandon").json()["state"] == "FAILED"
     assert request(api, name="job_reports").status_code == 201  # the name is free again
+
+
+def test_a_module_cloned_into_the_children_folder_is_linked_to_its_parent(api, projects_root, gh_state):
+    """The Linux server: odoo-base's modules were cloned by hand, not created from the template, and the Dashboard
+    showed none of them under odoo-base. Either order links them: the module first, or the parent scanned first."""
+    repo = git_repo(projects_root / "odoo-base", {".gitignore": "/custom-addons/*\n", ".hermes/project.yaml": PARENT_YAML,
+                                                  "README.md": "# odoo-base\n"})
+    git_repo(repo / "custom-addons" / "early_module", {"README.md": "# early\n"})
+    assert api.post("/v1/projects", {"path": "odoo-base"}).status_code == 201
+    assert api.post("/v1/projects", {"path": "odoo-base/custom-addons/early_module"}).status_code == 201
+    api.post("/v1/projects/odoo-base/scan")  # its children path is known now: the module registered before is linked
+    git_repo(repo / "custom-addons" / "late_module", {"README.md": "# late\n"})
+    assert api.post("/v1/projects", {"path": "odoo-base/custom-addons/late_module"}).status_code == 201
+    git_repo(repo / "elsewhere" / "other", {"README.md": "# other\n"})  # not in the children folder: no parent
+    assert api.post("/v1/projects", {"path": "odoo-base/elsewhere/other"}).status_code == 201
+    parents = {p["slug"]: p["parent"] for p in api.get("/v1/projects").json()["projects"]}
+    assert parents["early-module"] == "odoo-base" and parents["late-module"] == "odoo-base" and parents["other"] is None
