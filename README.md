@@ -42,6 +42,7 @@ sudo mkdir -p /srv/HermesProjects && sudo chown "$USER" /srv/HermesProjects
 cp .env.example .env
 sed -i "s|^HO_MACHINE_PROFILE=.*|HO_MACHINE_PROFILE=linux|; s|/Users/CHANGE_ME/HermesProjects|/srv/HermesProjects|" .env
 sed -i "s|^HO_DOCKER_GID=.*|HO_DOCKER_GID=$(getent group docker | cut -d: -f3)|" .env
+sudo scripts/linux-projects-permissions.sh   # you and the platform share the projects root; again after a manual clone
 make up
 docker compose exec control-plane ho health
 ```
