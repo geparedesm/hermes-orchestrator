@@ -12,6 +12,9 @@ from .app import create_app
 
 
 def main() -> None:
+    # Files written in the person's repositories stay group-writable: on Linux the person and this service share them
+    # through the projects group (scripts/linux-projects-permissions.sh); Docker Desktop ignores it.
+    os.umask(0o002)
     configure("git-service", os.environ.get("HO_LOG_LEVEL", "INFO"))
     token = Path(os.environ["HO_GIT_SERVICE_TOKEN_FILE"]).read_text().strip()
     root = Path(os.environ.get("HO_PROJECTS_ROOT", "/projects"))
