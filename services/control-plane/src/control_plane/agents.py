@@ -38,6 +38,13 @@ def record_usage(uow: UnitOfWork, execution: Row, rate_limits: list[dict[str, An
              window["resets_at"], window.get("observed_at"), execution.get("started_at"), execution["id"]))
 
 
+def default_model(uow: UnitOfWork, provider: str) -> str | None:
+    """The model a person chose for this agent in the Dashboard (None: the CLI's own default)."""
+    uow.cur.execute("SELECT model FROM provider_models WHERE provider = %s", (provider,))
+    row = uow.cur.fetchone()
+    return row["model"] if row else None
+
+
 def paused(uow: UnitOfWork, identity: str) -> set[str]:
     uow.cur.execute("SELECT provider FROM provider_settings WHERE identity = %s AND NOT enabled", (identity,))
     return {r["provider"] for r in uow.cur.fetchall()}
@@ -96,9 +103,7 @@ class Agents:
         return out
 
     def model_for(self, uow: UnitOfWork, provider: str) -> str | None:
-        uow.cur.execute("SELECT model FROM provider_models WHERE provider = %s", (provider,))
-        row = uow.cur.fetchone()
-        return row["model"] if row else None
+        return default_model(uow, provider)
 
     def set_model(self, uow: UnitOfWork, provider: str, model: str | None, *, principal: Principal) -> dict[str, Any]:
         if principal.value not in self.ctx.platform["platform"]["approvers"]:
