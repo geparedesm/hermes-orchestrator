@@ -109,9 +109,10 @@ class Projects:
         return self.get(uow, project_slug)
 
     def _children_path(self, uow: UnitOfWork, project_id: Any) -> PurePosixPath | None:
-        """Where a project keeps its child projects (`children.path`), from its active or proposed configuration."""
+        """Where a project keeps its child projects (`children.path`), from its newest active or proposed configuration
+        (a scan that changes the path links the projects in the new one)."""
         uow.cur.execute("SELECT effective_config FROM project_configs WHERE project_id = %s AND status IN ('ACTIVE', 'PROPOSED') "
-                        "ORDER BY (status = 'ACTIVE') DESC, created_at DESC LIMIT 1", (project_id,))
+                        "ORDER BY created_at DESC LIMIT 1", (project_id,))
         row = uow.cur.fetchone()
         path = (((row or {}).get("effective_config") or {}).get("children") or {}).get("path")
         if not isinstance(path, str) or not path or path.startswith("/") or ".." in PurePosixPath(path).parts:
