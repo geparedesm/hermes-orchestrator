@@ -265,10 +265,13 @@ def test_the_dashboard_shows_each_agents_plan_usage_and_a_person_can_pause_it(ap
     agents.finish_agent(execution, (FIXTURES / "codex-success.jsonl").read_bytes(),
                         extra={"ho/rate-limits.json": json.dumps(limits).encode()})
     services.scheduler.run_once()
+    with services.ctx.db.transaction() as cur:  # stand-in: Codex's login was confirmed (a missing login reads login_needed)
+        cur.execute("INSERT INTO credential_refs (provider, identity, status) VALUES ('codex', %s, 'READY') "
+                    "ON CONFLICT (provider, identity) DO UPDATE SET status = 'READY'", (services.ctx.provider_identity,))
     view = {a["provider"]: a for a in api.get("/v1/agents").json()["agents"]}
     codex = view["codex"]
     assert codex["session"]["used_percent"] == 88.0 and codex["week"]["used_percent"] == 61.0 and codex["status"] == "near_limit"
-    assert view["claude"]["session"] is None and view["claude"]["status"] in ("available", "login_needed")
+    assert view["claude"]["session"] is None and view["claude"]["status"] == "login_needed"
     with services.ctx.db.transaction() as cur:  # the raw file is never an artifact; only the numbers are kept
         cur.execute("SELECT count(*) AS n FROM artifacts WHERE path LIKE '%%rate-limits%%'")
         assert cur.fetchone()["n"] == 0
@@ -322,3 +325,16 @@ def test_renewing_a_paused_agents_login_holds_its_interrupted_work_until_resume(
     api.post("/v1/agents/claude/resume", {}, token=PLUGIN_TOKEN, principal="dashboard:operator")
     services.executions.dispatch(new)
     assert api.get(f"/v1/executions/{new}").json()["state"] != "REQUESTED"
+
+
+def test_an_agent_launches_with_the_model_a_person_chose(api, services, agents, task):
+    """A default model per agent (Dashboard) must reach the execution, and every launch must keep working."""
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+
+    plain = run_agent(api, task, provider="claude")
+    assert plain.status_code == 201, plain.text  # no model chosen: the CLI's own default
+    chosen = api.post("/v1/agents/claude/model", {"model": "claude-sonnet-5"}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    assert chosen.status_code == 200, chosen.text
+    response = run_agent(api, task, provider="claude")
+    assert response.status_code == 201, response.text
+    assert "claude-sonnet-5" in agents.specs[response.json()["id"]]["command"]
