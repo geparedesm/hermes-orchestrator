@@ -694,6 +694,9 @@ class Executions:
             elif result is not None:
                 if status.get("exit_code") == 0 and result.ok:
                     state, failure, reason = "SUCCEEDED", None, None
+                elif status.get("exit_code") in (124, 137, 143) and not status.get("oom_killed") and self._grant_expired(row):
+                    # Stopped by its time limit before sync marked it (Agent Manager enforces the grant's expiry too).
+                    state, failure, reason = "FAILED", "TIMEOUT", "reached its time limit"
                 else:
                     state = "FAILED"
                     failure = (result.failure_class or FailureClass.TASK).value
@@ -709,6 +712,14 @@ class Executions:
                          exit_code=status.get("exit_code"), artifacts=artifact_ids)
             exec_id = str(row["id"])
             uow.after_commit.append(lambda: self._remove(exec_id))
+
+    @staticmethod
+    def _grant_expired(row: Row) -> bool:
+        expires = ((row["spec"] or {}).get("grant") or {}).get("expires_at")
+        try:
+            return bool(expires) and datetime.fromisoformat(expires) <= datetime.now(timezone.utc)
+        except ValueError:
+            return False
 
     def _record_agent_result(self, uow: UnitOfWork, row: Row, result: ExecutionResult, units: dict[str, Any]) -> None:
         clean = json.loads(redact(json.dumps(result.as_json()))[0])

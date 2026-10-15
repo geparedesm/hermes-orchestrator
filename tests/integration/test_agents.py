@@ -338,3 +338,16 @@ def test_an_agent_launches_with_the_model_a_person_chose(api, services, agents, 
     response = run_agent(api, task, provider="claude")
     assert response.status_code == 201, response.text
     assert "claude-sonnet-5" in agents.specs[response.json()["id"]]["command"]
+
+
+def test_an_agent_cut_at_its_time_limit_fails_as_timeout(api, services, agents, task):
+    """T-1: the planning step ran past its 20 minutes; Agent Manager stopped it (exit 143) before sync marked it, and
+    it was recorded as UNKNOWN instead of TIMEOUT."""
+    execution = run_agent(api, task, provider="codex").json()["id"]
+    with services.ctx.db.transaction() as cur:  # stand-in: the grant's expiry passed while it ran
+        cur.execute("UPDATE executions SET spec = jsonb_set(spec, '{grant,expires_at}', to_jsonb((now() - interval '5 seconds')::text)) "
+                    "WHERE id = %s", (execution,))
+    agents.finish_agent(execution, (FIXTURES / "codex-success.jsonl").read_bytes()[:200], exit_code=143, reason="signal")
+    services.scheduler.run_once()
+    view = api.get(f"/v1/executions/{execution}").json()
+    assert view["state"] == "FAILED" and view["failure_class"] == "TIMEOUT", view

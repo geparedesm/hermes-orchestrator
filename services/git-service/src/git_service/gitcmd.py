@@ -3,15 +3,19 @@
 Repository configuration is attacker-controllable, so every command:
 - ignores system and global configuration;
 - disables hooks and fsmonitor (both can execute programs);
-- trusts only the exact repository path (safe.directory), never '*';
+- trusts only the exact repository paths (safe.directory), never '*': through a generated global configuration
+  holding nothing else, since Git before 2.43 ignores safe.directory given with -c (Linux, where the person owns
+  the repositories, needs it; Docker Desktop hides ownership);
 - never prompts and never uses a pager or external diff/textconv tools.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 GIT_TIMEOUT_SECONDS = 30
@@ -23,6 +27,26 @@ class GitError(RuntimeError):
 
 
 IDENTITY = ("Hermes Orchestrator", "hermes-orchestrator@localhost")
+
+
+def _safe_config(paths: tuple[Path, ...]) -> str:
+    """A global configuration holding only safe.directory for these exact repositories (and their .git, which Git
+    checks when it serves a clone or fetch). Written once per set of paths, in a private directory."""
+    entries = []
+    for path in paths:
+        text = str(path)
+        if any(c in text for c in '"\\\n\r'):
+            raise GitError("unsupported repository path")
+        entries += [text, f"{text}/.git"]
+    content = "[safe]\n" + "".join(f'\tdirectory = "{e}"\n' for e in entries)
+    folder = Path(tempfile.gettempdir()) / f"ho-git-safe-{os.getuid()}"
+    folder.mkdir(mode=0o700, exist_ok=True)
+    target = folder / (hashlib.sha256(content.encode()).hexdigest() + ".gitconfig")
+    if not target.exists():
+        scratch = folder / f".{target.name}.{os.getpid()}"
+        scratch.write_text(content, encoding="utf-8")
+        scratch.replace(target)
+    return str(target)
 
 
 def _environment(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -60,7 +84,8 @@ def run(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...
         command[command.index("-C") + 1] = "."
         cwd, pass_fds = f"/proc/self/fd/{cwd_fd}", (cwd_fd,)
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=_environment(env),
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
+                                env={**_environment(env), "GIT_CONFIG_GLOBAL": _safe_config((repo, *trusted))},
                                 check=False, input=input_text, cwd=cwd, pass_fds=pass_fds)
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {args[0]} timed out") from exc
@@ -72,7 +97,7 @@ def run(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...
 def popen(repo: Path, *args: str) -> subprocess.Popen[bytes]:
     """A hardened local git process with binary pipes (object streaming)."""
     return subprocess.Popen(command_for(repo, *args), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, env=_environment(None))
+                            stderr=subprocess.DEVNULL, env={**_environment(None), "GIT_CONFIG_GLOBAL": _safe_config((repo,))})
 
 
 def command_for(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...] = (),
