@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 S = TaskState
 ORCHESTRATOR = Principal("control-plane", "orchestrator")
 LEASE_MINUTES = 30
-STEP_TIMEOUT_MINUTES = 20
+STEP_TIMEOUT_MINUTES = 45  # default for scheduler.orchestrator_step_minutes
 MAX_STEP_FAILURES = 3
 MAX_ACTIONS = 30
 FAILBACK_HOLD = timedelta(minutes=10)
@@ -423,7 +423,8 @@ class Orchestration:
         uow.cur.execute("UPDATE tasks SET step_requested = false WHERE id = %s", (task["id"],))
         request = {"role": "ORCHESTRATOR", "provider": lease["provider"], "prompt": self.context_bundle(uow, task),
                    "result_schema": "orchestrator-step", "capabilities": {"project_read": True, "egress": "ALLOWLIST"},
-                   "max_turns": 40, "timeout_minutes": STEP_TIMEOUT_MINUTES, "lease_epoch": int(lease["epoch"]),
+                   "max_turns": 40,
+                   "timeout_minutes": int(self.ctx.platform["scheduler"].get("orchestrator_step_minutes", STEP_TIMEOUT_MINUTES)), "lease_epoch": int(lease["epoch"]),
                    "purpose": {"orchestrator_step": True, "fenced": True, "epoch": int(lease["epoch"]), "cursor": cursor,
                                "retry": int(task["orchestrator_failures"]) > 0}}
         return self.launch(uow, task, "STEP", request)

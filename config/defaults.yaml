@@ -62,6 +62,8 @@ scheduler:
   poll_seconds: 5
   # A waiting task gains one priority level per this many minutes (anti-starvation).
   aging_minutes: 30
+  # Time limit of one orchestrator step: a first planning step that reads large attachments (a 6-page CV) took 20.
+  orchestrator_step_minutes: 45
 
 # Budget profile limits (MASTER_SPEC section 70). null = not limited by that counter.
 budgets:
