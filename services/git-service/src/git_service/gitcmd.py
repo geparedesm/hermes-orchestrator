@@ -48,9 +48,10 @@ def _safe_config(paths: tuple[Path, ...]) -> str:
     folder = _SAFE_DIR
     target = folder / (hashlib.sha256(content.encode()).hexdigest() + ".gitconfig")
     if not target.exists():
-        scratch = folder / f".{target.name}.{os.getpid()}"
-        scratch.write_text(content, encoding="utf-8")
-        scratch.replace(target)
+        fd, scratch = tempfile.mkstemp(dir=folder, prefix=".", suffix=".tmp")  # unique per call: threads may race here
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.replace(scratch, target)
     return str(target)
 
 
