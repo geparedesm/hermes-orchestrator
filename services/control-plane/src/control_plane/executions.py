@@ -721,9 +721,10 @@ class Executions:
     def _grant_expired(row: Row, finished_at: Any = None) -> bool:
         """Whether the run ended at or after its grant's expiry (when the container finished, not when it is collected)."""
         expires = ((row["spec"] or {}).get("grant") or {}).get("expires_at")
+        if not expires or not finished_at:
+            return False  # without the finish time there is no evidence it ran into its limit
         try:
-            ended = datetime.fromisoformat(str(finished_at).replace("Z", "+00:00")) if finished_at else datetime.now(timezone.utc)
-            return bool(expires) and datetime.fromisoformat(expires) <= ended
+            return datetime.fromisoformat(expires) <= datetime.fromisoformat(str(finished_at).replace("Z", "+00:00"))
         except ValueError:
             return False
 

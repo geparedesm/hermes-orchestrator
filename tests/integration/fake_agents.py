@@ -5,6 +5,8 @@ The real Agent Manager is tested against Docker in tests/docker.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import base64
 from typing import Any
 
@@ -35,7 +37,8 @@ class FakeAgentManager:
         return {"execution": execution, "state": "running"}
 
     def finish(self, execution: str, exit_code: int = 0, files: dict[str, bytes] | None = None, logs: str = "") -> None:
-        self.containers[execution].update(state="exited", exit_code=exit_code, files=files or {}, logs=logs)
+        self.containers[execution].update(state="exited", exit_code=exit_code, files=files or {}, logs=logs,
+                                          finished_at=datetime.now(timezone.utc).isoformat())
 
     def finish_agent(self, execution: str, events: bytes, *, exit_code: int = 0, reason: str = "cli_exited",
                      extra: dict[str, bytes] | None = None) -> None:
@@ -56,7 +59,8 @@ class FakeAgentManager:
         container = self.containers.get(execution)
         if container is None:
             return {"execution": execution, "state": "absent"}
-        return {"execution": execution, "state": container["state"], "exit_code": container["exit_code"], "oom_killed": False}
+        return {"execution": execution, "state": container["state"], "exit_code": container["exit_code"], "oom_killed": False,
+                "finished_at": container.get("finished_at")}
 
     def stop(self, execution: str, grace_seconds: int = 10) -> dict[str, Any]:
         self.stopped.append(execution)
