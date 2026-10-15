@@ -694,12 +694,19 @@ class Executions:
             elif result is not None:
                 if status.get("exit_code") == 0 and result.ok:
                     state, failure, reason = "SUCCEEDED", None, None
+                elif (status.get("exit_code") in (137, 143) and not status.get("oom_killed")
+                      and not result.error_reported and self._grant_expired(row, status.get("finished_at"))):
+                    # Killed (SIGTERM/SIGKILL) at its time limit before sync marked it: Agent Manager enforces the grant's
+                    # expiry too. A run that finished with a result of its own (or a known failure) keeps it.
+                    state, failure, reason = "FAILED", "TIMEOUT", "reached its time limit"
                 else:
                     state = "FAILED"
                     failure = (result.failure_class or FailureClass.TASK).value
                     reason = "out of memory" if status.get("oom_killed") else (result.error or f"exit code {status.get('exit_code')}")
             elif status.get("exit_code") == 0:
                 state, failure, reason = "SUCCEEDED", None, None
+            elif status.get("exit_code") in (137, 143) and not status.get("oom_killed") and self._grant_expired(row, status.get("finished_at")):
+                state, failure, reason = "FAILED", "TIMEOUT", "reached its time limit"  # as for agent runs, above
             else:
                 state, failure = "FAILED", "TASK"
                 reason = "out of memory" if status.get("oom_killed") else f"exit code {status.get('exit_code')}"
@@ -709,6 +716,17 @@ class Executions:
                          exit_code=status.get("exit_code"), artifacts=artifact_ids)
             exec_id = str(row["id"])
             uow.after_commit.append(lambda: self._remove(exec_id))
+
+    @staticmethod
+    def _grant_expired(row: Row, finished_at: Any = None) -> bool:
+        """Whether the run ended at or after its grant's expiry (when the container finished, not when it is collected)."""
+        expires = ((row["spec"] or {}).get("grant") or {}).get("expires_at")
+        if not expires or not finished_at:
+            return False  # without the finish time there is no evidence it ran into its limit
+        try:
+            return datetime.fromisoformat(expires) <= datetime.fromisoformat(str(finished_at).replace("Z", "+00:00"))
+        except ValueError:
+            return False
 
     def _record_agent_result(self, uow: UnitOfWork, row: Row, result: ExecutionResult, units: dict[str, Any]) -> None:
         clean = json.loads(redact(json.dumps(result.as_json()))[0])

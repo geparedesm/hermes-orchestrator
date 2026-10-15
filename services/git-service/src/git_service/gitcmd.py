@@ -3,15 +3,19 @@
 Repository configuration is attacker-controllable, so every command:
 - ignores system and global configuration;
 - disables hooks and fsmonitor (both can execute programs);
-- trusts only the exact repository path (safe.directory), never '*';
+- trusts only the exact repository paths (safe.directory), never '*': through a generated global configuration
+  holding nothing else, since Git before 2.43 ignores safe.directory given with -c (Linux, where the person owns
+  the repositories, needs it; Docker Desktop hides ownership);
 - never prompts and never uses a pager or external diff/textconv tools.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 GIT_TIMEOUT_SECONDS = 30
@@ -23,6 +27,38 @@ class GitError(RuntimeError):
 
 
 IDENTITY = ("Hermes Orchestrator", "hermes-orchestrator@localhost")
+
+
+_SAFE_DIR: Path | None = None
+
+
+def _safe_config(paths: tuple[Path, ...], *, keep: bool = True) -> str:
+    """A global configuration holding only safe.directory for these exact repositories (and their .git, which Git
+    checks when it serves a clone or fetch), in a private directory: per call (`keep=False`, removed after the
+    command) or cached per repository (object streaming, a bounded set)."""
+    entries = []
+    for path in paths:
+        text = str(path)
+        if any(c in text for c in '"\\\n\r'):
+            raise GitError("unsupported repository path")
+        entries += [text, f"{text}/.git"]
+    content = "[safe]\n" + "".join(f'\tdirectory = "{e}"\n' for e in entries)
+    global _SAFE_DIR
+    if _SAFE_DIR is None:  # unpredictable and private to this process (0700): nobody can plant a configuration in it
+        _SAFE_DIR = Path(tempfile.mkdtemp(prefix="ho-git-safe-"))
+    folder = _SAFE_DIR
+    if not keep:  # one file for this call, removed by the caller: per-task paths never accumulate
+        fd, single = tempfile.mkstemp(dir=folder, suffix=".gitconfig")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        return single
+    target = folder / (hashlib.sha256(content.encode()).hexdigest() + ".gitconfig")
+    if not target.exists():
+        fd, scratch = tempfile.mkstemp(dir=folder, prefix=".", suffix=".tmp")  # unique per call: threads may race here
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.replace(scratch, target)
+    return str(target)
 
 
 def _environment(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -59,11 +95,15 @@ def run(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...
     if cwd_fd is not None and os.path.isdir("/proc/self/fd"):
         command[command.index("-C") + 1] = "."
         cwd, pass_fds = f"/proc/self/fd/{cwd_fd}", (cwd_fd,)
+    safe = _safe_config((repo, *trusted), keep=False)
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=_environment(env),
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
+                                env={**_environment(env), "GIT_CONFIG_GLOBAL": safe},
                                 check=False, input=input_text, cwd=cwd, pass_fds=pass_fds)
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {args[0]} timed out") from exc
+    finally:
+        os.unlink(safe)
     if result.returncode not in ok_codes:
         raise GitError(result.stderr.strip()[:500] or f"git {args[0]} failed")
     return result
@@ -72,7 +112,7 @@ def run(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...
 def popen(repo: Path, *args: str) -> subprocess.Popen[bytes]:
     """A hardened local git process with binary pipes (object streaming)."""
     return subprocess.Popen(command_for(repo, *args), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, env=_environment(None))
+                            stderr=subprocess.DEVNULL, env={**_environment(None), "GIT_CONFIG_GLOBAL": _safe_config((repo,))})
 
 
 def command_for(repo: Path, *args: str, protocols: str = "never", config: tuple[str, ...] = (),

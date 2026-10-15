@@ -144,6 +144,10 @@ class CodexAdapter:
             result.ok = True
         else:
             result.failure_class = self.classify_failure(bundle)
+            # Only a terminal outcome counts: a "Reconnecting..." notice is a retry the CLI was still working through.
+            result.error_reported = bool(last) or any(
+                e.get("type") == "turn.failed" or (e.get("type") == "error" and not str(e.get("message", "")).startswith("Reconnecting"))
+                for e in raw)
             result.error = self._last_error(raw) or (
                 "the final answer did not match the result schema" if last else str(runner_state(bundle).get("reason") or "execution failed"))
         return result

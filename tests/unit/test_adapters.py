@@ -295,3 +295,12 @@ def test_codex_reads_the_usage_the_runner_copied_from_the_session_log():
     for broken in (b"not json", b"[]", b'{"primary": {"used_percent": 5, "window_minutes": 300, "resets_at": 1e400}}',
                    b'{"primary": {"used_percent": NaN, "window_minutes": 300, "resets_at": 1}}', json.dumps({"primary": {"used_percent": 400, "window_minutes": 300, "resets_at": now}}).encode()):
         assert CodexAdapter().collect_result(bundle("", **{"rate-limits.json": broken})).rate_limits == []
+
+
+def test_codex_reconnect_notices_are_not_a_reported_outcome():
+    """A run cut at its time limit while Codex was reconnecting is a TIMEOUT, not the reconnect text."""
+    events = b'{"type":"thread.started","thread_id":"t"}\n{"type":"error","message":"Reconnecting... 2/5"}\n'
+    result = CodexAdapter().collect_result(bundle(events_jsonl=events, exit_code=143, reason="signal"))
+    assert not result.ok and result.error_reported is False
+    failed = b'{"type":"thread.started","thread_id":"t"}\n{"type":"turn.failed","error":{"message":"quota exceeded"}}\n'
+    assert CodexAdapter().collect_result(bundle(events_jsonl=failed, exit_code=1)).error_reported is True

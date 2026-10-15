@@ -349,6 +349,10 @@ def test_scope_conflicts_queue_the_launch(api, services, agents, repo, task):
     assert len(active(services, task, "DEVELOPER")) == 1
     [pending] = q(services, "SELECT * FROM pending_launches")
     assert "scope overlaps" in pending["reason"]
+    for _ in range(3):  # retried every pass while the overlap lasts: the wait is recorded once (T-1, T-56)
+        services.orchestration.process_pending()
+    [row] = q(services, "SELECT count(*) AS n FROM events WHERE type = 'LAUNCH_WAITING' AND summary LIKE '%%scope overlaps%%'")
+    assert row["n"] == 1
 
 
 # ------------------------------------------------------------------ relationships and knowledge

@@ -237,7 +237,12 @@ class Orchestration:
         if queue:
             uow.cur.execute("INSERT INTO pending_launches (id, task_id, subtask_id, kind, request, reason) VALUES (%s, %s, %s, %s, %s, %s)",
                             (uuid7(), task["id"], subtask["id"] if subtask else None, kind, jsonb(request), blocker[:300]))
-            self._event(uow, task, "LAUNCH_WAITING", f"{kind.lower()} waits: {blocker}", {"kind": kind})
+            summary = f"{kind.lower()} waits: {blocker}"
+            # Retried every scheduler pass: record the wait once per reason, not every few seconds (T-1, T-56).
+            uow.cur.execute("SELECT 1 FROM events WHERE task_id = %s AND type = 'LAUNCH_WAITING' AND summary = %s "
+                            "AND occurred_at > now() - interval '30 minutes' LIMIT 1", (task["id"], summary[:300]))  # as stored
+            if uow.cur.fetchone() is None:
+                self._event(uow, task, "LAUNCH_WAITING", summary, {"kind": kind})
         return None
 
     def _start(self, uow: UnitOfWork, task: Row, request: dict[str, Any]) -> Row:
