@@ -694,9 +694,10 @@ class Executions:
             elif result is not None:
                 if status.get("exit_code") == 0 and result.ok:
                     state, failure, reason = "SUCCEEDED", None, None
-                elif status.get("exit_code") not in (0, None) and not status.get("oom_killed") and self._grant_expired(row, status.get("finished_at")):
-                    # Stopped by its time limit before sync marked it (Agent Manager enforces the grant's expiry too);
-                    # a run that still finished cleanly with a valid result keeps it.
+                elif (status.get("exit_code") in (137, 143) and not status.get("oom_killed")
+                      and result.failure_class in (None, FailureClass.UNKNOWN) and self._grant_expired(row, status.get("finished_at"))):
+                    # Killed (SIGTERM/SIGKILL) at its time limit before sync marked it: Agent Manager enforces the grant's
+                    # expiry too. A run that finished with a result of its own (or a known failure) keeps it.
                     state, failure, reason = "FAILED", "TIMEOUT", "reached its time limit"
                 else:
                     state = "FAILED"
@@ -704,7 +705,7 @@ class Executions:
                     reason = "out of memory" if status.get("oom_killed") else (result.error or f"exit code {status.get('exit_code')}")
             elif status.get("exit_code") == 0:
                 state, failure, reason = "SUCCEEDED", None, None
-            elif not status.get("oom_killed") and self._grant_expired(row, status.get("finished_at")):
+            elif status.get("exit_code") in (137, 143) and not status.get("oom_killed") and self._grant_expired(row, status.get("finished_at")):
                 state, failure, reason = "FAILED", "TIMEOUT", "reached its time limit"  # as for agent runs, above
             else:
                 state, failure = "FAILED", "TASK"
