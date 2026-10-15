@@ -721,8 +721,9 @@ class Orchestration:
         states = {x["state"] for x in self._subtasks(uow, task)}
         if "ACCEPTED" not in states or not states <= {"ACCEPTED", "INTEGRATED", "CANCELLED"}:
             return False
-        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE'",
-                        (task["id"],))
+        uow.cur.execute("SELECT count(*) AS n FROM executions WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE' "
+                        "AND (started_at IS NOT NULL OR state = ANY(%s))",
+                        (task["id"], list(ACTIVE)))
         return int(uow.cur.fetchone()["n"]) < RESOLVE_ATTEMPTS  # type: ignore[index]
 
     def _set_requirements(self, uow: UnitOfWork, task: Row, text: str, *, source: str, reason: str) -> str:
@@ -1593,7 +1594,9 @@ class Orchestration:
         the target), at most RESOLVE_ATTEMPTS per task, then the orchestrator decides."""
         ref = result["conflicting_ref"]
         uow.cur.execute("SELECT count(*) AS n, count(*) FILTER (WHERE spec->'purpose'->>'ref' = %s) AS same FROM executions "
-                        "WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE'", (ref, task["id"]))
+                        # Only resolutions that ran count: one that never started (no image, Docker error) is no attempt.
+                        "WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE' AND (started_at IS NOT NULL OR state = ANY(%s))",
+                        (ref, task["id"], list(ACTIVE)))
         attempts = uow.cur.fetchone()
         if int(attempts["same"]) or int(attempts["n"]) >= RESOLVE_ATTEMPTS:  # type: ignore[index]
             self._input(uow, task, f"integration conflict in {', '.join(result['conflicts'][:5])} after a resolution attempt")
