@@ -144,6 +144,7 @@ class CodexAdapter:
             result.ok = True
         else:
             result.failure_class = self.classify_failure(bundle)
+            result.error_reported = bool(self._last_error(raw) or last)
             result.error = self._last_error(raw) or (
                 "the final answer did not match the result schema" if last else str(runner_state(bundle).get("reason") or "execution failed"))
         return result

@@ -168,6 +168,7 @@ class ClaudeAdapter:
         result.rate_limits = self._rate_limits(raw)
         result.session_id = next((e.get("session_id") for e in raw if e.get("session_id")), None)
         if final is not None:
+            result.error_reported = True
             result.session_id = final.get("session_id") or result.session_id
             if not final.get("is_error") and normalize_structured(self.provider, final.get("structured_output"), result, schema):
                 result.ok = True

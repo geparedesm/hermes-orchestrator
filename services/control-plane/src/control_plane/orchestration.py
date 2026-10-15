@@ -239,10 +239,9 @@ class Orchestration:
                             (uuid7(), task["id"], subtask["id"] if subtask else None, kind, jsonb(request), blocker[:300]))
             summary = f"{kind.lower()} waits: {blocker}"
             # Retried every scheduler pass: record the wait once per reason, not every few seconds (T-1, T-56).
-            uow.cur.execute("SELECT summary FROM events WHERE task_id = %s AND type = 'LAUNCH_WAITING' AND data->>'kind' = %s "
-                            "AND occurred_at > now() - interval '30 minutes' ORDER BY seq DESC LIMIT 1", (task["id"], kind))
-            last = uow.cur.fetchone()
-            if last is None or last["summary"] != summary[:300]:  # as _event stores it
+            uow.cur.execute("SELECT 1 FROM events WHERE task_id = %s AND type = 'LAUNCH_WAITING' AND summary = %s "
+                            "AND occurred_at > now() - interval '30 minutes' LIMIT 1", (task["id"], summary[:300]))  # as stored
+            if uow.cur.fetchone() is None:
                 self._event(uow, task, "LAUNCH_WAITING", summary, {"kind": kind})
         return None
 

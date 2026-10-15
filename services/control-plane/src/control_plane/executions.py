@@ -695,7 +695,7 @@ class Executions:
                 if status.get("exit_code") == 0 and result.ok:
                     state, failure, reason = "SUCCEEDED", None, None
                 elif (status.get("exit_code") in (137, 143) and not status.get("oom_killed")
-                      and result.failure_class in (None, FailureClass.UNKNOWN) and self._grant_expired(row, status.get("finished_at"))):
+                      and not result.error_reported and self._grant_expired(row, status.get("finished_at"))):
                     # Killed (SIGTERM/SIGKILL) at its time limit before sync marked it: Agent Manager enforces the grant's
                     # expiry too. A run that finished with a result of its own (or a known failure) keeps it.
                     state, failure, reason = "FAILED", "TIMEOUT", "reached its time limit"

@@ -132,6 +132,7 @@ class ExecutionResult:
     session_id: str | None = None
     failure_class: FailureClass | None = None
     error: str | None = None
+    error_reported: bool = False  # the CLI itself reported the outcome (an error or a final answer), not only the runner
     high_risk_commands: int = 0
     credential_refreshed: bool = False
     structured: dict[str, Any] | None = None  # the validated structured answer (any result schema)
