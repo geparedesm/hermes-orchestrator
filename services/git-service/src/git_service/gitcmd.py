@@ -29,6 +29,9 @@ class GitError(RuntimeError):
 IDENTITY = ("Hermes Orchestrator", "hermes-orchestrator@localhost")
 
 
+_SAFE_DIR: Path | None = None
+
+
 def _safe_config(paths: tuple[Path, ...]) -> str:
     """A global configuration holding only safe.directory for these exact repositories (and their .git, which Git
     checks when it serves a clone or fetch). Written once per set of paths, in a private directory."""
@@ -39,8 +42,10 @@ def _safe_config(paths: tuple[Path, ...]) -> str:
             raise GitError("unsupported repository path")
         entries += [text, f"{text}/.git"]
     content = "[safe]\n" + "".join(f'\tdirectory = "{e}"\n' for e in entries)
-    folder = Path(tempfile.gettempdir()) / f"ho-git-safe-{os.getuid()}"
-    folder.mkdir(mode=0o700, exist_ok=True)
+    global _SAFE_DIR
+    if _SAFE_DIR is None:  # unpredictable and private to this process (0700): nobody can plant a configuration in it
+        _SAFE_DIR = Path(tempfile.mkdtemp(prefix="ho-git-safe-"))
+    folder = _SAFE_DIR
     target = folder / (hashlib.sha256(content.encode()).hexdigest() + ".gitconfig")
     if not target.exists():
         scratch = folder / f".{target.name}.{os.getpid()}"
