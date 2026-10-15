@@ -704,6 +704,8 @@ class Executions:
                     reason = "out of memory" if status.get("oom_killed") else (result.error or f"exit code {status.get('exit_code')}")
             elif status.get("exit_code") == 0:
                 state, failure, reason = "SUCCEEDED", None, None
+            elif not status.get("oom_killed") and self._grant_expired(row, status.get("finished_at")):
+                state, failure, reason = "FAILED", "TIMEOUT", "reached its time limit"  # as for agent runs, above
             else:
                 state, failure = "FAILED", "TASK"
                 reason = "out of memory" if status.get("oom_killed") else f"exit code {status.get('exit_code')}"
