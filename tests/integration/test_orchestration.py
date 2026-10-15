@@ -677,6 +677,10 @@ def test_each_conflicting_workspace_gets_one_resolution_attempt(api, services, a
     assert len(handed) == 1 and inputs() == 1
     conflict("t-1-8a1")  # another subtask's workspace conflicting too gets its own attempt
     assert len(handed) == 2 and inputs() == 1
+    # T-1: a resolution that never started (its image was missing) is no attempt; the conflict is handed over again.
+    q(services, "UPDATE executions SET state = 'FAILED', started_at = NULL, ended_at = now() WHERE id = %s", step["id"])
+    conflict("t-1-7a1")
+    assert len(handed) == 3 and inputs() == 1
 
 
 def test_a_subtask_whose_dependencies_conflict_reconciles_them_first(api, services, agents, repo, task):
