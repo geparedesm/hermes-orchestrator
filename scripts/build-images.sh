@@ -21,6 +21,15 @@ BUILD_ARGS=(--build-arg "NODE_IMAGE=$NODE_IMAGE" --build-arg "CLAUDE_CODE_VERSIO
             --build-arg "ODOO_RELEASE=$ODOO_RELEASE" --build-arg "ODOO_SHA256=$ODOO_SHA256"
             --build-arg "ODOO_EXTRA_PYTHON=$ODOO_EXTRA_PYTHON")
 
+# Keep the currently pinned images alive while building (T-3): retagging :dev would otherwise let Docker delete an image
+# the lock still names, and launches in the meantime would fail with "No such image". They stay tagged :pinned-previous
+# until the next build.
+if [[ -z "${HO_PLATFORM:-}" && -f config/images.lock.yaml ]]; then
+  sed -n 's/^  \([a-z0-9-]*\): "\(sha256:[0-9a-f]*\)"$/\1 \2/p' config/images.lock.yaml | while read -r name id; do
+    docker image inspect "$id" >/dev/null 2>&1 && docker tag "$id" "hermes-orchestrator/$name:pinned-previous" || true
+  done
+fi
+
 declare -a LOCK=()
 build() {  # build <name> <dockerfile> <context> [build args...]
   local name=$1 dockerfile=$2 context=$3
@@ -81,4 +90,8 @@ tmp="$(mktemp config/.images.lock.XXXXXX)"
 } > "$tmp"
 chmod 644 "$tmp"  # mktemp makes it 0600; Agent Manager reads it as another user (Linux enforces this; Docker Desktop does not)
 mv "$tmp" config/images.lock.yaml
+# The new pins get their own tag too, so the next build keeps them alive while it runs.
+sed -n 's/^  \([a-z0-9-]*\): "\(sha256:[0-9a-f]*\)"$/\1 \2/p' config/images.lock.yaml | while read -r name id; do
+  docker tag "$id" "hermes-orchestrator/$name:pinned"
+done
 cat config/images.lock.yaml

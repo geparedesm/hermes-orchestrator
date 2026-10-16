@@ -351,3 +351,28 @@ def test_an_agent_cut_at_its_time_limit_fails_as_timeout(api, services, agents, 
     services.scheduler.run_once()
     view = api.get(f"/v1/executions/{execution}").json()
     assert view["state"] == "FAILED" and view["failure_class"] == "TIMEOUT", view
+
+
+def test_an_agent_waits_for_docker_memory_instead_of_failing(api, services, agents, task):
+    """T-3: "not enough Docker memory" failed each orchestrator step at once, and three of them blocked the task."""
+    from control_plane.agentmgr import AgentManagerError
+
+    agents.fail_with = AgentManagerError(409, "capacity_exceeded", "not enough Docker memory: needs 4096 MiB, 1649 MiB available")
+    response = run_agent(api, task, provider="codex")
+    execution = response.json()["id"]
+    services.executions.dispatch(execution)
+    services.executions.dispatch(execution)
+    view = api.get(f"/v1/executions/{execution}").json()
+    assert view["state"] == "REQUESTED"  # waiting, not failed, and no dispatch attempt spent
+    agents.fail_with = None  # memory freed
+    services.executions.dispatch(execution)
+    assert api.get(f"/v1/executions/{execution}").json()["state"] != "REQUESTED"
+    with services.ctx.db.transaction() as cur:  # a wait this long means it will not fit: it fails as CAPACITY
+        cur.execute("UPDATE executions SET created_at = now() - interval '31 minutes' WHERE id = %s", (execution,))
+    agents.fail_with = AgentManagerError(409, "capacity_exceeded", "not enough Docker memory")
+    late = run_agent(api, task, provider="codex").json()["id"]
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE executions SET created_at = now() - interval '31 minutes' WHERE id = %s", (late,))
+    services.executions.dispatch(late)
+    view = api.get(f"/v1/executions/{late}").json()
+    assert view["state"] == "FAILED" and view["failure_class"] == "CAPACITY"

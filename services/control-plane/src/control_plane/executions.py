@@ -45,6 +45,7 @@ ACTIVE = ("REQUESTED", "STARTING", "RUNNING", "STOPPING")
 TERMINAL = ("SUCCEEDED", "FAILED", "CANCELLED", "LOST")
 AGENT_ROLES = {Role.ORCHESTRATOR, Role.DEVELOPER, Role.REVIEWER}
 MAX_DISPATCH_ATTEMPTS = 5
+CAPACITY_WAIT = timedelta(minutes=30)  # an execution waits this long for Docker memory before it fails as CAPACITY
 _WORKSPACE = re.compile(r"^\.hermes/worktrees/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _FAILURE_BY_CODE = {"capacity_exceeded": "CAPACITY", "auth_required": "AUTH", "rejected": "POLICY",
                     "image_not_allowed": "POLICY", "not_found": "UNKNOWN", "docker_error": "TRANSIENT"}
@@ -456,6 +457,14 @@ class Executions:
             with self.ctx.unit_of_work() as uow:
                 row = self.get(uow, execution_id, lock=True)
                 if row["state"] != "REQUESTED":
+                    return
+                waited = datetime.now(timezone.utc) - row["created_at"]
+                if exc.code == "capacity_exceeded" and waited < CAPACITY_WAIT:
+                    # Not enough Docker memory right now (T-3): wait for running work to free it, without spending a
+                    # dispatch attempt; sync dispatches it again. Only a wait this long means it will not fit.
+                    uow.cur.execute("UPDATE executions SET dispatch_attempts = greatest(dispatch_attempts - 1, 0) WHERE id = %s",
+                                    (row["id"],))
+                    log.info("dispatch of %s waits for capacity: %s", execution_id, exc)
                     return
                 self._intent(uow, row["id"], "SENT" if exc.retryable else "FAILED", str(exc))
                 if exc.retryable and attempts < MAX_DISPATCH_ATTEMPTS:
