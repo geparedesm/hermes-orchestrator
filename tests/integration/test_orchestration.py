@@ -795,6 +795,27 @@ def test_accepted_work_still_integrates_after_a_resolution_that_could_not_start(
     assert not result["ok"] and result["conflicts"] == ["a.py"]  # the real conflict, not "no committed work"
 
 
+@pytest.mark.parametrize(("blocked", "planning"), [(True, False), (False, False), (True, True)])
+def test_a_resolution_without_a_merge_stops_instead_of_looping(api, services, agents, repo, task, blocked, planning):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "print('task')\n"})
+    commit(repo, "the person writes the same file", {"a.py": "print('person')\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    [resolver] = active(services, task, "DEVELOPER")
+    with services.ctx.unit_of_work() as uow:
+        assert services.orchestration._integrate_if_ready(uow, services.tasks.get(uow, task, lock=True), explicit=True) == "conflict resolution running"
+        assert services.orchestration.request_step(uow, services.tasks.get(uow, task, lock=True)) is None
+    if planning:  # stand-in: integration started from the accepted-plan recovery path, in PLANNING (Codex review)
+        q(services, "UPDATE tasks SET state = 'PLANNING' WHERE key = %s", task)
+    result = {**DONE, "status": "blocked" if blocked else "completed",
+              "blocked_reason": "PostgreSQL unavailable" if blocked else None}
+    answer(services, agents, resolver["id"], result)
+    assert state(api, task) == "BLOCKED"
+    assert not active(services, task, "DEVELOPER")
+    assert not active(services, task, "ORCHESTRATOR")
+
+
 def test_a_paused_agent_gets_no_new_work(api, services, agents, task):
     from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
 

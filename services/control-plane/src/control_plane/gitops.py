@@ -32,6 +32,7 @@ from .errors import ApiError, BadRequest, Conflict, UpstreamError
 from .events import record_event
 from .executions import ExecutionRequest, Executions
 from .tasks import Tasks
+from . import testenv
 
 log = logging.getLogger(__name__)
 S = TaskState
@@ -297,7 +298,8 @@ class GitChanges:
         result = self.ctx.git.integrate(project["relative_path"], task_key, changes["target_branch"], heads)
         if not result["ok"]:
             uow.cur.execute("UPDATE git_changes SET integration_conflicts = %s, updated_at = now() WHERE task_id = %s",
-                            (jsonb({"files": result["conflicts"], "ref": result["conflicting_ref"]}), task["id"]))
+                            (jsonb({"files": result["conflicts"], "ref": result["conflicting_ref"],
+                                    "base_ref": result.get("conflict_base_ref")}), task["id"]))
             self._event(uow, task, "INTEGRATION_CONFLICT",
                         f"{result['conflicting_ref']} conflicts with {changes['target_branch']} in {', '.join(result['conflicts'][:5])}",
                         {"conflicts": result["conflicts"], "ref": result["conflicting_ref"]})
@@ -324,7 +326,7 @@ class GitChanges:
     def resolve_conflicts(self, uow: UnitOfWork, task_key: str, *, provider: str, principal: Principal) -> dict[str, Any]:
         """Agent-assisted reconciliation (section 38): a clone at the target with the conflicting work merged
         and its conflicts left in place, and a DEVELOPER execution asked to resolve them."""
-        task, project, _ = self._context(uow, task_key, lock=True)
+        task, project, config = self._context(uow, task_key, lock=True)
         changes = self._changes(uow, task)
         conflicts = (changes or {}).get("integration_conflicts") or {}
         if not conflicts:
@@ -335,7 +337,8 @@ class GitChanges:
         branch = task_branch(self._policy(self._context(uow, task_key)[2])["prefix"], task_key, suffix)
         # Reclaims a clone left by a launch that was rolled back (refused for budget or capacity: T-53).
         prepared = self._prepare(uow, task, project, name, lambda: self.ctx.git.conflict_workspace(
-            project["relative_path"], name, branch, changes["target_branch"], conflicts["ref"]))  # type: ignore[index]
+            project["relative_path"], name, branch, changes["target_branch"], conflicts["ref"],
+            base_ref=conflicts.get("base_ref")))  # type: ignore[index]
         # Work already integrated through this workspace replaces the conflicting one.
         uow.cur.execute("UPDATE workspaces SET status = 'RETAINED' WHERE task_id = %s AND name = %s",
                         (task["id"], conflicts["ref"].rsplit("/", 1)[-1]))
@@ -350,9 +353,14 @@ class GitChanges:
                   f"with conflicts in: {files}. The target branch contains changes made by a human; keep their intent. "
                   "Resolve every conflict, run the project's tests, and commit the merge (git commit --no-edit). "
                   "If the two changes contradict each other and cannot both be kept, do not guess: report blocked.")
+        services = testenv.request_body(project, config, prepared["path"])
+        capabilities = {"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE"}
+        if services:
+            capabilities["test_services"] = True
         execution = self.executions.request(uow, principal=principal, task_key=task_key, req=ExecutionRequest(
             role="DEVELOPER", provider=provider, prompt=prompt, workspace=prepared["path"],
-            capabilities={"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE"}))
+            capabilities=capabilities, purpose={"kind": "RESOLVE", "ref": conflicts["ref"],
+                                              **({"test_environment": services} if services else {})}))
         return {"workspace": name, "conflicts": prepared["conflicts"], "execution": str(execution["id"])}
 
     # ----------------------------------------------------------------- GitHub

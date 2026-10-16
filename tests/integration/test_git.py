@@ -243,7 +243,11 @@ def test_integration_keeps_human_changes_and_retests(api, services, repo, agents
     assert "INTEGRATION_COMPLETED" in events(api, task) and "TEST_PASSED" in events(api, task)
 
 
-def test_conflict_is_reported_and_resolved_by_an_agent(api, services, repo, agents, task):
+def test_conflict_is_reported_and_resolved_by_an_agent(api, services, repo, agents, task, monkeypatch):
+    from control_plane import testenv
+
+    environment = {"project": "demo", "services": ["postgres"]}
+    monkeypatch.setattr(testenv, "request_body", lambda *args: environment)
     ws = workspace(api, task)
     commit(clone(repo, ws), "task line 5", {"app.py": edit_line(APP, 5, "task line 5")})
     commit(repo, "user line 5", {"app.py": edit_line(APP, 5, "user line 5")})
@@ -255,6 +259,9 @@ def test_conflict_is_reported_and_resolved_by_an_agent(api, services, repo, agen
     assert resolved.status_code == 201, resolved.text
     body = resolved.json()
     spec = agents.specs[body["execution"]]
+    assert spec["purpose"]["kind"] == "RESOLVE"
+    assert spec["purpose"]["test_environment"] == environment
+    assert spec["grant"]["capabilities"]["network"]["test_services"] is True
     assert "app.py" in spec["inputs"]["prompt.md"] and spec["workspace"].endswith(body["workspace"])
     # The agent resolves the conflict in its workspace and commits the merge.
     conflict_clone = repo / ".hermes" / "worktrees" / body["workspace"]
@@ -267,6 +274,21 @@ def test_conflict_is_reported_and_resolved_by_an_agent(api, services, repo, agen
 
 
 # ------------------------------------------------------------------------ merge
+
+
+def test_resolution_includes_work_already_integrated_before_the_conflict(api, services, repo, agents, task):
+    first = workspace(api, task, "first")
+    second = workspace(api, task, "second")
+    first_sha = commit(clone(repo, first), "first subtask", {"app.py": edit_line(APP, 5, "first subtask")})
+    second_sha = commit(clone(repo, second), "second subtask", {"app.py": edit_line(APP, 5, "second subtask")})
+    result = api.post(f"/v1/tasks/{task}/git/integrate").json()
+    assert not result["ok"]
+    resolved = api.post(f"/v1/tasks/{task}/git/resolve", {"provider": "claude"}).json()
+    ws = repo / ".hermes" / "worktrees" / resolved["workspace"]
+    assert sh(ws, "rev-parse", "HEAD") == first_sha
+    assert sh(ws, "rev-parse", "MERGE_HEAD") == second_sha
+    assert sh(ws, "diff", "--name-only", "--diff-filter=U") == "app.py"
+
 
 
 def ready_for_merge(api, services, repo, agents, task) -> dict:

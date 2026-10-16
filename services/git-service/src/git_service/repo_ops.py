@@ -461,7 +461,12 @@ def integrate(repo: Path, *, task: str, target_branch: str, heads: list[str], ta
             tree = _merge_aligning_versions(repo, current, head, conflicts)
             result = f"merged (manifest version aligned: {', '.join(conflicts)})"
         if tree is None:
-            return {"ok": False, "target_sha": target_sha, "conflicts": conflicts, "conflicting_ref": ref, "merged": merged}
+            # The conflict may be against work merged earlier in this loop, rather than the target itself.
+            # Preserve that exact base so the resolver sees the same conflict and keeps all accepted work.
+            conflict_base = f"refs/hermes/tasks/{task}/conflict-base"
+            run(repo, "update-ref", conflict_base, current)
+            return {"ok": False, "target_sha": target_sha, "conflicts": conflicts, "conflicting_ref": ref,
+                    "conflict_base_ref": conflict_base, "merged": merged}
         current = git(repo, "commit-tree", tree, "-p", current, "-p", head, "-m", f"Integrate {ref} for {task}")
         merged.append({"ref": ref, "sha": head, "result": result})
     ref = f"refs/hermes/tasks/{task}/integration"

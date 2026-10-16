@@ -96,3 +96,14 @@ def test_login_shells_find_the_test_runner():
         assert "found" in container.logs().decode()
     finally:
         container.remove(force=True)
+
+
+def test_standalone_python_can_extract_a_pdf_with_the_pinned_module_dependency():
+    client = docker.from_env()
+    command = "from io import BytesIO; from pypdf import PdfReader, PdfWriter; b=BytesIO(); w=PdfWriter(); w.add_blank_page(72,72); w.write(b); b.seek(0); assert len(PdfReader(b).pages)==1"
+    container = client.containers.run(_image(), ["/usr/bin/python3", "-c", command], detach=True,
+                                      user="10001:10001", network_mode="none", read_only=True)
+    try:
+        assert container.wait(timeout=120)["StatusCode"] == 0, container.logs().decode()
+    finally:
+        container.remove(force=True)

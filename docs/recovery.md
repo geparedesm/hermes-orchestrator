@@ -50,6 +50,12 @@ Notifications are written to the outbox in the same transaction as their event. 
 
 ## Operator commands
 
+Integration conflict workspaces start from the partial integration, including previously accepted work, and receive
+the project's test services. A resolver reporting `blocked` or `failed`, or an unchanged conflict after its resolution
+attempt, leaves the task `BLOCKED` with a reason instead of repeatedly resubmitting the same integration. After fixing
+the cause, the operator can explicitly request `ho git resolve T-n --provider codex` on an active task; successful
+resolution resumes integration, verification, cross-review, and the normal merge approval.
+
 ```bash
 docker compose exec -T control-plane ho recovery status      # health, open intents, pending notifications, recent runs
 docker compose exec -T control-plane ho recovery run         # reconcile now
