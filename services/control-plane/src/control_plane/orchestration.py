@@ -27,7 +27,7 @@ from ho_core.adapters.base import FailureClass
 from ho_core.enums import ApprovalAction, Priority, Risk, TaskState
 from ho_core.ids import uuid7
 from ho_core.routing import ProviderStats, route
-from ho_core.statemachine import WAITING_STATES, Trigger
+from ho_core.statemachine import ACTIVE_STATES, WAITING_STATES, Trigger
 
 from . import budgets, manifests, recovery, testenv
 from .agents import paused
@@ -394,6 +394,12 @@ class Orchestration:
     # ------------------------------------------------------------- steps
 
     def request_step(self, uow: UnitOfWork, task: Row) -> Row | None:
+        # Conflict resolution owns progress until it finishes. Another orchestrator step can only resubmit the
+        # same integration, and its worker may exhaust the memory needed by the resolver and test services.
+        uow.cur.execute("SELECT 1 FROM executions WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE' "
+                        "AND state = ANY(%s) LIMIT 1", (task["id"], list(ACTIVE)))
+        if uow.cur.fetchone() is not None:
+            return None
         lease = self.leases.get(uow, task["id"], lock=True)
         if lease is None:
             return None
@@ -1273,10 +1279,14 @@ class Orchestration:
             self._developer_finished(uow, execution, state, failure)
         elif purpose.get("kind") == "RESOLVE":
             task = self._task(uow, execution["task_id"])
-            if state == "SUCCEEDED":
+            result = execution.get("result") or {}
+            if state == "SUCCEEDED" and result.get("status") not in ("blocked", "failed"):
                 uow.after_commit.append(lambda key=task["key"]: self._integrate_later(key))
             else:
-                self._input(uow, task, f"conflict resolution {state.lower()}: {execution['failure_reason'] or ''}")
+                reason = f"conflict resolution blocked: {result.get('blocked_reason') or execution['failure_reason'] or state.lower()}"
+                if S(task["state"]) in ACTIVE_STATES:  # also PLANNING (the accepted-plan recovery path integrates)
+                    task = self._move(uow, task, S.BLOCKED, reason=reason[:300])
+                self._input(uow, task, reason)
 
     def _step_failed(self, uow: UnitOfWork, execution: Row, failure: str | None) -> None:
         task = self._task(uow, execution["task_id"])
@@ -1564,6 +1574,10 @@ class Orchestration:
             if explicit:
                 raise Conflict(f"{task['key']} is {task['state']}")
             return None
+        uow.cur.execute("SELECT 1 FROM executions WHERE task_id = %s AND spec->'purpose'->>'kind' = 'RESOLVE' "
+                        "AND state = ANY(%s) LIMIT 1", (task["id"], list(ACTIVE)))
+        if uow.cur.fetchone() is not None:
+            return "conflict resolution running"
         uow.after_commit.append(lambda key=task["key"]: self._integrate_later(key))
         return "integration started"
 
@@ -1591,7 +1605,7 @@ class Orchestration:
 
     def _resolve_conflict(self, uow: UnitOfWork, task: Row, result: dict[str, Any]) -> None:
         """One agent-assisted resolution attempt per conflicting workspace (several subtasks may each conflict with
-        the target), at most RESOLVE_ATTEMPTS per task, then the orchestrator decides."""
+        the target), at most RESOLVE_ATTEMPTS per task, then block for intervention."""
         ref = result["conflicting_ref"]
         uow.cur.execute("SELECT count(*) AS n, count(*) FILTER (WHERE spec->'purpose'->>'ref' = %s) AS same FROM executions "
                         # Only resolutions that ran count: one that never started (no image, Docker error) is no attempt.
@@ -1599,6 +1613,9 @@ class Orchestration:
                         (ref, task["id"], list(ACTIVE)))
         attempts = uow.cur.fetchone()
         if int(attempts["same"]) or int(attempts["n"]) >= RESOLVE_ATTEMPTS:  # type: ignore[index]
+            if S(task["state"]) in ACTIVE_STATES:
+                task = self._move(uow, task, S.BLOCKED,
+                                  reason="integration conflict persists after resolution; intervention required")
             self._input(uow, task, f"integration conflict in {', '.join(result['conflicts'][:5])} after a resolution attempt")
             return
         name = ref.rsplit("/", 1)[-1]
@@ -1609,7 +1626,7 @@ class Orchestration:
         try:
             with uow.cur.connection.transaction():  # a launch refused (budget, capacity) swaps no workspace (T-53)
                 resolved = self.git.resolve_conflicts(uow, task["key"], provider=provider, principal=ORCHESTRATOR)
-            uow.cur.execute("UPDATE executions SET spec = jsonb_set(spec, '{purpose}', %s) WHERE id = %s",
+            uow.cur.execute("UPDATE executions SET spec = jsonb_set(spec, '{purpose}', coalesce(spec->'purpose', '{}'::jsonb) || %s) WHERE id = %s",
                             (jsonb({"kind": "RESOLVE", "ref": ref}), resolved["execution"]))
         except ApiError as exc:
             self._input(uow, task, f"integration conflict could not be handed to an agent: {exc}")

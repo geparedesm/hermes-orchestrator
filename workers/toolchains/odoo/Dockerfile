@@ -27,6 +27,12 @@ RUN test -n "$ODOO_SERIES" -a -n "$ODOO_RELEASE" -a -n "$ODOO_SHA256" \
  && /opt/odoo/venv/bin/pip install --no-cache-dir --disable-pip-version-check -r /opt/odoo/requirements.txt \
  && if [ -n "$ODOO_EXTRA_PYTHON" ]; then /opt/odoo/venv/bin/pip install --no-cache-dir --disable-pip-version-check $ODOO_EXTRA_PYTHON; fi \
  && /opt/odoo/venv/bin/python /opt/odoo/odoo-bin --version
+# Projects may explicitly invoke /usr/bin/python3 for their standalone tests. The pinned module extras must be
+# available to that interpreter too, without exposing all of Odoo's virtualenv packages or changing the command.
+RUN if [ -n "$ODOO_EXTRA_PYTHON" ]; then \
+      system_packages="$(/usr/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"; \
+      /opt/odoo/venv/bin/pip install --no-cache-dir --disable-pip-version-check --target="$system_packages" $ODOO_EXTRA_PYTHON; \
+    fi
 COPY --chmod=755 ho-odoo-test /opt/ho/bin/ho-odoo-test
 # Login shells reset PATH (agent-base's /etc/ho-path brings these back); the test runner is also on the default PATH.
 RUN printf '%s\n' /opt/odoo/venv/bin >> /etc/ho-path && ln -s /opt/ho/bin/ho-odoo-test /usr/local/bin/ho-odoo-test
