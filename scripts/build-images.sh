@@ -90,8 +90,14 @@ tmp="$(mktemp config/.images.lock.XXXXXX)"
 } > "$tmp"
 chmod 644 "$tmp"  # mktemp makes it 0600; Agent Manager reads it as another user (Linux enforces this; Docker Desktop does not)
 mv "$tmp" config/images.lock.yaml
-# The new pins get their own tag too, so the next build keeps them alive while it runs.
+# The new pins get their own tag too, so the next build keeps them alive while it runs. Pin tags of images no longer
+# in the lock (a toolchain or provider removed) are dropped, so Docker can reclaim them.
+pinned_names="$(sed -n 's/^  \([a-z0-9-]*\): "sha256:[0-9a-f]*"$/\1/p' config/images.lock.yaml)"
 sed -n 's/^  \([a-z0-9-]*\): "\(sha256:[0-9a-f]*\)"$/\1 \2/p' config/images.lock.yaml | while read -r name id; do
   docker tag "$id" "hermes-orchestrator/$name:pinned"
+done
+docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^hermes-orchestrator/[a-z0-9-]+:pinned(-previous)?$' | while read -r ref; do
+  name="${ref#hermes-orchestrator/}"; name="${name%%:*}"
+  grep -qx "$name" <<<"$pinned_names" || docker rmi "$ref" >/dev/null 2>&1 || true
 done
 cat config/images.lock.yaml

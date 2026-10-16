@@ -458,14 +458,19 @@ class Executions:
                 row = self.get(uow, execution_id, lock=True)
                 if row["state"] != "REQUESTED":
                     return
-                waited = datetime.now(timezone.utc) - row["created_at"]
-                if exc.code == "capacity_exceeded" and waited < CAPACITY_WAIT:
+                if exc.code == "capacity_exceeded":
                     # Not enough Docker memory right now (T-3): wait for running work to free it, without spending a
-                    # dispatch attempt; sync dispatches it again. Only a wait this long means it will not fit.
-                    uow.cur.execute("UPDATE executions SET dispatch_attempts = greatest(dispatch_attempts - 1, 0) WHERE id = %s",
-                                    (row["id"],))
-                    log.info("dispatch of %s waits for capacity: %s", execution_id, exc)
-                    return
+                    # dispatch attempt; sync dispatches it again. Only a wait this long (counted from the first time
+                    # it did not fit, not from its creation) means it will not fit.
+                    since = (row["spec"] or {}).get("capacity_wait_since")
+                    now = datetime.now(timezone.utc)
+                    if since is None or now - datetime.fromisoformat(since) < CAPACITY_WAIT:
+                        uow.cur.execute(
+                            "UPDATE executions SET dispatch_attempts = greatest(dispatch_attempts - 1, 0), "
+                            "spec = jsonb_set(spec, '{capacity_wait_since}', to_jsonb(coalesce(spec->>'capacity_wait_since', %s))) "
+                            "WHERE id = %s", (now.isoformat(), row["id"]))
+                        log.info("dispatch of %s waits for capacity: %s", execution_id, exc)
+                        return
                 self._intent(uow, row["id"], "SENT" if exc.retryable else "FAILED", str(exc))
                 if exc.retryable and attempts < MAX_DISPATCH_ATTEMPTS:
                     log.warning("dispatch of %s will be retried: %s", execution_id, exc)
