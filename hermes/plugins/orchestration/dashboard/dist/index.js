@@ -623,10 +623,10 @@
         h("label", { className: "orch-small orch-muted" }, "Default model",
           modelOptions.length ? h("select", { className: "orch-input orch-select", value: model, onChange: function (e) { setModel(e.target.value); }, disabled: savingModel },
             h("option", { value: "" }, "Provider default"), modelOptions.map(function (option) {
-              return h("option", { key: option.id, value: option.id }, option.id);
+              return h("option", { key: option.id, value: option.id }, option.label && option.label !== option.id ? option.label + " (" + option.id + ")" : option.id);
             })) : h("input", { className: "orch-input", value: model, placeholder: "Provider default", onChange: function (e) { setModel(e.target.value); },
               onKeyDown: function (e) { if (e.key === "Enter") saveModel(); }, disabled: savingModel })),
-        h("div", { className: "orch-muted orch-small" }, a.model_catalog_status === "OBSERVED" ? "Models reported by completed runs" : "Model catalog unavailable until this agent reports a model"),
+        h("div", { className: "orch-muted orch-small" }, a.model_catalog_status === "CATALOG" ? "Models this agent offers" : a.model_catalog_status === "OBSERVED" ? "Models reported by completed runs" : "Model catalog unavailable until this agent reports a model"),
         h(Button, { small: true, kind: "primary", disabled: savingModel || model === (a.model || "") , onClick: saveModel }, savingModel ? "Saving…" : "Save model")) : null,
       error ? h("div", { className: "orch-alert" }, error) : null);
   }
