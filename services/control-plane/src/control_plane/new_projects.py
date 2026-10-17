@@ -81,10 +81,12 @@ class NewProjects:
         if _UNSAFE.search(description):
             # The value lands inside Markdown and YAML of the template.
             raise BadRequest("the description may not contain quotes, backslashes, braces, or < > &")
-        # The name is the project's slug too, which is unique across every project (also nested ones).
-        uow.cur.execute("SELECT 1 FROM projects WHERE slug = %s AND status <> 'UNREGISTERED'", (name,))
-        if uow.cur.fetchone() is not None:
-            raise Conflict(f"a project named {name} is already registered")
+        # The name is the project's slug too, unique across every project row (nested and unregistered ones included).
+        uow.cur.execute("SELECT status FROM projects WHERE slug = %s", (name,))
+        taken = uow.cur.fetchone()
+        if taken is not None:
+            raise Conflict(f"the name {name} belongs to a project that is already registered"
+                           + (" (unregistered now); choose another name" if taken["status"] == "UNREGISTERED" else ""))
         settings = self._settings()
         plan = self.ctx.git.project_plan(template=settings["template"], name=name)
         owner = settings.get("github_owner")

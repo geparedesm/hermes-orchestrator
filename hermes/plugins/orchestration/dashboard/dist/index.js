@@ -1011,9 +1011,10 @@
         h("div", { className: "orch-muted orch-small" }, (c.github_repo ? "GitHub " + c.github_repo : "No GitHub repository") +
           (c.state === "AWAITING_APPROVAL" && !expired ? " · approve it in Needs you" + (c.approval_number ? " (#" + c.approval_number + ")" : "") : "")),
         c.error ? h("div", { className: "orch-reason" }, c.error) : null,
-        c.state === "NEEDS_RECOVERY" || expired ? h("div", { className: "orch-row" },
-          c.state === "NEEDS_RECOVERY" ? h("span", { className: "orch-small" }, "Move or remove what is in the way, then retry. Nothing was deleted.") : null,
-          c.state === "NEEDS_RECOVERY" ? h(Button, { kind: "primary", small: true, icon: "retry", disabled: !!busy, onClick: function () { act(c, "retry"); } }, "Retry") : null,
+        c.state === "NEEDS_RECOVERY" || expired || (c.state === "RUNNING" && c.error) ? h("div", { className: "orch-row" },
+          c.state === "NEEDS_RECOVERY" ? h("span", { className: "orch-small" }, "Move or remove what is in the way, then retry. Nothing was deleted.")
+            : c.state === "RUNNING" ? h("span", { className: "orch-small" }, "It keeps retrying on its own; retry now, or abandon it.") : null,
+          c.state !== "AWAITING_APPROVAL" ? h(Button, { kind: "primary", small: true, icon: "retry", disabled: !!busy, onClick: function () { act(c, "retry"); } }, "Retry") : null,
           h(Button, { kind: "bad-outline", small: true, disabled: !!busy, onClick: function () { act(c, "abandon"); } }, "Abandon")) : null);
     }), error ? h("div", { className: "orch-alert" }, error) : null);
   }

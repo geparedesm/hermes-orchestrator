@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
+from control_plane.errors import UpstreamError
 
 from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
 
@@ -64,6 +65,18 @@ def test_without_github_nothing_is_created_on_github(api, services, projects_roo
     assert (projects_root / "rent-portal" / ".git").is_dir()
     assert "rent-portal" not in (gh_state.read_text() if gh_state.exists() else "")
     assert any(p["slug"] == "rent-portal" for p in api.get("/v1/projects").json()["projects"])
+    ready = approval_of(api, "PROJECT_READY")
+    assert api.post(f"/v1/approvals/{ready['id']}/decision", {"decision": "APPROVE"}).status_code == 200
+    with services.ctx.unit_of_work() as uow:
+        project = services.projects.get(uow, "rent-portal")
+        config = services.projects.active_config(uow, project["id"])
+    assert project["status"] == "PROJECT_READY"
+    assert config["source"] == "REPOSITORY"  # use the shipped template, not a generated fallback
+    effective = config["effective_config"]
+    assert effective["toolchain"]["profiles"] == ["generic"]
+    assert not any(effective["quality_gate"][check] for check in ("build", "tests", "full_suite", "lint", "ci_checks"))
+    assert effective["quality_gate"]["block_on_findings"] == ["HIGH", "CRITICAL"]
+    assert effective["git"]["protected_branches"] == ["main", "master"]
 
 
 def test_a_rejected_request_frees_the_name_and_reserved_names_are_kept(api, services, projects_root, gh_state):
@@ -97,7 +110,16 @@ def test_only_approvers_may_ask_for_a_project(api, services, gh_state):
     assert request(api, name="Bad_Name").status_code == 422
 
 
-def test_expired_requests_of_different_projects_stay_renewable(api, services, gh_state):
+def test_a_name_held_by_an_unregistered_project_is_refused_before_anything_is_created(api, services, projects_root, gh_state):
+    with services.ctx.db.transaction() as cur:  # stand-in: a project once registered under that slug, now unregistered
+        cur.execute("INSERT INTO projects (id, slug, name, relative_path, host_path, status, registered_by) VALUES "
+                    "(gen_random_uuid(), 'old-portal', 'old-portal', 'gone/old-portal', '/x/gone/old-portal', 'UNREGISTERED', 'test')")
+    response = request(api, name="old-portal")
+    assert response.status_code == 409 and "unregistered" in response.text
+    assert not (projects_root / "old-portal").exists()
+
+
+def test_expired_requests_of_different_projects_stay_renewable(api, services, projects_root, gh_state):
     assert request(api, name="alpha-app").status_code == 201
     second = request(api, name="beta-app")
     assert second.status_code == 201, second.text
@@ -108,3 +130,31 @@ def test_expired_requests_of_different_projects_stay_renewable(api, services, gh
     alpha = next(a for a in expired if a["action"] == "CREATE_PROJECT" and a["subject"]["name"] == "alpha-app")
     renewed = api.post(f"/v1/approvals/{alpha['id']}/renew")
     assert renewed.status_code in (200, 201), renewed.text  # the later beta-app request does not block it
+    renewed = renewed.json()
+    assert api.post(f"/v1/approvals/{alpha['id']}/renew").status_code == 409  # never renew the same operation twice
+    assert api.post(f"/v1/approvals/{renewed['id']}/decision", {"decision": "APPROVE"}).status_code == 200
+    assert (projects_root / "alpha-app" / ".git").is_dir()
+    assert not (projects_root / "beta-app").exists()
+    [pending] = api.get("/v1/project-creations").json()["creations"]
+    assert pending["name"] == "beta-app" and pending["approval_state"] == "EXPIRED"
+
+
+def test_a_transient_failure_can_be_retried_without_republishing(api, services, projects_root, gh_state, monkeypatch):
+    remote = services.ctx.git.project_remote
+
+    def offline(*args, **kwargs):
+        raise UpstreamError("GitHub is temporarily unavailable")
+
+    monkeypatch.setattr(services.ctx.git, "project_remote", offline)
+    request(api)
+    approval = approval_of(api)
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    [stopped] = api.get("/v1/project-creations").json()["creations"]
+    assert stopped["state"] == "RUNNING" and stopped["step"] == "PUBLISHED"
+    assert "temporarily unavailable" in stopped["error"]
+    readme = projects_root / "rent-portal" / "README.md"
+    readme.write_text("A person's edits made while GitHub was offline.\n")
+    monkeypatch.setattr(services.ctx.git, "project_remote", remote)
+    assert api.post(f"/v1/project-creations/{stopped['id']}/retry").status_code == 200
+    assert api.get("/v1/project-creations").json()["creations"] == []
+    assert readme.read_text() == "A person's edits made while GitHub was offline.\n"

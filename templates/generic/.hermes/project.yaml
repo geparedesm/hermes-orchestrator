@@ -3,4 +3,4 @@
 version: 1
 project: {name: "{{name}}"}
 toolchain: {profiles: [generic]}
-quality_gate: {build: false, tests: false}
+quality_gate: {build: false, tests: false, full_suite: false, lint: false, typecheck: false, ci_checks: false, docs_updated: false}

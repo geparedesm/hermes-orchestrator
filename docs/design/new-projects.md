@@ -1,6 +1,6 @@
 # New projects from a platform template
 
-Status: approved UI (`ui/hermes-dashboard.pen`, frame "Orchestration — Projects · New project"); building. Later,
+Status: implemented; approved UI (`ui/hermes-dashboard.pen`, frame "Orchestration — Projects · New project"). Later,
 more templates (API, web, mobile) add options to a Template selector in the same form.
 
 ## Behavior
@@ -49,7 +49,10 @@ braces, `<`, `>`, `&`, or control characters.
 Migration `0020`:
 - `child_creations.parent_id` becomes nullable; a new `kind` column (`CHILD` or `PROJECT`); `github_repo` becomes
   nullable (no GitHub).
-- A unique index on `destination` for projects (no parent).
+- A unique index on `name` for project creations (no parent); the name is also their destination folder.
+- Each creation operation is its own approval scope, so several projects can wait for approval and renew expired
+  approvals independently. Both the name and the destination are reserved against ordinary project registration.
+- Names held by unregistered projects are refused before publication, because their project rows retain the slug.
 - `CREATE_PROJECT` is added to the approval actions.
 
 Signing: `sign_project` and `verify_project` use their own domain (`{"project": body}`) and keys. They can never stand
@@ -57,8 +60,8 @@ for a child creation or a merge.
 
 ## Interfaces
 
-- Control plane: `POST /v1/projects/new` (approvers only), `POST /v1/projects/new/{operation_id}/{retry|abandon}`,
-  `GET /v1/projects/new` (live creations).
+- Control plane: `POST /v1/project-creations` (approvers only), `POST /v1/project-creations/{operation_id}/{retry|abandon}`,
+  `GET /v1/project-creations` (live creations and GitHub defaults).
 - Git Service: `/v1/projects/plan` (pins the template tree and checks the destination), `/v1/projects/publish`, and
   `/v1/projects/remote`, each verifying the signed authorization.
 - Plugin: matching routes. The Dashboard has the button and the form from the design; live creations appear above the
@@ -69,7 +72,9 @@ for a child creation or a merge.
 - Git Service: publish into the root; refusal for an existing directory, a link at the destination, an invalid name,
   a changed template, or a forged or child token; a retry reuses its own directory; remote with a fake gh.
 - Integration: request, approve, publish, (push), register, and scan; no GitHub when unchecked; non-approver
-  refused; reject; NEEDS_RECOVERY when the folder exists; the approval details headline.
+  refused; reject; NEEDS_RECOVERY when the folder exists; the approval details headline; independent approval renewal;
+  rejection of unregistered projects' names; retry after a transient GitHub failure without overwriting local edits;
+  PROJECT_READY approval using the repository template and its bootstrap Quality Gate.
 
 ## Risks
 
