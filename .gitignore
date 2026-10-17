@@ -17,3 +17,5 @@ config/images.lock.yaml
 # Secrets Broker v1 file store (never committed)
 project-secrets/
 config/models.lock.json
+# Local recovery snapshots contain runtime data and are not source files.
+backups/
