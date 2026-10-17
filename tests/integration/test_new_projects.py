@@ -105,3 +105,6 @@ def test_expired_requests_of_different_projects_stay_renewable(api, services, gh
         cur.execute("UPDATE approvals SET state = 'EXPIRED' WHERE action = 'CREATE_PROJECT'")
     expired = api.get("/v1/approvals?state=EXPIRED").json()["approvals"]
     assert sorted(a["subject"]["name"] for a in expired if a["action"] == "CREATE_PROJECT") == ["alpha-app", "beta-app"]
+    alpha = next(a for a in expired if a["action"] == "CREATE_PROJECT" and a["subject"]["name"] == "alpha-app")
+    renewed = api.post(f"/v1/approvals/{alpha['id']}/renew")
+    assert renewed.status_code in (200, 201), renewed.text  # the later beta-app request does not block it

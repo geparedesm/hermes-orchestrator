@@ -173,8 +173,11 @@ class Approvals:
             # Approved, possibly already applied (a budget raise), and expired unused: asking again could apply it twice.
             raise Conflict(f"this approval was already decided by {row['decided_by']}: there is nothing to ask again")
         uow.cur.execute("SELECT id, state FROM approvals WHERE action = %s AND project_id IS NOT DISTINCT FROM %s "
-                        "AND task_id IS NOT DISTINCT FROM %s AND requested_at > %s ORDER BY requested_at DESC LIMIT 1",
-                        (row["action"], row["project_id"], row["task_id"], row["requested_at"]))
+                        "AND task_id IS NOT DISTINCT FROM %s AND requested_at > %s "
+                        # Project creations share no project: only a newer approval of the same operation counts.
+                        "AND (action <> 'CREATE_PROJECT' OR subject->>'operation_id' = %s) ORDER BY requested_at DESC LIMIT 1",
+                        (row["action"], row["project_id"], row["task_id"], row["requested_at"],
+                         (row["subject"] or {}).get("operation_id")))
         newer = uow.cur.fetchone()
         if newer is not None:
             raise Conflict(f"a newer {row['action']} approval exists ({newer['state']}): use that one")
