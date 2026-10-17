@@ -74,6 +74,7 @@ def test_a_rejected_request_frees_the_name_and_reserved_names_are_kept(api, serv
     import subprocess
     subprocess.run(["git", "init", "-q", str(projects_root / "rent-portal")], check=True)
     assert api.post("/v1/projects", {"path": "rent-portal"}).status_code == 409  # reserved by the creation
+    assert api.post("/v1/projects", {"path": "rent-portal", "slug": "other-name"}).status_code == 409  # its folder too
     approval = approval_of(api)
     api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "REJECT"})
     assert api.post("/v1/projects", {"path": "rent-portal"}).status_code == 201  # free again
@@ -94,3 +95,13 @@ def test_only_approvers_may_ask_for_a_project(api, services, gh_state):
     response = request(api, token=PLUGIN_TOKEN, principal="telegram:12345")
     assert response.status_code == 403, response.text
     assert request(api, name="Bad_Name").status_code == 422
+
+
+def test_expired_requests_of_different_projects_stay_renewable(api, services, gh_state):
+    assert request(api, name="alpha-app").status_code == 201
+    second = request(api, name="beta-app")
+    assert second.status_code == 201, second.text
+    with services.ctx.db.transaction() as cur:  # stand-in: both approvals expired
+        cur.execute("UPDATE approvals SET state = 'EXPIRED' WHERE action = 'CREATE_PROJECT'")
+    expired = api.get("/v1/approvals?state=EXPIRED").json()["approvals"]
+    assert sorted(a["subject"]["name"] for a in expired if a["action"] == "CREATE_PROJECT") == ["alpha-app", "beta-app"]

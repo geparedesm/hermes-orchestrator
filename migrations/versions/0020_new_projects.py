@@ -34,6 +34,14 @@ def upgrade() -> None:
     ALTER TABLE approvals ADD CONSTRAINT approvals_project_scope
         CHECK (project_id IS NOT NULL OR action IN ('UPDATE', 'CREATE_PROJECT'));
 
+    -- At most one open request per action and scope; project creations have no project yet, so each one is its own
+    -- scope (its operation), or only one project could be requested at a time.
+    DROP INDEX approvals_open;
+    CREATE UNIQUE INDEX approvals_open ON approvals (project_id, task_id, action)
+        NULLS NOT DISTINCT WHERE state IN ('PENDING', 'APPROVED') AND action <> 'CREATE_PROJECT';
+    CREATE UNIQUE INDEX approvals_open_project_creation ON approvals ((subject->>'operation_id'))
+        WHERE state IN ('PENDING', 'APPROVED') AND action = 'CREATE_PROJECT';
+
     ALTER TABLE child_creations ADD COLUMN kind text NOT NULL DEFAULT 'CHILD' CHECK (kind IN ('CHILD', 'PROJECT'));
     ALTER TABLE child_creations ALTER COLUMN parent_id DROP NOT NULL;
     ALTER TABLE child_creations ALTER COLUMN github_repo DROP NOT NULL;
@@ -55,6 +63,10 @@ def downgrade() -> None:
     ALTER TABLE child_creations ALTER COLUMN parent_id SET NOT NULL;
     ALTER TABLE child_creations DROP COLUMN kind;
     DELETE FROM approvals WHERE action = 'CREATE_PROJECT';
+    DROP INDEX approvals_open_project_creation;
+    DROP INDEX approvals_open;
+    CREATE UNIQUE INDEX approvals_open ON approvals (project_id, task_id, action)
+        NULLS NOT DISTINCT WHERE state IN ('PENDING', 'APPROVED');
     ALTER TABLE approvals DROP CONSTRAINT approvals_project_scope;
     ALTER TABLE approvals ADD CONSTRAINT approvals_project_scope CHECK (project_id IS NOT NULL OR action = 'UPDATE');
     ALTER TABLE approvals DROP CONSTRAINT approvals_action_check;

@@ -80,6 +80,8 @@ class Approvals:
                 "SELECT a.* FROM approvals a LEFT JOIN tasks t ON t.id = a.task_id WHERE a.state = 'EXPIRED' "
                 "AND (a.decided_at IS NULL OR a.action = ANY(%s)) AND (t.id IS NULL OR t.state <> ALL(%s)) AND NOT EXISTS (SELECT 1 FROM approvals n WHERE n.action = a.action "
                 "AND n.project_id IS NOT DISTINCT FROM a.project_id AND n.task_id IS NOT DISTINCT FROM a.task_id "
+                # Project creations share no project: each is its own operation (its renewal keeps the operation id).
+                "AND (a.action <> 'CREATE_PROJECT' OR n.subject->>'operation_id' = a.subject->>'operation_id') "
                 "AND n.requested_at > a.requested_at) ORDER BY a.requested_at DESC LIMIT %s",
                 (list(_REBUILT_FROM_STATE), list(_TERMINAL_TASK_STATES), limit))
             return uow.cur.fetchall()
