@@ -51,6 +51,8 @@ if [[ -f "$BACKUP/config/images.lock.yaml" ]]; then
   # The execution images allowed when the backup was taken (an update rebuilds them; a rollback must return).
   cp "$BACKUP/config/images.lock.yaml" config/images.lock.yaml
   echo "restored the execution image allowlist"
+  # The model choices follow the restored CLIs (regenerated, so an older backup without a catalog also gets one).
+  ./scripts/model-catalog.sh || { rm -f config/models.lock.json; echo "model catalog not regenerated; the Dashboard offers observed models only" >&2; }
 fi
 
 echo "starting the platform"

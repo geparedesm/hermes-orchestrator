@@ -379,3 +379,16 @@ def test_an_agent_waits_for_docker_memory_instead_of_failing(api, services, agen
     services.executions.dispatch(late)
     view = api.get(f"/v1/executions/{late}").json()
     assert view["state"] == "FAILED" and view["failure_class"] == "CAPACITY"
+
+
+def test_agents_offer_every_model_their_provider_lists(api, services, tmp_path, monkeypatch):
+    from conftest import PLUGIN_TOKEN  # type: ignore[import-not-found]
+    from control_plane import agents as agents_module
+    catalog = tmp_path / "models.lock.json"
+    catalog.write_text(json.dumps({"codex": [{"id": "gpt-6.1-sol", "label": "GPT-6.1-Sol"}, {"id": "gpt-6-luna", "label": "GPT-6-Luna"}]}))
+    monkeypatch.setattr(agents_module, "CATALOG_FILE", catalog)
+    api.post("/v1/agents/codex/model", {"model": "my-custom-model"}, token=PLUGIN_TOKEN, principal="dashboard:operator")
+    view = {a["provider"]: a for a in api.get("/v1/agents").json()["agents"]}
+    assert [o["id"] for o in view["codex"]["model_options"]] == ["gpt-6.1-sol", "gpt-6-luna", "my-custom-model"]
+    assert view["codex"]["model_options"][-1]["source"] == "configured" and view["codex"]["model_catalog_status"] == "CATALOG"
+    assert {"fable", "opus", "sonnet", "haiku"} <= {o["id"] for o in view["claude"]["model_options"]}

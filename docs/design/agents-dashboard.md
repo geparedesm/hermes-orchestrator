@@ -103,3 +103,15 @@ All three findings are accepted:
    - Tests cover concurrent connect, disconnect, and launch, and a restart in the middle.
 3. **Codex output path:** `ho/rate-limits.json`, as built (`OUT=/output/ho`). A test checks that a malformed file, or
    one with extra fields, never becomes an artifact.
+
+## Model choices
+
+Each agent's "Default model" list comes from the provider itself, never from a list kept in this repository by hand:
+
+- Codex: the catalog bundled with the pinned CLI (`codex debug models --bundled`, run offline), the models its own
+  picker lists, in its order. `scripts/model-catalog.sh` writes it to `config/models.lock.json` (machine-specific,
+  not committed) whenever `build-images.sh` pins new images, and `restore.sh` regenerates it after restoring the lock.
+- Claude Code has no catalog command: the list is its documented `--model` aliases (`fable`, `opus`, `sonnet`,
+  `haiku`; https://code.claude.com/docs/en/model-config), which always resolve to the latest model of each family.
+
+Models seen in completed runs, and a model set by hand, are added to the list, so nothing configured disappears.

@@ -8,6 +8,10 @@ last run: the view says how old it is, and a window whose reset time has passed 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
+import logging
+import os
+from pathlib import Path
 import re
 from typing import Any
 
@@ -21,6 +25,33 @@ from .events import record_event
 from .executions import ACTIVE
 
 _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,99}$")
+log = logging.getLogger(__name__)
+
+# Claude Code has no command that lists models; these are its documented `--model` aliases, which always resolve to the
+# provider's latest model of each family (https://code.claude.com/docs/en/model-config).
+CLAUDE_MODELS = [{"id": "fable", "label": "Fable (latest)"}, {"id": "opus", "label": "Opus (latest)"},
+                 {"id": "sonnet", "label": "Sonnet (latest)"}, {"id": "haiku", "label": "Haiku (latest)"}]
+# Other providers' catalogs come from their pinned CLIs (scripts/model-catalog.sh).
+CATALOG_FILE = Path(os.environ.get("HO_CONFIG_DIR", "/app/config")) / "models.lock.json"
+
+
+def model_catalog(path: Path | None = None) -> dict[str, list[dict[str, str]]]:
+    """Models each provider offers, from the provider itself; a provider without a catalog has none."""
+    catalog: dict[str, list[dict[str, str]]] = {"claude": list(CLAUDE_MODELS)}
+    path = path or CATALOG_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return catalog
+    except (OSError, ValueError) as exc:
+        log.warning("model catalog %s unreadable: %s", path, exc)
+        return catalog
+    for provider in ADAPTERS:
+        entries = data.get(provider) if isinstance(data, dict) else None
+        if provider != "claude" and isinstance(entries, list):
+            catalog[provider] = [{"id": str(e["id"]), "label": str(e.get("label") or e["id"])} for e in entries
+                                 if isinstance(e, dict) and _MODEL.fullmatch(str(e.get("id", "")))]
+    return catalog
 
 
 def record_usage(uow: UnitOfWork, execution: Row, rate_limits: list[dict[str, Any]]) -> None:
@@ -75,31 +106,33 @@ class Agents:
         limited = {r["provider"] for r in uow.cur.fetchall()}
         uow.cur.execute("SELECT provider, model, updated_at FROM provider_models")
         models = {r["provider"]: {"model": r["model"], "updated_at": r["updated_at"]} for r in uow.cur.fetchall()}
-        # Model identifiers come from provider usage records, so the dashboard has no baked-in catalog.
-        uow.cur.execute("SELECT provider, units->>'model' AS model FROM usage_records WHERE units ? 'model'")
+        # Models observed in runs complete the provider's catalog (a model it no longer lists, or one set by hand).
+        uow.cur.execute("SELECT DISTINCT provider, units->>'model' AS model FROM usage_records WHERE units ? 'model'")
         observed_models: dict[str, set[str]] = {}
         for row in uow.cur.fetchall():
             model = row["model"]
             if model and model != "unknown" and _MODEL.fullmatch(model):
                 observed_models.setdefault(row["provider"], set()).add(model)
+        catalog = model_catalog()
         out = []
         for provider in sorted(ADAPTERS):
             windows = usage.get(provider, {})
             status = ("paused" if provider in off else "login_needed" if login.get(provider, "UNKNOWN") != "READY"
                       else "limited" if provider in limited
                       else "near_limit" if any(w["used_percent"] >= 80 for w in windows.values()) else "available")
-            choices = set(observed_models.get(provider, set()))
             configured = models.get(provider, {}).get("model")
-            if configured:
-                choices.add(configured)
+            options = [{**m, "source": "catalog"} for m in catalog.get(provider, [])]
+            known = {m["id"] for m in options}
+            extra = set(observed_models.get(provider, set())) | ({configured} if configured else set())
+            options += [{"id": m, "label": m, "source": "provider_usage" if m in observed_models.get(provider, set()) else "configured"}
+                        for m in sorted(extra - known)]
             out.append({"provider": provider, "identity": identity, "login": login.get(provider, "UNKNOWN"),
                         "enabled": provider not in off, "status": status, "running": running.get(provider, 0),
                         "session": windows.get("session"), "week": windows.get("week"),
                         "model": models.get(provider, {}).get("model"),
                         "model_updated_at": models.get(provider, {}).get("updated_at"),
-                        "model_options": [{"id": value, "source": "provider_usage" if value in observed_models.get(provider, set()) else "configured"}
-                                          for value in sorted(choices)],
-                        "model_catalog_status": "OBSERVED" if observed_models.get(provider) else "UNAVAILABLE"})
+                        "model_options": options,
+                        "model_catalog_status": "CATALOG" if catalog.get(provider) else "OBSERVED" if observed_models.get(provider) else "UNAVAILABLE"})
         return out
 
     def model_for(self, uow: UnitOfWork, provider: str) -> str | None:

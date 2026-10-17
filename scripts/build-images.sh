@@ -100,4 +100,5 @@ docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^hermes-orchestrato
   name="${ref#hermes-orchestrator/}"; name="${name%%:*}"
   grep -qx "$name" <<<"$pinned_names" || docker rmi "$ref" >/dev/null 2>&1 || true
 done
+./scripts/model-catalog.sh
 cat config/images.lock.yaml
