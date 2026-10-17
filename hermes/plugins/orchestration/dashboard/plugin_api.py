@@ -62,6 +62,13 @@ class NewTaskBody(BaseModel):
     approve_plan: bool = False
 
 
+class NewProjectBody(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,40}$")
+    description: str = Field(min_length=1, max_length=500)
+    github: bool = True
+    idempotency_key: str = Field(pattern=r"^[A-Za-z0-9._:-]{8,128}$")
+
+
 class NewChildBody(BaseModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{1,40}$")
     title: str = Field(min_length=1, max_length=120)
@@ -225,6 +232,24 @@ def task_action(key: str, verb: str) -> Any:
     if verb not in TASK_ACTIONS:
         raise HTTPException(status_code=404, detail="unknown action")
     return _call(_api().action, key, verb)
+
+
+@router.get("/project-creations")
+def project_creations() -> Any:
+    return _call(_api().project_creations)
+
+
+@router.post("/project-creations")
+def create_project(body: NewProjectBody) -> Any:
+    """A new project from the platform's generic template. The control plane asks for a CREATE_PROJECT approval
+    before anything is written; the Dashboard operator decides it like any other approval."""
+    return _call(lambda: _api().create_project(body.name, body.description.strip(), body.github,
+                                               idempotency_key=body.idempotency_key))
+
+
+@router.post("/project-creations/{operation_id}/{verb}")
+def project_creation_action(operation_id: UUID, verb: Literal["retry", "abandon"]) -> Any:
+    return _call(_api().project_creation_action, str(operation_id), verb)
 
 
 @router.post("/projects/{slug}/children")

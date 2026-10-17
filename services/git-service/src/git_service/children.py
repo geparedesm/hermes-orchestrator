@@ -218,27 +218,35 @@ def publish(parent: Path, subject: dict[str, Any]) -> dict[str, Any]:
     files = render(parent, subject["template_tree"], _values(subject))
     base_fd = _open_anchored(parent, subject["children_path"])
     try:
-        try:
-            os.mkdir(subject["name"], mode=0o755, dir_fd=base_fd)  # exclusive: a concurrent directory wins
-        except FileExistsError as exc:
-            raise Unowned(f"{relative} appeared while the creation was starting") from exc
-        root_fd = os.open(subject["name"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=base_fd)
-        try:
-            for parts, content, executable in files:
-                _write_exclusive(root_fd, parts, content, executable)
-            message = subject["commit_message"].replace("{name}", subject["name"])
-            # Git works in the directory written above (its descriptor), never in whatever the path names now.
-            for args in (("init", "-q", "-b", "main"), ("add", "-A"),
-                         ("commit", "-q", "--no-verify", "-m", message, "-m", f"{TRAILER}: {subject['operation_id']}")):
-                _same_directory(destination, root_fd)
-                run(destination, *args, cwd_fd=root_fd)
-            commit = run(destination, "rev-parse", "--verify", "HEAD^{commit}", cwd_fd=root_fd).stdout.strip()
-            _same_directory(destination, root_fd)
-        finally:
-            os.close(root_fd)
+        commit = create_repository(base_fd, destination, relative, subject["name"], files,
+                                   subject["commit_message"].replace("{name}", subject["name"]), subject["operation_id"])
     finally:
         os.close(base_fd)
     return {"destination": relative, "commit": commit, "reused": False}
+
+
+def create_repository(base_fd: int, destination: Path, relative: str, name: str, files: list[tuple[tuple[str, ...], bytes, bool]],
+                      message: str, operation_id: str) -> str:
+    """Create `name` exclusively below the opened directory `base_fd`, write the rendered files there, and make the
+    first commit with the operation id as a trailer. Returns that commit."""
+    try:
+        os.mkdir(name, mode=0o755, dir_fd=base_fd)  # exclusive: a concurrent directory wins
+    except FileExistsError as exc:
+        raise Unowned(f"{relative} appeared while the creation was starting") from exc
+    root_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=base_fd)
+    try:
+        for parts, content, executable in files:
+            _write_exclusive(root_fd, parts, content, executable)
+        # Git works in the directory written above (its descriptor), never in whatever the path names now.
+        for args in (("init", "-q", "-b", "main"), ("add", "-A"),
+                     ("commit", "-q", "--no-verify", "-m", message, "-m", f"{TRAILER}: {operation_id}")):
+            _same_directory(destination, root_fd)
+            run(destination, *args, cwd_fd=root_fd)
+        commit = run(destination, "rev-parse", "--verify", "HEAD^{commit}", cwd_fd=root_fd).stdout.strip()
+        _same_directory(destination, root_fd)
+    finally:
+        os.close(root_fd)
+    return commit
 
 
 def _open_anchored(parent: Path, children_path: str) -> int:
@@ -284,10 +292,17 @@ def remote(parent: Path, subject: dict[str, Any], commit: str) -> dict[str, Any]
     if not valid_sha(commit):
         raise Refused("invalid commit")
     destination, relative = check_destination(parent, subject["children_path"], subject["name"])
+    return publish_remote(destination, relative, subject, commit, f"hermes-orchestrator child {subject['operation_id']}")
+
+
+def publish_remote(destination: Path, relative: str, subject: dict[str, Any], commit: str, marker: str) -> dict[str, Any]:
+    """The GitHub step of a creation: the repository is created described with `marker` (this operation's evidence),
+    adopted on a retry only with it, and `main` is pushed only onto an absent branch or the same commit."""
+    if not valid_sha(commit):
+        raise Refused("invalid commit")
     if _own_commit(destination, subject["operation_id"]) != commit:
         raise Unowned(f"{relative} is not the repository this operation published")
     full_name = f"{subject['owner']}/{subject['repo']}"
-    marker = f"hermes-orchestrator child {subject['operation_id']}"
     found = _view(full_name)
     if found is None:
         github.gh("repo", "create", full_name, "--private" if subject["private"] else "--public", "--description", marker)

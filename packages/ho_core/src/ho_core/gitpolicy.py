@@ -136,6 +136,41 @@ def verify_child(key: bytes, token: dict[str, Any], *, now: datetime | None = No
     return {"approval_id": body["approval_id"], **subject}
 
 
+# A new project at the projects root from a platform template (docs/design/new-projects.md). Its own signing domain:
+# it can never stand for a child creation or a merge, nor the reverse.
+PROJECT_SUBJECT_KEYS = ("operation_id", "template", "template_tree", "name", "params", "github", "owner", "repo", "private",
+                        "commit_message")
+PROJECT_NAME = re.compile(r"^[a-z][a-z0-9-]{1,40}$")
+
+
+def sign_project(key: bytes, *, approval_id: str, subject: dict[str, Any], expires_at: datetime) -> dict[str, Any]:
+    body = {"approval_id": approval_id, "subject": {k: subject.get(k) for k in PROJECT_SUBJECT_KEYS},
+            "expires_at": expires_at.astimezone(timezone.utc).isoformat()}
+    return {**body, "signature": hmac.new(key, _canonical({"project": body}), hashlib.sha256).hexdigest()}
+
+
+def verify_project(key: bytes, token: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    """Return the approved subject, or raise GitPolicyError if the token is forged, altered, expired, or loose."""
+    try:
+        body = {"approval_id": str(token["approval_id"]), "subject": dict(token["subject"]), "expires_at": str(token["expires_at"])}
+        signature = str(token["signature"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise GitPolicyError("malformed new-project authorization") from exc
+    expected = hmac.new(key, _canonical({"project": body}), hashlib.sha256).hexdigest()
+    if not key or not hmac.compare_digest(signature, expected):
+        raise GitPolicyError("new-project authorization signature is invalid")
+    if datetime.fromisoformat(body["expires_at"]) <= (now or datetime.now(timezone.utc)):
+        raise GitPolicyError("new-project authorization has expired")
+    subject = body["subject"]
+    if set(subject) != set(PROJECT_SUBJECT_KEYS):
+        raise GitPolicyError("new-project authorization subject is incomplete")
+    if not valid_sha(str(subject["template_tree"] or "")):
+        raise GitPolicyError("new-project authorization must bind the exact template")
+    if not PROJECT_NAME.match(str(subject["name"] or "")) or not re.match(r"^[a-z][a-z0-9_-]{0,40}$", str(subject["template"] or "")):
+        raise GitPolicyError("invalid project or template name")
+    return {"approval_id": body["approval_id"], **subject}
+
+
 # --------------------------------------------------------------------------
 # Human change classification (section 37)
 # --------------------------------------------------------------------------

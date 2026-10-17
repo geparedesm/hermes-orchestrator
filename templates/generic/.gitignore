@@ -1,0 +1,20 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+
+# hermes-orchestrator workspaces
+.hermes/worktrees/
+.hermes.local.yaml

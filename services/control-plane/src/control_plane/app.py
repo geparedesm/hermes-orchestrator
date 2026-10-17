@@ -39,6 +39,7 @@ from .executions import ExecutionRequest, Executions
 from .scheduler import Scheduler
 from .orchestration import Orchestration
 from .children import Children
+from .new_projects import NewProjects
 from .tasks import Tasks
 from .updates import Updates
 from .views import approval_view, config_view, execution_view, project_view
@@ -68,6 +69,7 @@ class Services:
     updates: Updates | None = None
     children: Children | None = None
     agents: Agents | None = None
+    new_projects: NewProjects | None = None
 
 
 def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = True, dispatcher: Any = None,
@@ -100,9 +102,11 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     gate.on_evaluated.append(_request_merge_when_ready(git, orchestrator))
     children = Children(ctx, projects, approvals)
     scheduler.hooks.append(children.sync)
+    new_projects = NewProjects(ctx, projects, approvals)
+    scheduler.hooks.append(new_projects.sync)
     return Services(ctx, auth, approvals, projects, tasks, scheduler, executions, run_scheduler, credentials, git,
                     verifications, reviews, gate, orchestrator, recovery, outbox, maintenance, Updates(ctx, approvals), children,
-                    Agents(ctx))
+                    Agents(ctx), new_projects)
 
 
 def _request_merge_when_ready(git: GitChanges, orchestrator: Any = None) -> Any:
@@ -140,6 +144,12 @@ class NewChild(BaseModel):
     name: str = Field(min_length=2, max_length=41, pattern=r"^[a-z][a-z0-9_]{1,40}$")
     title: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
+
+
+class NewProject(BaseModel):
+    name: str = Field(min_length=2, max_length=41, pattern=r"^[a-z][a-z0-9-]{1,40}$")
+    description: str = Field(min_length=1, max_length=500)
+    github: bool = True
 
 
 class Decision(BaseModel):
@@ -302,6 +312,28 @@ def create_app(services: Services) -> FastAPI:
                             "children": {"label": settings.get("label") or "child project"} if settings else None,
                             "toolchain": list((effective.get("toolchain") or {}).get("profiles") or [])})
             return {"projects": out}
+
+    # New projects from a platform template (docs/design/new-projects.md); approvers only.
+    @app.get("/v1/project-creations")
+    def list_project_creations(_: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            settings = ctx.platform["platform"].get("new_projects") or {}
+            return jsonable({"creations": services.new_projects.list(uow), "github_owner": settings.get("github_owner"),
+                             "private": settings.get("private", True)})
+
+    @app.post("/v1/project-creations")
+    def create_project(body: NewProject, who: Principal = Depends(principal),
+                       idempotency_key: str | None = Header(default=None)) -> JSONResponse:
+        def command(uow: UnitOfWork):
+            return 201, jsonable(services.new_projects.request(uow, principal=who, name=body.name, description=body.description,
+                                                               github=body.github))
+        return idempotent(idempotency_key, who, {"op": "create-project", **body.model_dump()}, command)
+
+    @app.post("/v1/project-creations/{operation_id}/{verb}")
+    def project_creation_action(operation_id: UUID, verb: Literal["retry", "abandon"], who: Principal = Depends(principal)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            action = services.new_projects.retry if verb == "retry" else services.new_projects.abandon
+            return jsonable(action(uow, principal=who, operation_id=operation_id))
 
     @app.get("/v1/projects/{slug}/children")
     def list_children(slug: str, _: Identity = Depends(identity)) -> dict[str, Any]:

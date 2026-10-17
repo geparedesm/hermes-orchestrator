@@ -67,7 +67,8 @@ class Projects:
 
     # ----------------------------------------------------------------- commands
 
-    def register(self, uow: UnitOfWork, *, principal: Principal, path: str, name: str | None, slug: str | None) -> Row:
+    def register(self, uow: UnitOfWork, *, principal: Principal, path: str, name: str | None, slug: str | None,
+                 reservation: Any = None) -> Row:
         root = self.ctx.platform["platform"]["projects_root_host"]
         try:
             relative = host_to_relative(root, path)
@@ -83,6 +84,11 @@ class Projects:
             raise BadRequest(str(exc)) from exc
         if not is_slug(project_slug):
             raise BadRequest("slug must match ^[a-z0-9][a-z0-9-]{0,62}$")
+        # A project being created from the Dashboard reserves its name (docs/design/new-projects.md).
+        uow.cur.execute("SELECT 1 FROM child_creations WHERE kind = 'PROJECT' AND name = %s AND id IS DISTINCT FROM %s "
+                        "AND state NOT IN ('REJECTED', 'INVALIDATED', 'FAILED', 'DONE')", (project_slug, reservation))
+        if uow.cur.fetchone() is not None:
+            raise Conflict(f"the name {project_slug} is reserved by a project being created")
         project_id = uuid7()
         try:
             with uow.cur.connection.transaction():  # savepoint so a conflict can be reported cleanly

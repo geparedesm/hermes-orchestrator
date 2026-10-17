@@ -177,7 +177,7 @@ class Children:
     # ------------------------------------------------------------------ decision and steps
 
     def _on_decision(self, uow: UnitOfWork, approval: Row, approved: bool, principal: Principal) -> None:
-        uow.cur.execute("SELECT * FROM child_creations WHERE approval_id = %s FOR UPDATE", (approval["id"],))
+        uow.cur.execute("SELECT * FROM child_creations WHERE approval_id = %s AND kind = 'CHILD' FOR UPDATE", (approval["id"],))
         row = uow.cur.fetchone()
         if row is None or row["state"] != "AWAITING_APPROVAL":
             return
@@ -228,7 +228,7 @@ class Children:
         for _ in range(4):
             try:
                 with self.ctx.unit_of_work() as uow:
-                    uow.cur.execute("SELECT * FROM child_creations WHERE id = %s FOR UPDATE", (operation_id,))
+                    uow.cur.execute("SELECT * FROM child_creations WHERE id = %s AND kind = 'CHILD' FOR UPDATE", (operation_id,))
                     row = uow.cur.fetchone()
                     if row is None or row["state"] != "RUNNING" or row["step"] == "REGISTERED":
                         return
@@ -294,8 +294,8 @@ class Children:
     def sync(self) -> dict[str, int]:
         """Scheduler hook: resume creations whose last attempt failed for a transient reason."""
         with self.ctx.unit_of_work() as uow:
-            uow.cur.execute("SELECT id FROM child_creations WHERE state = 'RUNNING' AND updated_at < now() - %s LIMIT 5",
-                            (RETRY_AFTER,))
+            uow.cur.execute("SELECT id FROM child_creations WHERE kind = 'CHILD' AND state = 'RUNNING' "
+                            "AND updated_at < now() - %s LIMIT 5", (RETRY_AFTER,))
             due = [r["id"] for r in uow.cur.fetchall()]
         for operation_id in due:
             self.run(operation_id)

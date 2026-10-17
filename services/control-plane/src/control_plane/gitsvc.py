@@ -89,6 +89,15 @@ class GitServiceClient:
     def child_remote(self, path: str, authorization: dict[str, Any], commit: str) -> dict[str, Any]:
         return self._post("/v1/children/remote", {"path": path, "authorization": authorization, "commit": commit})
 
+    def project_plan(self, *, template: str, name: str) -> dict[str, Any]:
+        return self._post("/v1/projects/plan", {"template": template, "name": name})
+
+    def project_publish(self, authorization: dict[str, Any]) -> dict[str, Any]:
+        return self._post("/v1/projects/publish", {"authorization": authorization})
+
+    def project_remote(self, authorization: dict[str, Any], commit: str) -> dict[str, Any]:
+        return self._post("/v1/projects/remote", {"authorization": authorization, "commit": commit})
+
     def merge(self, path: str, task: str, authorization: dict[str, Any]) -> dict[str, Any]:
         return self._post("/v1/merge", {"path": path, "task": task, "authorization": authorization})
 

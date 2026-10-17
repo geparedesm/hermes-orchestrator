@@ -1,0 +1,6 @@
+# hermes-orchestrator configuration of {{name}} (created from the generic template).
+# The first task proposes the real toolchain, commands, and Quality Gate; a person approves that change.
+version: 1
+project: {name: "{{name}}"}
+toolchain: {profiles: [generic]}
+quality_gate: {build: false, tests: false}

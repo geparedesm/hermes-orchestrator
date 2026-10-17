@@ -16,6 +16,8 @@ platform:
   # Retention (MASTER_SPEC section 80): artifacts of failed or blocked tasks are kept longer than the
   # project's artifacts_days; delivered notifications and recovery reports are pruned.
   retention: {failed_artifacts_days: 90, notifications_days: 30, recovery_runs_days: 30}
+  # New projects from the Dashboard (docs/design/new-projects.md): owner of their GitHub repositories.
+  new_projects: {github_owner: geparedesm, private: true, template: generic, commit_message: "[ADD] Create {name}"}
   approval_ttl_hours:
     default: 72
     MERGE: 72

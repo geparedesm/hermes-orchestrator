@@ -451,3 +451,22 @@
   .orch-prow-actions { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; }
   .orch-prow-head { display: none; }
 }
+
+/* ---- New project (ui/hermes-dashboard.pen, "Projects · New project") ---- */
+.orch-newproject { width: min(35rem, 100%); }
+.orch-mono { font-family: var(--font-mono, ui-monospace, monospace); }
+.orch-check-option { flex-direction: row !important; align-items: flex-start; gap: 0.7rem !important; padding: 0.75rem 0.85rem; border-radius: 0.6rem;
+  border: 1px solid var(--o-border); background: color-mix(in srgb, var(--o-accent) 8%, transparent); cursor: pointer; }
+.orch-check-option input { margin-top: 0.15rem; accent-color: var(--o-accent); width: 1rem; height: 1rem; }
+.orch-check-option > span { display: flex; flex-direction: column; gap: 0.15rem; }
+.orch-label-caps { font-size: 0.7rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--o-muted); }
+.orch-starts { display: flex; flex-direction: column; gap: 0.45rem; }
+.orch-starts-item { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.86rem; }
+.orch-newproject-foot { align-items: center; }
+.orch-newproject-foot > span { margin-right: auto; }
+.orch-project-creations { list-style: none; margin: 0; padding: 0.4rem 1rem; display: flex; flex-direction: column; gap: 0; }
+.orch-project-creations .orch-creation { width: 100%; max-width: none; border: 0; border-bottom: 1px solid var(--o-border); border-radius: 0;
+  padding: 0.65rem 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.orch-project-creations .orch-creation:last-child { border-bottom: 0; }
+.orch-project-creations .orch-creation > .orch-row:first-child { flex-wrap: nowrap; }
+.orch-project-creations .orch-creation > .orch-row:first-child .orch-ellipsis { flex: 1; }
