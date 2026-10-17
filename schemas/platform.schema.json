@@ -97,6 +97,33 @@
           "type": "string",
           "maxLength": 64,
           "description": "Image tag of the running stack (HO_VERSION), set at startup."
+        },
+        "new_projects": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "New projects from a platform template (docs/design/new-projects.md).",
+          "properties": {
+            "github_owner": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$",
+              "description": "Owner of the GitHub repositories new projects create."
+            },
+            "private": {
+              "type": "boolean",
+              "default": true
+            },
+            "template": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{0,40}$",
+              "default": "generic"
+            },
+            "commit_message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "default": "[ADD] Create {name}"
+            }
+          }
         }
       }
     },

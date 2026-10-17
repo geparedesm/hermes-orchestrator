@@ -36,6 +36,8 @@ COPY services/git-service /src/git-service
 RUN pip install -c /tmp/requirements.lock /src/ho_core /src/git-service && rm -rf /src /tmp/requirements.lock
 
 COPY schemas /app/schemas
+# Platform templates for new projects (docs/design/new-projects.md), read-only.
+COPY --chown=root:root templates /opt/ho/templates
 
 USER 10001:10001
 EXPOSE 8081

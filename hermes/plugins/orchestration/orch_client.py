@@ -146,6 +146,18 @@ class TaskApi:
             raise ApiError(400, f"unknown creation action {verb}")
         return self.call("POST", f"/v1/projects/{_slug(slug)}/children/{urllib.parse.quote(operation_id, safe='')}/{verb}")
 
+    def project_creations(self) -> Any:
+        return self.call("GET", "/v1/project-creations")
+
+    def create_project(self, name: str, description: str, github: bool, *, idempotency_key: str | None = None) -> Any:
+        return self.call("POST", "/v1/project-creations", {"name": name, "description": description, "github": bool(github)},
+                         idempotency_key=idempotency_key)
+
+    def project_creation_action(self, operation_id: str, verb: str) -> Any:
+        if verb not in ("retry", "abandon"):
+            raise ApiError(400, f"unknown creation action {verb}")
+        return self.call("POST", f"/v1/project-creations/{urllib.parse.quote(operation_id, safe='')}/{verb}")
+
     def board(self) -> Any:
         return self.call("GET", "/v1/dashboard/board")
 

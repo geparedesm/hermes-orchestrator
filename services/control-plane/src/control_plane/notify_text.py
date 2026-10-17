@@ -102,6 +102,8 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
         "CREATE_CHILD": ("Create *{child}* ({child_title}) in project *{project}*: a new folder {child_path} and the "
                          "{visibility} GitHub repository *{child_repo}*, from the template at {parent_sha}?",
                          "yes, create it", "no, don't create it"),
+        "CREATE_PROJECT": ("Create the new project *{child}*: a folder {child} in your projects{github_en}?",
+                           "yes, create it", "no, don't create it"),
         "REQUEST": ("Claude asks:\n_{text}_", "yes, go ahead", "no, stop the task"),
         "OTHER": ("{summary}", "yes", "no"),
     },
@@ -130,6 +132,8 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
         "CREATE_CHILD": ("¿Creo *{child}* ({child_title}) en el proyecto *{project}*: una carpeta nueva {child_path} y el "
                          "repositorio {visibility_es} de GitHub *{child_repo}*, desde la plantilla en {parent_sha}?",
                          "sí, créalo", "no, no lo crees"),
+        "CREATE_PROJECT": ("¿Creo el proyecto nuevo *{child}*: una carpeta {child} en tus proyectos{github_es}?",
+                           "sí, créalo", "no, no lo crees"),
         "REQUEST": ("Claude pregunta:\n_{text}_", "sí, adelante", "no, para la tarea"),
         "OTHER": ("{summary}", "sí", "no"),
     },
@@ -257,6 +261,10 @@ def _approval_parts(approval: dict[str, Any], task: str | None, project: str | N
         "visibility_es": "privado" if subject.get("private", True) else "público",
         "parent_sha": str(subject.get("parent_sha") or "?")[:12],
         "plan_count": len(subject.get("subtasks") or []),
+        "github_en": f" and the {'private' if subject.get('private', True) else 'public'} GitHub repository "
+                     f"*{subject.get('owner')}/{subject.get('repo')}*" if subject.get("github") else " (without GitHub)",
+        "github_es": f" y el repositorio {'privado' if subject.get('private', True) else 'público'} de GitHub "
+                     f"*{subject.get('owner')}/{subject.get('repo')}*" if subject.get("github") else " (sin GitHub)",
     }
     return kind, question, yes, no, fields
 

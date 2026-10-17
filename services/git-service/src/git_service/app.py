@@ -19,11 +19,11 @@ import yaml
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from ho_core.detect import MAX_FILE_BYTES, detect
-from ho_core.gitpolicy import GitPolicyError, protected_branches, verify_child, verify_merge
+from ho_core.gitpolicy import GitPolicyError, protected_branches, verify_child, verify_merge, verify_project
 from ho_core.paths import PathOutsideRoot, resolve_inside
 from pydantic import BaseModel, Field
 
-from . import children, github, gitcmd, repo_ops
+from . import children, github, gitcmd, projects, repo_ops
 
 
 class ProjectPath(BaseModel):
@@ -101,6 +101,19 @@ class ChildBody(ProjectPath):
 
 
 class ChildRemoteBody(ChildBody):
+    commit: str = Field(min_length=40, max_length=64)
+
+
+class NewProjectPlanBody(BaseModel):
+    template: str = Field(min_length=1, max_length=41)
+    name: str = Field(min_length=1, max_length=41)
+
+
+class NewProjectBody(BaseModel):
+    authorization: dict[str, Any]
+
+
+class NewProjectRemoteBody(NewProjectBody):
     commit: str = Field(min_length=40, max_length=64)
 
 
@@ -313,6 +326,27 @@ def create_app(projects_root: Path, token: str, merge_key: bytes = b"") -> FastA
                                         target_branch=subject["target_branch"], target_sha=subject["target_sha"],
                                         head_sha=subject["head_sha"], method=subject["method"])
         return locked(repo, run_merge)
+
+    # ---------------------------------------------------------------- new projects (docs/design/new-projects.md)
+
+    @app.get("/v1/projects/templates", dependencies=[Depends(authorized)])
+    def project_templates() -> dict[str, Any]:
+        return {"templates": projects.available()}
+
+    @app.post("/v1/projects/plan", dependencies=[Depends(authorized)])
+    def project_plan(body: NewProjectPlanBody) -> dict[str, Any]:
+        """Pins the template tree and checks the destination; writes nothing."""
+        return locked(projects_root / body.name, lambda: projects.plan(projects_root, template=body.template, name=body.name))
+
+    @app.post("/v1/projects/publish", dependencies=[Depends(authorized)])
+    def project_publish(body: NewProjectBody) -> dict[str, Any]:
+        subject = verify_project(merge_key, body.authorization)
+        return locked(projects_root / subject["name"], lambda: projects.publish(projects_root, subject))
+
+    @app.post("/v1/projects/remote", dependencies=[Depends(authorized)])
+    def project_remote(body: NewProjectRemoteBody) -> dict[str, Any]:
+        subject = verify_project(merge_key, body.authorization)
+        return locked(projects_root / subject["name"], lambda: projects.remote(projects_root, subject, body.commit))
 
     # ---------------------------------------------------------------- child projects
 

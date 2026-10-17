@@ -349,6 +349,27 @@ def _create_child(approval: Row) -> dict[str, Any]:
     }
 
 
+def _create_project(approval: Row) -> dict[str, Any]:
+    s = approval["subject"] or {}
+    repo = f"{s.get('owner')}/{s.get('repo')}" if s.get("github") else None
+    visibility = "private" if s.get("private", True) else "public"
+    changes = [{"kind": "+", "text": f"Folder {s.get('name')} in your projects, with a README, rules for the agents, and Hermes settings"},
+               {"kind": "+", "text": f"First commit: {str(s.get('commit_message') or '').replace('{name}', s.get('name', ''))}"}]
+    if repo:
+        changes.append({"kind": "+", "text": f"{visibility.capitalize()} GitHub repository {repo}"})
+    changes.append({"kind": "+", "text": f"A new project {s.get('name')} (you approve its configuration next)"})
+    return {
+        "headline": f"Create the new project {s.get('name')}" + (f" with its own {visibility} GitHub repository?" if repo else ", without GitHub?"),
+        "highlights": [str((s.get("params") or {}).get("description") or "")[:160]], "recommendation": None,
+        "changes": changes,
+        "why": "Creating folders and repositories is a person's decision.",
+        "if_yes": "The project is created from the template exactly as pinned here.",
+        "if_no": "Nothing is created; the name is free again.",
+        "facts": [["Template", f"{s.get('template')} at {str(s.get('template_tree'))[:12]}"], ["Repository", repo or "none"]],
+        "links": [],
+    }
+
+
 def _plan(approval: Row) -> dict[str, Any]:
     s = approval["subject"] or {}
     items = s.get("subtasks") or []
@@ -390,6 +411,8 @@ def details(uow: UnitOfWork, approval: Row, defaults: dict[str, Any] | None = No
             out = _waiting(uow, approval)
         elif action == "CREATE_CHILD":
             out = _create_child(approval)
+        elif action == "CREATE_PROJECT":
+            out = _create_project(approval)
         elif action == "PLAN":
             out = _plan(approval)
         elif action == "UPDATE":

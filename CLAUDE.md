@@ -38,13 +38,14 @@ Phases 0–11 merged (PRs #2–#12): the platform is complete per PHASES.md. Her
 | Path | Responsibility |
 | --- | --- |
 | `packages/ho_core/` | enums, `statemachine`, `config` (layered + tighten-only), `policy/` (engine, hard, commands), `adapters/` (Claude, Codex), `gitpolicy`, `verification` (risk, gaps, steps), `routing` (provider scores), `redact`, `schemas` |
-| `services/control-plane/.../` | `app.py` (API), `cli.py` (`ho`), `tasks`, `projects`, `approvals`, `scheduler` (+hooks), `executions` (grants, dispatch, sync, finalize), `credentials`, `gitops` (workspaces, integration, merges), `verification` (verifications, reviews, Quality Gate), `orchestration` (leases, steps, actions, subtask cycle, launches), `budgets` (reservations), `manifests`, `recovery` (checkpoints, reconciliation, health), `notifications` (Hermes outbox), `dashboard` (read models, `/metrics`), `maintenance` (retention), `updates` (UPDATE approvals), `children` (child projects from a parent's template, CREATE_CHILD) |
+| `services/control-plane/.../` | `app.py` (API), `cli.py` (`ho`), `tasks`, `projects`, `approvals`, `scheduler` (+hooks), `executions` (grants, dispatch, sync, finalize), `credentials`, `gitops` (workspaces, integration, merges), `verification` (verifications, reviews, Quality Gate), `orchestration` (leases, steps, actions, subtask cycle, launches), `budgets` (reservations), `manifests`, `recovery` (checkpoints, reconciliation, health), `notifications` (Hermes outbox), `dashboard` (read models, `/metrics`), `maintenance` (retention), `updates` (UPDATE approvals), `children` (child projects from a parent's template, CREATE_CHILD), `new_projects` (new projects from a platform template, CREATE_PROJECT) |
 | `services/agent-manager/.../` | `plan.py` (hard invariants), `docker_ops.py` (workers, proxies, inputs, secrets, sessions, test environments), `compose.py` (project Compose sanitizing), `secrets.py`, `images.py` |
-| `services/git-service/.../` | `repo_ops.py` (workspaces, collect, divergence, integrate, merge), `children.py` (child publish and GitHub creation), `github.py` (`gh`), `gitcmd.py` (hardened git) |
+| `services/git-service/.../` | `repo_ops.py` (workspaces, collect, divergence, integrate, merge), `children.py` (child publish and GitHub creation), `projects.py` (new projects from `templates/`), `github.py` (`gh`), `gitcmd.py` (hardened git) |
 | `hermes/` | `plugins/orchestration` (tools, `/orch`, CLI, Dashboard tab; thin Task API client), `init.sh` (hermes-init) |
 | `services/egress-proxy/` | CONNECT-only allowlisting proxy, one per agent execution |
 | `workers/` | `agent-base` (+`ho-verify`, `ho-wait-secrets`), `toolchains/*` (odoo: `ho-odoo-test`), `providers/{claude,codex}` (`ho-agent-run`, `ho-auth-login`), `browser-runner` |
-| `migrations/versions/` | `0001`–`0014` (raw SQL) |
+| `migrations/versions/` | `0001`–`0020` (raw SQL) |
+| `templates/` | platform templates for new projects (`generic`), copied into the Git Service image |
 | `schemas/` | JSON Schemas: project, capability, platform, manifest, task, agent-result, review-result, orchestrator-step |
 | `scripts/` | `build-images.sh`, `auth-login.sh`, `init-secrets.sh`, `backup.sh`/`restore.sh`, `update.sh`/`rollback.sh`, `check.sh`, `check-multiarch.sh`, `smoke-phase{2..11}.sh` |
 

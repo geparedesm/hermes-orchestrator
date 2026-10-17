@@ -104,6 +104,7 @@ class ApprovalAction(StrEnum):
     PROJECT_READY = "PROJECT_READY"
     CREATE_CHILD = "CREATE_CHILD"
     PLAN = "PLAN"
+    CREATE_PROJECT = "CREATE_PROJECT"
 
 
 class ApprovalState(StrEnum):
