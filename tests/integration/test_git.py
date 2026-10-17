@@ -12,6 +12,7 @@ import pytest
 
 from conftest import PLUGIN_TOKEN, git_repo  # type: ignore[import-not-found]
 from fake_agents import FakeAgentManager  # type: ignore[import-not-found]
+from control_plane import budgets
 
 pytestmark = pytest.mark.integration
 
@@ -356,6 +357,36 @@ def test_already_merged_task_back_in_ready_for_merge_resumes_verification(api, s
     assert retried.status_code == 200 and retried.json()["state"] == "VERIFYING", retried.text
     assert finish_verification(services, agents, task)["state"] == "PASSED"
     assert api.get(f"/v1/tasks/{task}").json()["state"] == "DONE"
+
+
+def test_waiting_for_the_merge_decision_uses_no_runtime(api, services, repo, agents, task):
+    approval = ready_for_merge(api, services, repo, agents, task)
+    with services.ctx.unit_of_work() as uow:
+        uow.cur.execute("SELECT waiting_since FROM tasks WHERE key = %s", (task,))
+        assert uow.cur.fetchone()["waiting_since"] is not None
+        # Stand-in for a night without a decision.
+        uow.cur.execute("UPDATE tasks SET started_at = now() - interval '10 hours', waiting_since = now() - interval '9 hours' "
+                        "WHERE key = %s", (task,))
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    with services.ctx.unit_of_work() as uow:
+        uow.cur.execute("SELECT * FROM tasks WHERE key = %s", (task,))
+        row = uow.cur.fetchone()
+    assert row["state"] == "VERIFYING" and row["waiting_since"] is None
+    assert 9 * 3600 - 10 <= row["waited_seconds"] <= 9 * 3600 + 10
+    assert 55 <= budgets.runtime_minutes(row) <= 65
+
+
+def test_post_merge_verification_without_budget_blocks_visibly(api, services, repo, agents, task):
+    approval = ready_for_merge(api, services, repo, agents, task)
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    finish_verification(services, agents, task, "FAILED")
+    with services.ctx.unit_of_work() as uow:  # stand-in for a task that used its runtime
+        uow.cur.execute("UPDATE budgets SET limits = limits || '{\"runtime_minutes\": 1}' "
+                        "WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", (task,))
+        uow.cur.execute("UPDATE tasks SET started_at = now() - interval '2 hours', waited_seconds = 0 WHERE key = %s", (task,))
+    api.post(f"/v1/tasks/{task}/retry")
+    view = api.get(f"/v1/tasks/{task}").json()
+    assert view["state"] == "BLOCKED" and "needs budget" in view["state_reason"]
 
 
 def test_target_moved_after_request_invalidates_the_approval(api, services, repo, agents, task):

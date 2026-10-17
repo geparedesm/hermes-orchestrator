@@ -45,6 +45,10 @@ _STATE_EVENTS = {
 _BUDGET_COUNTERS = ("runtime_minutes", "agent_launches", "retries", "review_cycles", "subtasks", "provider_usage_units")
 
 
+# A task READY_FOR_MERGE waits for the person's merge decision: like the waiting states, it uses no runtime budget.
+RUNTIME_PAUSED_STATES = WAITING_STATES | {S.READY_FOR_MERGE}
+
+
 class Tasks:
     def __init__(self, ctx: Context, projects: Projects, approvals: Approvals) -> None:
         self.ctx = ctx
@@ -186,8 +190,8 @@ class Tasks:
         except InvalidTransition as exc:
             raise Conflict(f"{task['key']}: cannot move from {current} to {target} ({exc.reason})") from exc
         now = datetime.now(timezone.utc)
-        # Time spent waiting for people (approvals, pauses, logins, blocks) does not count as runtime.
-        was_waiting, will_wait = current in WAITING_STATES, result.state in WAITING_STATES
+        # Time spent waiting for people (approvals, pauses, logins, blocks, the merge decision) does not count as runtime.
+        was_waiting, will_wait = current in RUNTIME_PAUSED_STATES, result.state in RUNTIME_PAUSED_STATES
         # Only waits after the task started count: runtime is measured from started_at.
         wait_from = max(task["waiting_since"], task["started_at"]) if task["waiting_since"] and task["started_at"] else None
         waited = (now - wait_from).total_seconds() if was_waiting and not will_wait and wait_from else 0
