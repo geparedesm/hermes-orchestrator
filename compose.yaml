@@ -6,6 +6,10 @@
 # creates them on demand from the images pinned in config/images.lock.yaml.
 #
 # Setup: cp .env.example .env && edit it; make up
+#
+# Each service has memory and CPU limits so that no service can starve the others or the workers on a small host;
+# override them in .env (HO_<SERVICE>_MEMORY, HO_<SERVICE>_CPUS). Keep machine.docker_memory_reserve_gb at least as
+# large as what these services and anything else on the host really use (docs/operations.md, "Resources").
 name: hermes-orchestrator
 
 x-hardening: &hardening
@@ -20,6 +24,8 @@ x-hardening: &hardening
 
 services:
   postgres:
+    mem_limit: ${HO_POSTGRES_MEMORY:-512m}
+    cpus: ${HO_POSTGRES_CPUS:-1.0}
     image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
@@ -39,6 +45,8 @@ services:
       retries: 20
 
   redis:
+    mem_limit: ${HO_REDIS_MEMORY:-128m}
+    cpus: ${HO_REDIS_CPUS:-0.5}
     image: redis:8.2-alpine@sha256:b51665e66f00759be7c3152ad5ac3c66fb2f619c13ef62dea7cc1f9914524635
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
@@ -53,6 +61,8 @@ services:
       retries: 20
 
   migrate:
+    mem_limit: ${HO_MIGRATE_MEMORY:-256m}
+    cpus: ${HO_MIGRATE_CPUS:-1.0}
     image: hermes-orchestrator/control-plane:${HO_VERSION:-dev}
     build: {context: ., dockerfile: services/control-plane/Dockerfile}
     <<: *hardening
@@ -66,6 +76,8 @@ services:
     networks: [ho-data]
 
   control-plane:
+    mem_limit: ${HO_CONTROL_PLANE_MEMORY:-512m}
+    cpus: ${HO_CONTROL_PLANE_CPUS:-1.0}
     image: hermes-orchestrator/control-plane:${HO_VERSION:-dev}
     build: {context: ., dockerfile: services/control-plane/Dockerfile}
     <<: *hardening
@@ -101,6 +113,8 @@ services:
     networks: [ho-data, ho-control, ho-edge]
 
   git-service:
+    mem_limit: ${HO_GIT_SERVICE_MEMORY:-768m}
+    cpus: ${HO_GIT_SERVICE_CPUS:-1.0}
     image: hermes-orchestrator/git-service:${HO_VERSION:-dev}
     build: {context: ., dockerfile: services/git-service/Dockerfile}
     <<: *hardening
@@ -119,6 +133,8 @@ services:
     networks: [ho-control, ho-git-egress]
 
   agent-manager:
+    mem_limit: ${HO_AGENT_MANAGER_MEMORY:-384m}
+    cpus: ${HO_AGENT_MANAGER_CPUS:-1.0}
     image: hermes-orchestrator/agent-manager:${HO_VERSION:-dev}
     build: {context: ., dockerfile: services/agent-manager/Dockerfile}
     <<: *hardening
@@ -148,6 +164,8 @@ services:
   # orchestration plugin. It reaches the control plane only (ho-edge) and the Internet for its channels
   # and model provider (ho-hermes-egress); no Docker socket, no project files.
   hermes-init:
+    mem_limit: ${HO_HERMES_INIT_MEMORY:-256m}
+    cpus: ${HO_HERMES_INIT_CPUS:-0.5}
     image: &hermes-image nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
     entrypoint: ["sh", "/opt/ho/init.sh"]
     environment:
@@ -162,6 +180,8 @@ services:
     network_mode: none
 
   hermes:
+    mem_limit: ${HO_HERMES_MEMORY:-1536m}
+    cpus: ${HO_HERMES_CPUS:-1.5}
     image: *hermes-image
     command: ["gateway", "run"]
     restart: unless-stopped

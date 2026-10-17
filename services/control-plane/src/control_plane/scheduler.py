@@ -203,7 +203,7 @@ class Scheduler:
                     self._stop.wait(backoff)
                     continue
                 started = time.monotonic()
-                if not self.ctx.coordinator.wait_for_wake(poll):
+                if not self.ctx.coordinator.wait_for_wake(poll, self._stop):
                     # Timed out, Redis disabled, or Redis failing: poll PostgreSQL on schedule.
                     remaining = poll - (time.monotonic() - started)
                     if remaining > 0:

@@ -87,6 +87,30 @@ Changing a pinned version is an update: rebuild, run the tests and smoke tests, 
 
 The stack runs on Apple Silicon (ARM64) and x86-64 or ARM64 Linux. Every base image is pinned to a multi-architecture index. `scripts/check-multiarch.sh` builds all images for the other architecture and runs each under emulation (`HO_CHECK_PLATFORM=linux/arm64` on an x86-64 host). Machine profiles are separate: `config/mac-m2-pro.yaml` and `config/linux.yaml`, selected with `HO_MACHINE_PROFILE`.
 
+## Resources
+
+Every Compose service has a memory and CPU limit (`compose.yaml`; override with `HO_<SERVICE>_MEMORY` and
+`HO_<SERVICE>_CPUS` in `.env`), so a runaway service cannot starve the workers or other software on the host.
+
+Executions are sized by the machine profile (`config/<machine>.yaml`, or the untracked `config/local.yaml` for one
+host): `resource_profiles` for agents, `runners` for test and browser runs. Agent Manager starts an execution only if
+its memory limit fits in `Docker total - docker_memory_reserve_gb - limits of the running executions`; otherwise the
+execution waits up to 30 minutes for memory, then fails with CAPACITY. Size the reserve to what really runs outside
+executions: the platform services (about 1 GB in use), other containers on the host, and the host itself.
+
+On a small Linux server (8 GB) shared with other services, start from:
+
+```yaml
+machine:
+  docker_memory_reserve_gb: 3
+  max_agent_workers: 2
+  resource_profiles: {LIGHT: {cpus: 1, memory_gb: 1}, NORMAL: {cpus: 2, memory_gb: 2}, HEAVY: {cpus: 3, memory_gb: 3}}
+  runners: {test: {cpus: 2, memory_gb: 2}, browser: {cpus: 2, memory_gb: 2}}
+```
+
+Watch `docker stats` and the Dashboard's capacity panel; a CAPACITY failure means the reserve or the profiles are too
+large for the host.
+
 ## Retention and cleanup
 
 Run daily by the scheduler (`ho maintenance run` on demand):
