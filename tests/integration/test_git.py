@@ -329,6 +329,35 @@ def test_failed_post_merge_tests_block_the_task(api, services, repo, agents, tas
     assert api.get(f"/v1/tasks/{task}").json()["state"] == "BLOCKED"
 
 
+def test_retry_after_a_failed_post_merge_verifies_again(api, services, repo, agents, task):
+    approval = ready_for_merge(api, services, repo, agents, task)
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    finish_verification(services, agents, task, "FAILED")
+    merged = sh(repo, "rev-parse", "main")
+    retried = api.post(f"/v1/tasks/{task}/retry")
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["key"] == task and retried.json()["state"] == "VERIFYING"  # not a new pipeline
+    post_merge = finish_verification(services, agents, task)
+    assert post_merge["purpose"] == "POST_MERGE" and post_merge["state"] == "PASSED"
+    assert api.get(f"/v1/tasks/{task}").json()["state"] == "DONE"
+    assert sh(repo, "rev-parse", "main") == merged  # nothing merged twice
+
+
+def test_already_merged_task_back_in_ready_for_merge_resumes_verification(api, services, repo, agents, task):
+    approval = ready_for_merge(api, services, repo, agents, task)
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    finish_verification(services, agents, task, "FAILED")
+    # Stand-in for a retry before this rule: the pipeline ran again and passed the gate on the merged change.
+    with services.ctx.unit_of_work() as uow:
+        uow.cur.execute("UPDATE tasks SET state = 'READY_FOR_MERGE' WHERE key = %s", (task,))
+    refused = api.post(f"/v1/tasks/{task}/git/merge-request")
+    assert refused.status_code == 409 and "already merged" in refused.text
+    retried = api.post(f"/v1/tasks/{task}/retry")
+    assert retried.status_code == 200 and retried.json()["state"] == "VERIFYING", retried.text
+    assert finish_verification(services, agents, task)["state"] == "PASSED"
+    assert api.get(f"/v1/tasks/{task}").json()["state"] == "DONE"
+
+
 def test_target_moved_after_request_invalidates_the_approval(api, services, repo, agents, task):
     approval = ready_for_merge(api, services, repo, agents, task)
     before = commit(repo, "user commits after the merge request", {"README.md": "# late\n"})

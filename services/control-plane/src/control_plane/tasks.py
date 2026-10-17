@@ -55,6 +55,8 @@ class Tasks:
         self.on_budget_resume: list[Any] = []  # (uow, task) after a budget pause resumes: relaunch what waited
         # Called with (uow, updated task, previous state) after every state change (checkpoints, wind-down).
         self.on_transition: list[Any] = []
+        # Called with (uow, locked task, principal) on retry; a hook that resumes the task itself returns it.
+        self.on_retry: list[Any] = []
         approvals.register_handler(ApprovalAction.BUDGET_UNLIMITED, self._on_budget_unlimited_decision)
 
     # ------------------------------------------------------------------ queries
@@ -259,6 +261,10 @@ class Tasks:
 
     def retry(self, uow: UnitOfWork, key: str, *, principal: Principal, idempotency_key: str) -> Row:
         task = self.get(uow, key, lock=True)
+        for hook in self.on_retry:
+            resumed = hook(uow, task, principal)
+            if resumed is not None:
+                return resumed
         if task["state"] == S.BLOCKED:
             # A fresh start for the orchestrator too: earlier idle steps do not count against the retry.
             uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0 WHERE id = %s", (task["id"],))

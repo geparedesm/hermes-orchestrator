@@ -114,6 +114,9 @@ def transition(
             return TransitionResult(target, None)
         if current == S.BLOCKED and trigger == Trigger.USER and target == S.READY:
             return TransitionResult(S.READY, None)
+        # A change already merged needs only its post-merge verification again (the control plane checks the merge).
+        if current == S.BLOCKED and trigger == Trigger.USER and target == S.VERIFYING:
+            return TransitionResult(S.VERIFYING, None)
         raise InvalidTransition(current, target, f"must resume to {resume_state}")
 
     # Entering a waiting state records where to come back to.
