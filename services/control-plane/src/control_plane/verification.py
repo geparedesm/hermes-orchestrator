@@ -135,8 +135,21 @@ class Verifications:
         except BudgetExhausted as exc:
             # The verification stays PREPARING; it is launched again when the budget is raised.
             with self.ctx.unit_of_work() as uow:
-                task_key = self._load(uow, verification_id)[1]["key"]
-            self.executions.pause_for_budget(task_key, str(exc))
+                row, task = self._load(uow, verification_id)[:2]
+                task = self.tasks.get(uow, task["key"], lock=True)
+                if row["purpose"] == "POST_MERGE" and task["state"] == S.VERIFYING:
+                    # A merged task cannot pause for budget: it stops visibly instead of waiting unseen, and a retry
+                    # after the budget is raised verifies it again.
+                    uow.cur.execute("UPDATE verifications SET state = 'ERROR', error = %s, finished_at = now() WHERE id = %s",
+                                    (str(exc)[:500], verification_id))
+                    uow.cur.execute("UPDATE git_changes SET post_merge_status = 'FAILED' WHERE task_id = %s", (task["id"],))
+                    self.tasks.transition(uow, task, S.BLOCKED, trigger=Trigger.SYSTEM, actor="control-plane",
+                                          reason=f"post-merge verification needs budget: {exc}; raise it, then retry")
+                    if environment is not None:
+                        key = task["key"]
+                        uow.after_commit.append(lambda: self._stop_services(key))
+                    return
+            self.executions.pause_for_budget(task["key"], str(exc))
 
     def relaunch_waiting(self, uow: UnitOfWork, task: Row) -> None:
         """Launch, after this transaction, verifications of `task` left PREPARING (for example by an exhausted budget)."""
