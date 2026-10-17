@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from typing import Any
 
 import redis
@@ -16,11 +18,16 @@ import redis
 log = logging.getLogger(__name__)
 
 WAKE_STREAM = "ho:wake:scheduler"
+MAX_BLOCK_SECONDS = 5
 
 
 class Coordinator:
     def __init__(self, url: str | None) -> None:
         self._client = redis.Redis.from_url(url, socket_timeout=2, socket_connect_timeout=2) if url else None
+        # Blocking reads: the socket must outlast the block (a shorter one turns every wait into a timeout error and
+        # wake-ups never arrive), and the block is short so that shutdown and a stalled Redis never wait long.
+        self._blocking = (redis.Redis.from_url(url, socket_timeout=MAX_BLOCK_SECONDS + 2, socket_connect_timeout=2)
+                          if url else None)
         self._last_id = "$"
 
     @property
@@ -43,18 +50,34 @@ class Coordinator:
         except redis.RedisError as exc:
             log.warning("scheduler wake-up not sent: %s", exc)
 
-    def wait_for_wake(self, timeout_seconds: float) -> bool:
-        """Block until a wake-up arrives or the timeout expires. Returns True if woken."""
-        if not self._client:
+    def wait_for_wake(self, timeout_seconds: float, stop: threading.Event | None = None) -> bool:
+        """Block until a wake-up arrives or the timeout expires (or `stop` is set). Returns True if woken.
+
+        Reads in short blocks so that shutdown and a stalled Redis never wait long."""
+        if not self._blocking:
             return False
-        try:
-            result = self._client.xread({WAKE_STREAM: self._last_id}, block=int(timeout_seconds * 1000), count=100)
-        except redis.RedisError as exc:
-            log.warning("scheduler wake-up wait failed; polling instead: %s", exc)
-            return False
-        if result:
-            self._last_id = result[0][1][-1][0]
-            return True
+        deadline = time.monotonic() + timeout_seconds
+        if self._last_id == "$":
+            # A concrete position: "$" means "newest at the time of each read", so a wake-up sent between two
+            # reads would be skipped.
+            try:
+                newest = self._blocking.xrevrange(WAKE_STREAM, count=1)
+            except redis.RedisError as exc:
+                log.warning("scheduler wake-up wait failed; polling instead: %s", exc)
+                return False
+            self._last_id = newest[0][0] if newest else "0-0"
+        while not (stop is not None and stop.is_set()):
+            block_ms = int(min(deadline - time.monotonic(), MAX_BLOCK_SECONDS) * 1000)
+            if block_ms <= 0:  # never 0: Redis reads that as "block forever"
+                return False
+            try:
+                result = self._blocking.xread({WAKE_STREAM: self._last_id}, block=block_ms, count=100)
+            except redis.RedisError as exc:
+                log.warning("scheduler wake-up wait failed; polling instead: %s", exc)
+                return False
+            if result:
+                self._last_id = result[0][1][-1][0]
+                return True
         return False
 
     def publish_events(self, events: list[dict[str, Any]]) -> None:
