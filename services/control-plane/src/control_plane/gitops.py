@@ -51,6 +51,7 @@ class GitChanges:
         approvals.register_renewer(ApprovalAction.MERGE, self._renew_merge)
         approvals.register_handler(ApprovalAction.HIGH_RISK_OPERATION, self._on_conflict_decision)
         executions.workspace_check = self.check_workspace
+        tasks.on_retry.append(self._retry_merged)
         # Set by verification.Verifications and verification.QualityGate (Phase 6).
         self.verifications: Any = None
         self.quality_gate: Any = None
@@ -441,6 +442,9 @@ class GitChanges:
         changes = self._changes(uow, task, lock=True)
         if changes is None or not changes["integration_sha"]:
             raise Conflict(f"{task_key} has no integrated change")
+        if changes["merge_commit_sha"]:
+            raise Conflict(f"{task_key} is already merged as {changes['merge_commit_sha'][:12]}; "
+                           "retry the task to run its post-merge verification again")
         if changes["retest_status"] in ("RUNNING", "FAILED"):
             raise Conflict(f"the integrated change's tests are {changes['retest_status']}")
         subject = self._merge_subject(uow, task, project, config, changes)
@@ -551,15 +555,36 @@ class GitChanges:
                             f"not updated ({local.get('reason')}): run git pull there", {"reason": local.get("reason")})
             task = self.tasks.transition(uow, task, S.VERIFYING, trigger=Trigger.SYSTEM, actor="git-service",
                                          reason="merge confirmed; post-merge verification")
-            uow.cur.execute("UPDATE git_changes SET post_merge_status = 'RUNNING' WHERE task_id = %s", (task["id"],))
-            verification = self.verifications.start(uow, task_key, ref=f"refs/hermes/merges/{changes['merge_approval_id']}",
-                                                    purpose="POST_MERGE")
-            uow.cur.execute("UPDATE git_changes SET verification_execution_id = NULL WHERE task_id = %s", (task["id"],))
-            self._event(uow, task, "POST_MERGE_STARTED", f"post-merge verification {str(verification['id'])[:8]} started",
-                        actor="control-plane")
+            self._start_post_merge(uow, task, changes["merge_approval_id"])
             if changes["remote_branch"] and (config.get("git") or {}).get("delete_remote_branch_after_merge", True):
                 path, branch, policy = project["relative_path"], changes["remote_branch"], self._policy(config)
                 uow.after_commit.append(lambda: self._delete_remote(path, branch, policy))
+
+    def _start_post_merge(self, uow: UnitOfWork, task: Row, approval_id: UUID) -> None:
+        uow.cur.execute("UPDATE git_changes SET post_merge_status = 'RUNNING' WHERE task_id = %s", (task["id"],))
+        verification = self.verifications.start(uow, task["key"], ref=f"refs/hermes/merges/{approval_id}", purpose="POST_MERGE")
+        uow.cur.execute("UPDATE git_changes SET verification_execution_id = NULL WHERE task_id = %s", (task["id"],))
+        self._event(uow, task, "POST_MERGE_STARTED", f"post-merge verification {str(verification['id'])[:8]} started",
+                    actor="control-plane")
+
+    def _retry_merged(self, uow: UnitOfWork, task: Row, principal: Principal) -> Row | None:
+        """Retrying a task whose change is already merged runs its post-merge verification again: a new pipeline
+        would integrate nothing and could never be merged. A task stuck before this rule (READY_FOR_MERGE again after
+        such a retry) resumes the same way."""
+        if task["state"] not in (S.BLOCKED, S.READY_FOR_MERGE):
+            return None
+        changes = self._changes(uow, task, lock=True)
+        if changes is None or not changes["merge_commit_sha"] or not changes["merged_by_approval_id"] \
+                or changes["post_merge_status"] == "PASSED":
+            return None
+        merged = changes["merge_commit_sha"][:12]
+        if task["state"] == S.READY_FOR_MERGE:
+            task = self.tasks.transition(uow, task, S.BLOCKED, trigger=Trigger.USER, actor=principal.value,
+                                         reason=f"already merged as {merged}")
+        task = self.tasks.transition(uow, task, S.VERIFYING, trigger=Trigger.USER, actor=principal.value,
+                                     reason=f"retried by user: already merged as {merged}; post-merge verification again")
+        self._start_post_merge(uow, task, changes["merged_by_approval_id"])
+        return task
 
     def _delete_remote(self, path: str, branch: str, policy: dict[str, Any]) -> None:
         try:
