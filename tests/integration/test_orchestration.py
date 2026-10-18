@@ -839,3 +839,41 @@ def test_a_review_that_cannot_start_for_budget_asks_the_person_once(api, service
     [row] = q(services, "SELECT count(*) AS n FROM events e JOIN tasks t ON t.id = e.task_id WHERE t.key = %s "
                         "AND e.type = 'RETRY_SCHEDULED'", task)
     assert row["n"] == 1
+
+
+def test_a_plan_refused_while_an_assumption_waits_is_shown_to_the_next_step(api, services, agents, task):
+    step(services, agents, task, {"type": "RECORD_ASSUMPTION", "text": "Only public fields are exposed", "level": "HIGH",
+                                  "reversible": False},
+         {"type": "SET_PLAN", "text": "Harden the public API", "subtasks": [plan_item("harden")]})
+    assert actions(services, task)[-1][:2] == ("SET_PLAN", "REJECTED")
+    [approval] = q(services, "SELECT * FROM approvals WHERE action = 'ASSUMPTION'")
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    services.scheduler.run_once()
+    [execution] = active(services, task, "ORCHESTRATOR")
+    prompt = agents.specs[str(execution["id"])]["inputs"]["prompt.md"]
+    assert "it proposed: Harden the public API; harden: subtask harden" in prompt
+
+
+def test_quality_gate_reasons_stay_in_view_until_fixed(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "a = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    # Stand-in for a failed gate whose announcement an earlier step already read (T-6).
+    q(services, "INSERT INTO quality_gate_evaluations (id, task_id, commit_sha, config_hash, policy_version, risk, requirements, "
+      "residual_risk, outcome) SELECT gen_random_uuid(), id, 'abc', 'h', 'p', 'MEDIUM', %s::jsonb, 'r', 'FAIL' FROM tasks "
+      "WHERE key = %s", json.dumps([{"name": "requirements", "detail": "unmet: README.md was not updated", "status": "FAIL"},
+                                    {"name": "exception_approval", "detail": "risk HIGH needs an exception", "status": "APPROVAL_REQUIRED"},
+                                    {"name": "tests", "detail": "test passed", "status": "PASS"}]), task)
+    q(services, "UPDATE tasks SET state = 'FIX_REQUIRED', step_requested = true, orchestrator_cursor_seq = "
+      "(SELECT max(seq) FROM events) WHERE key = %s", task)
+    for execution in active(services, task, "TESTER") + active(services, task, "REVIEWER"):
+        agents.finish_agent(str(execution["id"]), b"", exit_code=1)
+    q(services, "UPDATE verifications SET state = 'ERROR' WHERE state IN ('PREPARING', 'RUNNING')")
+    services.scheduler.run_once()
+    [execution] = active(services, task, "ORCHESTRATOR")
+    prompt = agents.specs[str(execution["id"])]["inputs"]["prompt.md"]
+    assert "## What the last Quality Gate evaluation requires" in prompt
+    assert "- requirements: unmet: README.md was not updated" in prompt and "test passed" not in prompt
+    assert "- exception_approval: risk HIGH needs an exception" in prompt
+    assert "Every subtask is accepted" in prompt
