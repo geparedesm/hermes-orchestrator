@@ -814,18 +814,32 @@ class Orchestration:
         if not items:
             raise ValueError("a plan needs at least one subtask")
         keys = [str(i.get("key") or "").strip() for i in items]
-        if len(set(keys)) != len(keys) or not all(re.match(r"^[A-Za-z0-9_-]{1,20}$", k) for k in keys):
-            raise ValueError("subtask keys must be unique short identifiers")
+        # Say which key and why: a bare "invalid keys" made T-6's orchestrator retry blindly until it was blocked.
+        invalid = [k for k in keys if not re.match(r"^[A-Za-z0-9_-]{1,20}$", k)]
+        duplicated = sorted({k for k in keys if keys.count(k) > 1})
+        if invalid or duplicated:
+            raise ValueError("subtask keys must be unique, 1 to 20 characters of letters, digits, _ or -"
+                             + (f"; invalid: {', '.join(repr(k) for k in invalid)}" if invalid else "")
+                             + (f"; repeated: {', '.join(duplicated)}" if duplicated else ""))
         if any(re.match(r"^T-[0-9]+-[0-9]+$", k) for k in keys):
             raise ValueError("subtask keys are your own short names (like 'api'); T-n-m keys are assigned by the platform")
         graph = {k: [d for d in (i.get("depends_on") or [])] for k, i in zip(keys, items, strict=True)}
-        for key, deps in graph.items():
-            unknown = [d for d in deps if d not in graph]
-            if unknown:
-                raise ValueError(f"{key} depends on unknown subtasks {unknown}")
-        _check_acyclic(graph)
         current = {s["local_key"]: s for s in self._subtasks(uow, task)}
-        if task["current_plan_version"] and self._same_plan(uow, current, keys, items, graph):
+        # Accepted subtasks a new plan leaves out stay in it (below), so new subtasks may build on them (T-6's fixes did).
+        kept = {k for k, s in current.items() if k not in graph and s["state"] in ("ACCEPTED", "INTEGRATED")}
+        for key, deps in graph.items():
+            unknown = [d for d in deps if d not in graph and d not in kept]
+            if unknown:
+                raise ValueError(f"{key} depends on unknown subtasks {unknown}"
+                                 + (f" (accepted subtasks you can depend on: {', '.join(sorted(kept))})" if kept else ""))
+        kept_deps: dict[str, list[str]] = {}
+        for k in kept:  # their existing dependencies stay too, so they count for cycles
+            uow.cur.execute("SELECT x.local_key FROM subtask_dependencies d JOIN subtasks x ON x.id = d.depends_on_subtask_id "
+                            "WHERE d.subtask_id = %s", (current[k]["id"],))
+            kept_deps[k] = [r["local_key"] for r in uow.cur.fetchall()]
+        _check_acyclic({**graph, **kept_deps})
+        # Accepted subtasks a plan leaves out are kept either way: they do not make a resubmitted plan a new one.
+        if task["current_plan_version"] and self._same_plan(uow, {k: v for k, v in current.items() if k not in kept}, keys, items, graph):
             # Only an approval that was cleared (a revision, a stale consumption) is asked for again: a rejected plan resent
             # unchanged is refused like any unchanged plan, so a rejection never comes back as the same question.
             if self._supervised(uow, task) and task.get("plan_approval_state") is None:
@@ -879,6 +893,7 @@ class Orchestration:
                  str(item.get("title") or key)[:200], str(item.get("description") or "")[:8000],
                  jsonb({"files": list(item.get("files") or [])[:100]}), item.get("risk") or "MEDIUM", item.get("preferred_provider")))
             mapping[key] = subtask_id
+        mapping.update({k: current[k]["id"] for k in kept})
         for key, deps in graph.items():
             for dep in deps:
                 uow.cur.execute("INSERT INTO subtask_dependencies (subtask_id, depends_on_subtask_id) VALUES (%s, %s)",
@@ -1929,7 +1944,7 @@ def _check_acyclic(graph: dict[str, list[str]]) -> None:
         if seen.get(node) == 2:
             return
         seen[node] = 1
-        for dep in graph[node]:
+        for dep in graph.get(node, []):  # a kept subtask may depend on one outside the new plan
             visit(dep)
         seen[node] = 2
 

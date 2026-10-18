@@ -877,3 +877,41 @@ def test_quality_gate_reasons_stay_in_view_until_fixed(api, services, agents, re
     assert "- requirements: unmet: README.md was not updated" in prompt and "test passed" not in prompt
     assert "- exception_approval: risk HIGH needs an exception" in prompt
     assert "Every subtask is accepted" in prompt
+
+
+def test_an_invalid_plan_key_is_named_in_the_rejection(api, services, agents, task):
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("portfolio-final-tests"), plan_item("a"), plan_item("a")]})
+    [(kind, outcome, reason)] = actions(services, task)
+    assert (kind, outcome) == ("SET_PLAN", "REJECTED")
+    assert "invalid: 'portfolio-final-tests'" in reason and "repeated: a" in reason and "1 to 20 characters" in reason
+
+
+def test_a_new_subtask_may_depend_on_an_accepted_one_the_plan_leaves_out(api, services, agents, repo, task):
+    plan_and_start(services, agents, task, plan_item("a"), plan_item("b"))
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "a = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    assert subtasks(services, task)["a"]["state"] == "ACCEPTED"
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("b"), plan_item("fix", depends_on=["a", "nope"])]})
+    assert "accepted subtasks you can depend on: a" in actions(services, task)[-1][2]
+    [execution] = active(services, task, "ORCHESTRATOR")
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("b"), plan_item("fix", depends_on=["a"])]})
+    assert actions(services, task)[-1][:2] == ("SET_PLAN", "ACCEPTED")
+    plan = subtasks(services, task)
+    assert plan["a"]["state"] == "ACCEPTED" and plan["fix"]["state"] == "READY"
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("b"), plan_item("fix", depends_on=["a"])]})
+    assert actions(services, task)[-1][2].startswith("the plan is unchanged")  # the same short plan is not a new version
+
+
+def test_a_kept_accepted_subtask_still_counts_for_dependency_cycles(api, services, agents, repo, task):
+    plan_and_start(services, agents, task, plan_item("b"), plan_item("a", depends_on=["b"]), start="b")
+    develop(services, agents, repo, active(services, task, "DEVELOPER")[0], {"b.py": "b = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "a", "provider": "codex"})
+    develop(services, agents, repo, active(services, task, "DEVELOPER")[0], {"a.py": "a = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    q(services, "UPDATE tasks SET state = 'RUNNING', step_requested = true WHERE key = %s", task)  # stand-in: before integration
+    q(services, "UPDATE subtasks SET state = 'FIX_REQUIRED' WHERE local_key = 'b'")
+    services.scheduler.run_once()
+    step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("b", depends_on=["a"])]})
+    assert "dependency cycle" in actions(services, task)[-1][2]
