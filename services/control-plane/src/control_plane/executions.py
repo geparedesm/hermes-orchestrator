@@ -166,7 +166,9 @@ class Executions:
         if provider and req.prompt and req.model is None:
             # The Dashboard's per-agent default model (ctx.agents is the Agent Manager client, which has none).
             from .agents import default_model
-            req.model = default_model(uow, provider)
+            req.model = ((task.get("model_overrides") or {}).get(provider, {}).get(role.value)
+                         or (config["agents"].get("models") or {}).get(provider, {}).get(role.value)
+                         or default_model(uow, provider, role.value))
         if provider:
             from .agents import paused  # a person paused this agent in the Dashboard: no new execution (launches queue)
             if provider in paused(uow, self.ctx.provider_identity) and not hold_if_paused:

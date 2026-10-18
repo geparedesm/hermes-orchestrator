@@ -266,6 +266,21 @@ def _approval_parts(approval: dict[str, Any], task: str | None, project: str | N
         "github_es": f" y el repositorio {'privado' if subject.get('private', True) else 'público'} de GitHub "
                      f"*{subject.get('owner')}/{subject.get('repo')}*" if subject.get("github") else " (sin GitHub)",
     }
+    if action == "MERGE" and subject.get("human_test"):
+        preview = subject["human_test"]
+        shared = preview.get('tasks') or []
+        if lang == "es":
+            question = "Prueba la versión " + str(preview["version"]) + ": " + preview["url"] + "\n¿La probaste y autorizas el merge en {branch}?"
+            yes = "Lo probé y autorizo el merge"
+            if len(shared) > 1:
+                question += "\nIncluye todas estas tareas: " + ", ".join(shared)
+                yes = "Lo probé y autorizo todas las tareas indicadas"
+        else:
+            question = "Test version " + str(preview["version"]) + ": " + preview["url"] + "\nDid you test it and authorize the merge into {branch}?"
+            yes = "I tested this version and authorize the merge"
+            if len(shared) > 1:
+                question += "\nIncludes all these tasks: " + ", ".join(shared)
+                yes = "I tested this version and authorize all listed tasks"
     return kind, question, yes, no, fields
 
 

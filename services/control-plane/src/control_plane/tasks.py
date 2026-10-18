@@ -121,6 +121,15 @@ class Tasks:
         config = self.projects.active_config(uow, project["id"])
         effective = config["effective_config"] if config else self.ctx.platform["project_defaults"]
 
+        platform_delivery = self.ctx.platform["project_defaults"].get("delivery") or {}
+        delivery = {**platform_delivery, **(effective.get("delivery") or {})}
+        human_test = bool(platform_delivery.get("human_test_required") or delivery.get("human_test_required")
+                          or body.get("human_test_required"))
+        mode = body.get("delivery_mode") or delivery.get("mode", "SUBTASKS")
+        models = body.get("model_overrides") or {}
+        if models and principal.value not in self.ctx.platform["platform"]["approvers"]:
+            raise Forbidden("only an approver may select task model overrides")
+
         requested_budget = body.get("budget_profile") or effective["budget"]["profile"]
         fallback_budget = effective["budget"]["profile"]
         if fallback_budget == BudgetProfile.UNLIMITED:
@@ -139,13 +148,13 @@ class Tasks:
         uow.cur.execute(
             """
             INSERT INTO tasks (id, key, project_id, title, original_request_artifact_id, requested_by, priority, state,
-                               autonomy, budget_profile, expansion_profile, labels, idempotency_key, approve_plan)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'BACKLOG', %s, %s, %s, %s, %s, %s)
+                               autonomy, budget_profile, expansion_profile, labels, idempotency_key, approve_plan, delivery_mode, human_test_required, model_overrides)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'BACKLOG', %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING *
             """,
             (task_id, key, project["id"], title, artifact.id, principal.value, body.get("priority", "NORMAL"),
              autonomy, budget_profile, body.get("expansion_profile"), body.get("labels", []), body["idempotency_key"],
-             bool(body.get("approve_plan"))),
+             bool(body.get("approve_plan")), mode, human_test, jsonb(models)),
         )
         task = uow.cur.fetchone()
         assert task is not None

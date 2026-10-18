@@ -22,7 +22,7 @@ from .agents import Agents
 from .approvals import Approvals
 from .auth import PRINCIPAL_HEADER, Authenticator, Identity, Principal
 from .context import Context, UnitOfWork
-from .db import Row
+from .db import Row, jsonb
 from .credentials import Credentials
 from .gitops import GitChanges
 from .verification import QualityGate, Reviews, Verifications
@@ -155,6 +155,29 @@ class NewProject(BaseModel):
 class Decision(BaseModel):
     decision: Literal["APPROVE", "REJECT"]
     note: str | None = Field(default=None, max_length=1000)
+
+
+class PreviewDeployment(BaseModel):
+    image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    base_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    module_heads: dict[str, str]
+    snapshot_id: str | None = Field(default=None, max_length=100)
+
+
+class PreviewPrepare(BaseModel):
+    deployment: PreviewDeployment | None = None
+    environment: str = Field(min_length=1, max_length=63)
+    url: str = Field(max_length=500)
+    tasks: list[str] = Field(min_length=1, max_length=50)
+
+
+class PreviewFeedback(BaseModel):
+    candidate_id: UUID
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class PreviewReady(BaseModel):
+    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class AgentModelUpdate(BaseModel):
@@ -842,6 +865,51 @@ def create_app(services: Services) -> FastAPI:
             health = services.recovery.health.summary(uow) if services.recovery else {}
             return jsonable(dashboard.summary(uow, queue, health, ctx.platform.get("project_defaults") or {}))
 
+    @app.get("/v1/previews")
+    def previews_list(_: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            uow.cur.execute("SELECT * FROM preview_candidates ORDER BY created_at DESC LIMIT 50")
+            return jsonable({"candidates": uow.cur.fetchall()})
+
+    @app.post("/v1/previews", status_code=201)
+    def preview_prepare(body: PreviewPrepare, who_identity: Identity = Depends(identity),
+                        who: Principal = Depends(principal)) -> dict[str, Any]:
+        operator_only(who_identity)
+        from .previews import Previews
+        with ctx.unit_of_work() as uow:
+            return jsonable(Previews(ctx).prepare(uow, environment=body.environment, url=body.url,
+                                                 tasks=body.tasks, principal=who,
+                                                 deployment=body.deployment.model_dump() if body.deployment else None))
+
+    @app.post("/v1/previews/{candidate_id}/ready")
+    def preview_ready(candidate_id: UUID, body: PreviewReady, who_identity: Identity = Depends(identity),
+                      who: Principal = Depends(principal)) -> dict[str, Any]:
+        operator_only(who_identity)
+        from .previews import Previews
+        with ctx.unit_of_work() as uow:
+            row = Previews(ctx).activate(uow, candidate_id, manifest_hash=body.manifest_hash, principal=who)
+            for entry in row["manifest"]["tasks"]:
+                uow.after_commit.append(lambda key=entry["task"]: request_preview_merge(key))
+            return jsonable(row)
+
+    def request_preview_merge(key: str) -> None:
+        try:
+            with ctx.unit_of_work() as uow:
+                services.git.request_merge(uow, key, principal=Principal("control-plane", "preview"), reintegrate_if_moved=True)
+        except ApiError as exc:
+            log.info("candidate for %s needs revalidation: %s", key, exc)
+
+    @app.post("/v1/previews/{candidate_id}/{verb}")
+    def preview_action(candidate_id: UUID, verb: str, who: Principal = Depends(principal)) -> dict[str, Any]:
+        from .previews import Previews
+        with ctx.unit_of_work() as uow:
+            previews = Previews(ctx)
+            if verb == "begin":
+                return jsonable(previews.begin(uow, candidate_id, who))
+            if verb == "retire":
+                return jsonable(previews.retire(uow, candidate_id, who))
+            raise NotFound("unknown preview action")
+
     @app.get("/v1/agents")
     def agents_view(_: Identity = Depends(identity)) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
@@ -851,6 +919,12 @@ def create_app(services: Services) -> FastAPI:
     def agent_model(provider: str, body: AgentModelUpdate, who: Principal = Depends(principal)) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
             return jsonable(services.agents.set_model(uow, provider, body.model, principal=who))
+
+    @app.post("/v1/agents/{provider}/models/{role}")
+    def role_model(provider: str, role: str, body: AgentModelUpdate,
+                   who: Principal = Depends(principal)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return jsonable(services.agents.set_role_model(uow, provider, role, body.model, principal=who))
 
     @app.post("/v1/agents/{provider}/{verb}")
     def agents_action(provider: str, verb: str, who: Principal = Depends(principal)) -> dict[str, Any]:
@@ -869,9 +943,34 @@ def create_app(services: Services) -> FastAPI:
         with ctx.unit_of_work() as uow:
             task = services.tasks.get(uow, key)
             body = {"task": services.tasks.summary(uow, task), **dashboard.task_detail(uow, task)}
+            uow.cur.execute("SELECT * FROM preview_candidates WHERE manifest->'tasks' @> %s "
+                            "ORDER BY created_at DESC LIMIT 1", (jsonb([{'task': key}]),))
+            body['preview'] = uow.cur.fetchone()
+            uow.cur.execute("SELECT a.path FROM feature_plans p JOIN artifacts a ON a.id = p.document_artifact_id "
+                            "WHERE p.task_id = %s ORDER BY p.version DESC LIMIT 1", (task['id'],))
+            plan = uow.cur.fetchone()
+            body['feature_plan'] = ctx.artifacts.read(plan['path']).decode('utf-8', 'replace') if plan else None
             if services.orchestration is not None:
                 body["orchestration"] = services.orchestration.inspect(uow, key)
             return jsonable(body)
+
+    @app.post("/v1/tasks/{key}/preview-feedback")
+    def preview_feedback(key: str, body: PreviewFeedback, who: Principal = Depends(principal)) -> dict[str, Any]:
+        from .previews import Previews
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key, lock=True)
+            previews = Previews(ctx)
+            previews._human(who)
+            candidate = previews.get(uow, body.candidate_id)
+            if not any(entry['task'] == key for entry in candidate['manifest']['tasks']):
+                raise Conflict("the candidate does not contain this task")
+            if services.orchestration is None:
+                raise Conflict("orchestration is not enabled")
+            current = services.orchestration._requirements_text(uow, task) or services.reviews._request_text(uow, task)
+            text = current + f"\n\n## Human feedback on test version {candidate['version']}\n" + body.text.strip()
+            result = services.orchestration.revise(uow, key, text, principal=who)
+            previews.retire(uow, body.candidate_id, who)
+            return jsonable(result)
 
     @app.get("/v1/tasks/{key}/attachments")
     def list_attachments(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:

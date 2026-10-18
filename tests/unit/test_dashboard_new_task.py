@@ -184,3 +184,11 @@ def test_a_budget_increase_is_requested_as_the_operator(dashboard, monkeypatch):
     assert client.post("/tasks/T-49/budget", json={"add": {"provider_usage_units": 2_000_000}}).status_code == 200  # tokens
     assert client.post("/tasks/T-49/budget", json={"add": {"unlimited": 1}}).status_code == 422
     assert client.post("/tasks/../budget", json={"add": {"agent_launches": 1}}).status_code == 404
+
+
+def test_preview_origin_cannot_create_tasks_using_dashboard_cookies(dashboard):
+    client, calls = dashboard
+    body = {'project': 'demo', 'request': 'Do it', 'idempotency_key': KEY}
+    assert client.post('/tasks', json=body, headers={'Origin': 'https://test.gp-developer.com'}).status_code == 403
+    assert not calls
+    assert client.post('/tasks', json=body, headers={'Origin': 'http://testserver'}).status_code == 200

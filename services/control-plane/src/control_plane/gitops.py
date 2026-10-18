@@ -448,6 +448,10 @@ class GitChanges:
         if changes["retest_status"] in ("RUNNING", "FAILED"):
             raise Conflict(f"the integrated change's tests are {changes['retest_status']}")
         subject = self._merge_subject(uow, task, project, config, changes)
+        from .previews import Previews
+        binding = Previews(self.ctx).binding(uow, task, changes)
+        if binding:
+            subject["human_test"] = binding
         if self.quality_gate is not None and not subject["quality_gate"]:
             raise Conflict(f"{task_key} has no passing Quality Gate evaluation for its integrated change")
         moved = subject["target_sha"] != changes["integration_target_sha"]
@@ -492,8 +496,12 @@ class GitChanges:
         _, project, config = self._context(uow, task["key"], lock=True)
         changes = self._changes(uow, task, lock=True)
         assert changes is not None
+        from .previews import Previews
+        binding = Previews(self.ctx).binding(uow, task, changes, require_testing=True)
         try:
             subject = self._merge_subject(uow, task, project, config, changes)
+            if binding:
+                subject["human_test"] = binding
         except ApiError as exc:
             subject = {"unavailable": str(exc)}
         if not self.approvals.consume(uow, approval, subject=subject, config_hash=config["_hash"]):

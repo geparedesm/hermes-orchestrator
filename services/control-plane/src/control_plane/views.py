@@ -80,6 +80,9 @@ def task_view(row: Row, *, project_slug: str, budget: Row | None = None, pending
         "title": row["title"],
         "state": row["state"],
         "priority": row["priority"],
+        "delivery_mode": row.get("delivery_mode", "SUBTASKS"),
+        "human_test_required": row.get("human_test_required", False),
+        "model_overrides": row.get("model_overrides") or {},
         "created_at": _iso(row["created_at"]),
         "updated_at": _iso(row["updated_at"]),
     }

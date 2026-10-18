@@ -1,0 +1,98 @@
+# Operator-managed preview resources. Never attached to the production Odoo database network.
+name: ho-preview
+services:
+  db:
+    restart: unless-stopped
+    image: ${HO_PREVIEW_POSTGRES_IMAGE:?Pin the installed PostgreSQL image ID}
+    environment:
+      POSTGRES_USER: preview
+      POSTGRES_DB: preview
+      POSTGRES_PASSWORD_FILE: /run/secrets/preview_db_password
+    secrets: [preview_db_password]
+    volumes:
+      - preview-db:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    networks: [database]
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U preview -d preview']
+      interval: 3s
+      retries: 30
+  odoo:
+    restart: unless-stopped
+    image: ${HO_PREVIEW_ODOO_IMAGE:?Pin the candidate Odoo image ID}
+    entrypoint: [python3, /preview/odoo_entrypoint.py]
+    command: [serve]
+    secrets: [preview_db_password, preview_admin_password, preview_master_password]
+    volumes:
+      - ./odoo_entrypoint.py:/preview/odoo_entrypoint.py:ro
+      - ./anonymize_odoo.py:/preview/anonymize_odoo.py:ro
+      - ./anonymization-policy.json:/preview/anonymization-policy.json:ro
+      - ./seed_odoo.py:/preview/seed_odoo.py:ro
+      - preview-data:/var/lib/odoo
+    tmpfs: ["/tmp:size=268435456,mode=1777"]
+    networks: [database, application]
+    mem_limit: 1536m
+    cpus: 1.0
+    pids_limit: 128
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      db: {condition: service_healthy}
+  gateway:
+    restart: unless-stopped
+    image: ${HO_PREVIEW_GATEWAY_IMAGE:?Pin the tested control-plane image}
+    entrypoint: [python, /preview/gateway_start.py]
+    volumes:
+      - ./gateway_start.py:/preview/gateway_start.py:ro
+      - ./current.json:/preview/current.json:ro
+    environment:
+      HO_PREVIEW_API_URL: http://control-plane:8080
+      HO_PREVIEW_PLUGIN_TOKEN_FILE: /run/secrets/preview_plugin_token
+      HO_PREVIEW_HERMES_URL: http://hermes:9119
+      HO_PREVIEW_WEBSOCKET_URL: ws://odoo:8072/websocket
+      HO_PREVIEW_APPLICATION_URL: http://odoo:8069
+      HO_PREVIEW_PUBLIC_ORIGIN: https://test.gp-developer.com
+      HO_PREVIEW_ODOO_PASSWORD_FILE: /run/secrets/preview_admin_password
+      HO_PREVIEW_VERSION_FILE: /preview/current.json
+      HO_PREVIEW_DASHBOARD_URL: ${HO_PREVIEW_DASHBOARD_URL:-/}
+      HO_PREVIEW_OPERATOR_ID: ${HO_PREVIEW_OPERATOR_ID:?Use the verified Hermes operator identity}
+    secrets: [preview_admin_password, preview_plugin_token]
+    ports: ['127.0.0.1:8085:8085']
+    networks: [application, hermes, edge]
+    mem_limit: 256m
+    read_only: true
+    tmpfs: ["/tmp:size=16777216,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  tunnel:
+    image: hermes-orchestrator/preview-tunnel:local
+    command: [--config, /etc/cloudflared/config.yml, tunnel, run]
+    restart: unless-stopped
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+    secrets: [cloudflare_tunnel]
+    networks: [edge]
+    mem_limit: 128m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  edge: {}
+  database: {internal: true}
+  application: {internal: true}
+  hermes:
+    external: true
+    name: hermes-orchestrator_ho-edge
+volumes:
+  preview-db: {}
+  preview-data: {}
+secrets:
+  preview_plugin_token: {file: ../../secrets/ho_plugin_token}
+  cloudflare_tunnel: {file: ../../secrets/preview/cloudflare-tunnel.json}
+  preview_db_password: {file: ../../secrets/preview/db_password}
+  preview_admin_password: {file: ../../secrets/preview/admin_password}
+  preview_master_password: {file: ../../secrets/preview/master_password}

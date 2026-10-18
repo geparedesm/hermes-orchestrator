@@ -99,8 +99,16 @@ class TaskApi:
 
     def create(self, project: str, request: str, title: str | None = None, priority: str | None = None, *,
                budget: str | None = None, depends_on: list[str] | None = None, idempotency_key: str | None = None,
-               attachments: list[dict[str, str]] | None = None, approve_plan: bool = False) -> Any:
+               attachments: list[dict[str, str]] | None = None, approve_plan: bool = False,
+               delivery_mode: str | None = None, human_test_required: bool | None = None,
+               model_overrides: dict[str, dict[str, str]] | None = None) -> Any:
         body: dict[str, Any] = {"project": project, "request": request}
+        if delivery_mode is not None:
+            body["delivery_mode"] = delivery_mode
+        if human_test_required is not None:
+            body["human_test_required"] = human_test_required
+        if model_overrides:
+            body["model_overrides"] = model_overrides
         if approve_plan:
             body["approve_plan"] = True
         if title:
@@ -205,6 +213,26 @@ class TaskApi:
         if not re.match(r"^[a-z][a-z0-9-]{0,30}$", provider or ""):
             raise ApiError(400, "invalid agent")
         return self.call("POST", f"/v1/agents/{provider}/model", {"model": model})
+
+    def set_role_model(self, provider: str, role: str, model: str | None) -> Any:
+        if provider not in ("claude", "codex") or role not in ("ORCHESTRATOR", "DEVELOPER", "REVIEWER"):
+            raise ApiError(400, "invalid agent role")
+        return self.call("POST", f"/v1/agents/{provider}/models/{role}", {"model": model})
+
+    def preview_feedback(self, key: str, candidate_id: str, text: str) -> Any:
+        return self.call("POST", f"/v1/tasks/{_key(key)}/preview-feedback", {"candidate_id": candidate_id, "text": text})
+
+    def previews(self) -> Any:
+        return self.call("GET", "/v1/previews")
+
+    def preview_action(self, candidate_id: str, verb: str) -> Any:
+        try:
+            candidate_id = str(uuid.UUID(candidate_id))
+        except (ValueError, AttributeError):
+            raise ApiError(400, "invalid candidate") from None
+        if verb not in ("begin", "retire"):
+            raise ApiError(400, "invalid preview action")
+        return self.call("POST", f"/v1/previews/{candidate_id}/{verb}", {})
 
     def decide(self, approval_id: str, approve: bool, note: str | None = None) -> Any:
         body: dict[str, Any] = {"decision": "APPROVE" if approve else "REJECT"}

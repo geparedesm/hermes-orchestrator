@@ -205,6 +205,15 @@
 
   // ------------------------------------------------------------ approvals
 
+  function openTestVersion(preview) {
+    const opened = window.open("about:blank", "_blank");
+    if (opened) opened.opener = null;
+    return post("/previews/" + (preview.candidate_id || preview.id) + "/begin", {}).then(function () {
+      if (opened) opened.location.href = preview.url;
+      else window.location.assign(preview.url);
+    }).catch(function (error) { if (opened) opened.close(); throw error; });
+  }
+
   // One decision, explained the way the chat explains it, with the two outcomes as the buttons.
   const CHANGE_MARK = { "+": ["+", "good"], "-": ["−", "bad"], "~": ["~", "info"], "!": ["!", "warn"], "?": ["?", "info"] };
   const RISK_TONE = { low: "muted", medium: "info", high: "warn", critical: "bad" };
@@ -290,6 +299,15 @@
     const expires = left(a.expires_at);
     const risk = d && d.risk;
     const who = d && requester(d.requested_by);
+    const preview = (a.subject || {}).human_test;
+    const human = d && d.human_test;
+    const canApprove = !preview || !!(human && human.can_approve);
+    function openPreview() {
+      setBusy("PREVIEW"); setError(null);
+      openTestVersion(preview).then(props.done)
+        .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(null); });
+    }
+
     return h("article", { className: "orch-approval" },
       h("div", { className: "orch-approval-head" },
         h("span", { className: "orch-approval-icon" }, h(Icon, { name: "alert", size: 16 })),
@@ -304,6 +322,10 @@
       d && (d.highlights || []).length ? h("ul", { className: "orch-highlights" },
         d.highlights.map(function (x, i) { return h("li", { key: i }, x); })) : null,
       d ? h(Advice, { recommendation: d.recommendation, yes: plain.yes, no: plain.no }) : null,
+      preview && !props.hidePreviewOpen ? h("div", { className: "orch-stack" },
+        h("p", { className: "orch-muted orch-small" }, "Test version " + preview.version + " before authorizing this merge. Opening it does not approve anything."),
+        h(Button, { disabled: !!busy || !(human && human.available), onClick: openPreview }, "Open test environment"),
+        !canApprove ? h("p", { className: "orch-muted orch-small" }, "Open the current test version first. Unavailable or expired versions cannot be approved.") : null) : null,
       rejecting ? h("div", { className: "orch-reject" },
         h("label", { className: "orch-reject-label" }, "Why? (optional — the agents read it and act on it)",
           h("textarea", { value: note, rows: 3, maxLength: 1000, autoFocus: true,
@@ -313,7 +335,7 @@
           h(Button, { kind: "bad", icon: "x", disabled: !!busy, onClick: function () { decide("REJECT"); } }, busy === "REJECT" ? "Saving…" : capital(plain.no)),
           h(Button, { disabled: !!busy, onClick: function () { setRejecting(false); setNote(""); } }, "Back")))
         : h("div", { className: "orch-approval-actions" },
-          h(Button, { kind: "good", icon: "check", disabled: !!busy, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : capital(plain.yes)),
+          h(Button, { kind: "good", icon: "check", disabled: !!busy || !canApprove, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : capital(plain.yes)),
           h(Button, { kind: "bad-outline", icon: "x", disabled: !!busy, onClick: function () { setRejecting(true); } }, capital(plain.no) + "…"),
           a.task && props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Open task") : null),
       error ? h("div", { className: "orch-alert" }, error) : null,
@@ -585,6 +607,35 @@
         h("span", { className: tone ? "orch-text-" + tone : null }, w ? (w.reset ? "Reset" : resetPhrase(w.resets_at)) : "No data yet")),
       h("div", { className: "orch-usage-track" }, h("div", { style: { width: pct + "%", background: tone ? "var(--o-" + tone + ")" : agentColor(props.agent) } })));
   }
+  const MODEL_ROLES = [["ORCHESTRATOR", "Planning"], ["DEVELOPER", "Implementation"], ["REVIEWER", "Review"]];
+  function ModelSelect(props) {
+    const options = props.agent.model_options || [];
+    const known = options.some(function (m) { return m.id === props.value; });
+    return h("select", { className: "orch-input orch-select", value: props.value || "", disabled: props.disabled,
+      onChange: function (e) { props.change(e.target.value); }, "aria-label": props.label },
+      h("option", { value: "" }, props.fallback || "Use provider default"),
+      props.value && !known ? h("option", { value: props.value }, props.value) : null,
+      options.map(function (m) { return h("option", { key: m.id, value: m.id }, m.label || m.id); }));
+  }
+  function RoleModel(props) {
+    const a = props.agent, role = props.role;
+    const configured = (a.role_models || {})[role[0]] || "";
+    const [value, setValue] = useState(configured);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    useEffect(function () { setValue(configured); }, [configured]);
+    function save() {
+      setBusy(true); setError(null);
+      post("/agents/" + a.provider + "/models/" + role[0], { model: value || null }).then(props.done)
+        .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(false); });
+    }
+    return h("div", { className: "orch-stack" },
+      h("label", null, role[1], h(ModelSelect, { agent: a, value: value, change: setValue, disabled: busy,
+        label: capital(a.provider) + " " + role[1] + " model", fallback: "Provider default" + (a.model ? " · " + a.model : "") })),
+      h(Button, { small: true, onClick: save, disabled: busy || value === configured }, busy ? "Saving…" : "Save " + role[1].toLowerCase()),
+      error ? h("div", { className: "orch-alert" }, error) : null);
+  }
+
   function AgentCard(props) {
     const a = props.agent;
     const [busy, setBusy] = useState(false);
@@ -628,6 +679,10 @@
               onKeyDown: function (e) { if (e.key === "Enter") saveModel(); }, disabled: savingModel })),
         h("div", { className: "orch-muted orch-small" }, a.model_catalog_status === "CATALOG" ? "Models this agent offers" : a.model_catalog_status === "OBSERVED" ? "Models reported by completed runs" : "Model catalog unavailable until this agent reports a model"),
         h(Button, { small: true, kind: "primary", disabled: savingModel || model === (a.model || "") , onClick: saveModel }, savingModel ? "Saving…" : "Save model")) : null,
+      h("details", null, h("summary", { className: "orch-disclosure" }, "Models by role"),
+        h("div", { className: "orch-stack" }, MODEL_ROLES.map(function (role) {
+          return h(RoleModel, { key: role[0], agent: a, role: role, done: props.done });
+        }))),
       error ? h("div", { className: "orch-alert" }, error) : null);
   }
   function ConnectAgent() {
@@ -1208,6 +1263,51 @@
       setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
     });
   }
+  function HumanTest(props) {
+    const d = props.data, t = d.task;
+    const preview = d.preview;
+    const [note, setNote] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    if (!t.human_test_required && !preview) return null;
+    const available = preview && ["READY", "TESTING"].indexOf(preview.state) >= 0 && Date.parse(preview.expires_at) > Date.now();
+    const section = (d.feature_plan || "").match(/^## Human test[ \t]*\r?\n([\s\S]*)/m);
+    const instructions = section ? section[1].split(/\r?\n## /)[0].trim() : "";
+    function open() {
+      setBusy(true); setError(null);
+      openTestVersion(preview).then(props.reload)
+        .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(false); });
+    }
+
+    function retire() {
+      setBusy(true); setError(null);
+      post("/previews/" + preview.id + "/retire", {}).then(props.reload)
+        .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(false); });
+    }
+    function feedback() {
+      setBusy(true); setError(null);
+      post("/tasks/" + t.key + "/preview-feedback", { text: note, candidate_id: preview.id }).then(function () {
+        setNote(""); props.reload();
+      }).catch(function (e) { setError(message(e)); }).finally(function () { setBusy(false); });
+    }
+    return h(Card, { title: "Test this version" },
+      preview ? h("div", { className: "orch-stack" },
+        h("div", { className: "orch-row" }, h(Pill, null, preview.state), h("strong", null, preview.environment + " · version " + preview.version)),
+        h(Button, { kind: "primary", disabled: busy || !available, onClick: open }, "Open test environment"),
+        instructions ? h("div", null, h("strong", null, "What to test"),
+          h("pre", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, instructions)) : null,
+        h("p", { className: "orch-muted orch-small" }, "Included tasks: " + preview.manifest.tasks.map(function (x) { return x.task; }).join(", ")),
+        h("p", { className: "orch-muted orch-small" }, "Available until " + when(preview.expires_at) + ". The final decision below authorizes the merge."),
+        d.feature_plan ? h("details", null, h("summary", null, "Plan and test instructions"), h("pre", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, d.feature_plan)) : null,
+        h("label", null, "What needs changing?", h("textarea", { value: note, maxLength: 4000, rows: 3,
+          onChange: function (e) { setNote(e.target.value); }, placeholder: "Describe what you did, expected and observed." })),
+        h(Button, { disabled: busy || !note.trim() || FINISHED.indexOf(t.state) >= 0, onClick: feedback }, busy ? "Sending…" : "Request changes"),
+        h("p", { className: "orch-muted orch-small" }, "Requesting changes ends this test session so a corrected version can be prepared."),
+        ["PREPARING", "READY", "TESTING"].indexOf(preview.state) >= 0 ? h(Button, { disabled: busy, onClick: retire }, "End testing and allow the next version") : null,
+        error ? h("div", { className: "orch-alert" }, error) : null)
+        : h("p", { className: "orch-muted" }, "Waiting for a verified test environment. The merge remains blocked until you can test the candidate."));
+  }
+
   function Summary(props) {
     const d = props.data;
     const t = d.task;
@@ -1220,7 +1320,8 @@
       rounds.filter(function (c) { return c.state === "PENDING"; }).map(function (c) {
         return h(QuestionCard, { key: c.id, round: Object.assign({ task: t.key }, c), done: props.reload });
       }),
-      pending.map(function (a) { return h(ApprovalCard, { key: a.id, approval: Object.assign({ task_title: t.title }, a), done: props.reload }); }),
+      h(HumanTest, { data: d, reload: props.reload }),
+      pending.map(function (a) { return h(ApprovalCard, { key: a.id, approval: Object.assign({ task_title: t.title }, a), hidePreviewOpen: !!d.preview, done: props.reload }); }),
       answered.length ? h(Card, { title: "Your answers", count: answered.reduce(function (n, c) { return n + c.questions.length; }, 0) },
         h("ul", { className: "orch-facts" }, answered.flatMap(function (c) {
           return c.questions.map(function (q) {
@@ -1281,7 +1382,8 @@
               x[1], n ? h("span", { className: "orch-count" }, n) : null);
           })),
           tab === "summary" ? h(Summary, { data: d, reload: view.reload })
-            : tab === "plan" ? h(Plan, { dag: d.dag })
+            : tab === "plan" ? h("div", { className: "orch-stack" }, d.feature_plan ? h(Card, { title: "Implementation plan" },
+                h("pre", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, d.feature_plan)) : null, h(Plan, { dag: d.dag }))
               : tab === "quality" ? h(Quality, { data: d })
                 : tab === "activity" ? h(Timeline, { events: d.timeline })
                   : h(Advanced, { data: d, reload: view.reload }))));
@@ -1318,7 +1420,9 @@
   // idempotency key per form, so a double click or a retried request creates one task.
   function NewTask(props) {
     const [projects, setProjects] = useState(null);
-    const [form, setForm] = useState({ project: props.project || "", request: "", title: "", priority: "NORMAL", budget: "", depends_on: "", approve_plan: false });
+    const [form, setForm] = useState({ project: props.project || "", request: "", title: "", priority: "NORMAL", budget: "", depends_on: "", approve_plan: false, delivery_mode: "FEATURE", human_test_required: true });
+    const agents = usePoll("/agents");
+    const [models, setModels] = useState({});
     const [key] = useState(newKey);
     const [files, setFiles] = useState([]);
     const [more, setMore] = useState(false);
@@ -1357,6 +1461,7 @@
         .then(function (attachments) {
           return post("/tasks", { project: form.project, request: form.request, title: form.title || null, priority: form.priority,
             budget: form.budget || null, idempotency_key: key, attachments: attachments, approve_plan: form.approve_plan,
+            delivery_mode: form.delivery_mode, human_test_required: form.human_test_required, model_overrides: models,
             depends_on: form.depends_on.split(/[\s,]+/).filter(function (k) { return k; }) });
         })
         .then(function (t) { props.created(t.key); })
@@ -1388,6 +1493,29 @@
         onChange: function (e) { const v = e.target.checked; setForm(function (f) { return Object.assign({}, f, { approve_plan: v }); }); } }),
         h("span", null, h("strong", null, "Review the plan before work starts"),
           h("span", { className: "orch-muted orch-small" }, " — the plan comes to you as a decision; nothing is built until you approve it."))),
+      h("details", null, h("summary", { className: "orch-disclosure" }, "Delivery settings"),
+        h("div", { className: "orch-stack" },
+          h("label", null, "Delivery", h("select", { value: form.delivery_mode, onChange: field("delivery_mode") },
+            h("option", { value: "FEATURE" }, "Complete feature (recommended)"), h("option", { value: "SUBTASKS" }, "Subtasks (advanced)"))),
+          h("label", { className: "orch-check-row" }, h("input", { type: "checkbox", checked: form.human_test_required,
+            onChange: function (e) { const checked = e.target.checked; setForm(function (f) { return Object.assign({}, f, { human_test_required: checked }); }); } }),
+            "Require my test before merge"),
+          h("p", { className: "orch-muted orch-small" }, "A verified test environment must be deployed before a human-test task can be merged. Project policy may require this even when unchecked."),
+          agents.error ? h("div", { className: "orch-alert" }, message(agents.error)) : null,
+          ((agents.data || {}).agents || []).map(function (agent) {
+            return h("fieldset", { key: agent.provider, className: "orch-stack" }, h("legend", null, capital(agent.provider) + " models"),
+              MODEL_ROLES.map(function (role) {
+                return h("label", { key: role[0] }, role[1], h(ModelSelect, { agent: agent,
+                  value: (models[agent.provider] || {})[role[0]] || "", label: capital(agent.provider) + " " + role[1] + " task model",
+                  fallback: "Use project or role default",
+                  change: function (value) { setModels(function (old) {
+                    const next = Object.assign({}, old), selected = Object.assign({}, old[agent.provider] || {});
+                    if (value) selected[role[0]] = value; else delete selected[role[0]];
+                    if (Object.keys(selected).length) next[agent.provider] = selected; else delete next[agent.provider];
+                    return next;
+                  }); } }));
+              }));
+          }))),
       h("button", { type: "button", className: "orch-disclosure", onClick: function () { setMore(!more); } }, (more ? "▾ " : "▸ ") + "More options"),
       more ? h("div", { className: "orch-form-row" },
         h("label", null, h("span", null, "Title"), h("input", { value: form.title, onChange: field("title"), maxLength: 200, placeholder: "Written for you if empty" })),

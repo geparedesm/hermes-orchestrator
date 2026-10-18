@@ -190,3 +190,11 @@ Phase 3 implements these as automated tests; Phase 11 reruns them on both platfo
 | N07 | Project Compose override with `ports:` or `network_mode: host` | Rejected before start (Phase 6: `network_mode: host`, privileges, capabilities, the Docker socket, and builds are rejected; `ports:` are removed rather than rejected, because most development Compose files publish ports) |
 | N08 | DNS queries for arbitrary external names from internal networks | Fails. Workers use `127.0.0.1` as their DNS server, so Docker's embedded resolver has nowhere to forward external names (verified in Phase 3); names on attached internal networks still resolve. |
 | N09 | Host port scan of published ports | Only loopback-bound Hermes ports |
+
+### Optional human acceptance environment
+
+`ho-preview_database` and `ho-preview_application` are internal Docker networks. Preview PostgreSQL is reachable only
+from preview Odoo. Preview Odoo has no production database attachment or outbound Internet bridge. The gateway joins
+the application network and the existing Hermes control edge to verify sessions and record testing; it publishes
+only `127.0.0.1:8085`. A separate Cloudflare connector on `ho-preview_edge` routes `test.gp-developer.com` to that
+operator-authenticated gateway. Odoo's evented port remains internal and is proxied only after session/origin validation.

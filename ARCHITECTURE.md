@@ -507,3 +507,11 @@ Implemented in Phase 8; procedures in [docs/recovery.md](docs/recovery.md). The 
 | OI-06 | Measure the disk and time cost of isolated clones on large repositories; evaluate the read-only `--reference` optimization. **Phase 5:** a repository with 72 MB of history and 60 MB of files clones in 3.4 s and uses 121 MB per workspace; collecting without new commits takes 0.12 s. `--reference` is not viable: the clone would depend on the main repository's object store, which is not mounted in workers. Shallow workspaces are the option to evaluate if disk use becomes a problem. | 5 |
 | OI-07 | Validate the pinned Hermes image boots with the plugin on both architectures, and that SQLite state uses a container-native volume (D07, D09). **Phase 2 result:** the pinned index digest boots on `linux/arm64` and on `linux/amd64` (emulated) with a named volume at `HERMES_HOME=/opt/data`, reports `v0.21.5 (2026.9.24) · upstream f97608f1`, and its OCI revision label matches the inspected commit. Booting *with the plugin* moves to Phase 9, when the plugin exists. See [docs/validation/phase-2.md](docs/validation/phase-2.md). **Phase 9:** the pinned image runs in Compose with the plugin (`hermes plugins list`: enabled) and a container-native `hermes-data` volume on macOS (Apple Silicon). | 2, 9 |
 | OI-08 | Decide whether a read-only projection into the native Kanban board is worth adding after v1 (AD-02). | 10 |
+
+### Optional delivery preview subsystem
+
+The six core services remain unchanged. The optional `deploy/preview` stack adds private Odoo/PostgreSQL, an
+operator-authenticated gateway and an independent Cloudflare connector. An operator-side user service exports pinned
+Git snapshots and prepares shared candidates; no worker gains Docker or control-plane access. Current Odoo parent and
+module projects use this adapter. Other application families need an explicit runtime adapter. See
+[feature delivery](docs/design/feature-delivery.md) and [operator deployment](deploy/preview/README.md).

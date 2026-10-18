@@ -15,6 +15,7 @@ dependencies = [
   "psycopg-pool>=3.2,<4",
   "redis>=5.2,<7",
   "httpx>=0.28,<1",
+  "websockets==15.0.1",
   "alembic>=1.14,<2",
   "SQLAlchemy>=2.0.36,<3",
 ]

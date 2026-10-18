@@ -1,0 +1,16 @@
+[Unit]
+Description=Hermes shared preview controller
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/gp/hermes-orchestrator
+ExecStart=/usr/bin/python3 /home/gp/hermes-orchestrator/deploy/preview/controller.py
+Restart=on-failure
+RestartSec=15
+UMask=0077
+StandardOutput=append:/home/gp/hermes-orchestrator/backups/feature-delivery/preview-controller.log
+StandardError=append:/home/gp/hermes-orchestrator/backups/feature-delivery/preview-controller.log
+
+[Install]
+WantedBy=default.target

@@ -142,6 +142,7 @@ TIGHTEN_ONLY: dict[tuple[str, ...], Callable[[Any, Any], Any]] = {
     ("expansion", "profile"): _stricter(_BUDGET),
     ("git", "protected_branches"): _union,
     ("git", "require_pull_request"): _any_true,
+    ("delivery", "human_test_required"): _any_true,
     ("resources", "max_profile"): _stricter(_RESOURCE),
     ("resources", "max_agent_workers"): _minimum,
     ("config_drift", "auto_update_trivial"): _all_true,
