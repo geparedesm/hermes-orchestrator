@@ -79,7 +79,7 @@
               "properties": {
                 "key": {
                   "type": "string",
-                  "description": "Short local id unique in the plan, for example s1."
+                  "description": "Short local id unique in the plan: 1 to 20 letters, digits, _ or -, for example s1 or api_fix."
                 },
                 "title": {
                   "type": "string"
