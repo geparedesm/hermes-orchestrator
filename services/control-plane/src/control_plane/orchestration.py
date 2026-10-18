@@ -69,6 +69,20 @@ def _now() -> datetime:
 # ------------------------------------------------------------------------ leases
 
 
+
+def _deferred(action: Row) -> str:
+    """What a rejected action proposed, when it was refused only because the task was waiting for the person: the next
+    step sees it and can propose it again, instead of starting over without it (T-6 lost its fix plan this way)."""
+    if not str(action["reason"] or "").startswith("task is "):
+        return ""
+    payload = action["payload"] or {}
+    parts = [str(payload.get("text") or "")[:400]]
+    parts += [f"{x.get('key')}: {x.get('title')}" for x in (payload.get("subtasks") or [])[:10] if isinstance(x, dict)]
+    if payload.get("subtask"):
+        parts.append(f"subtask {payload['subtask']}")
+    shown = "; ".join(p for p in parts if p)
+    return f" (not applied; it proposed: {shown})" if shown else ""
+
 class Leases:
     def __init__(self, ctx: Context) -> None:
         self.ctx = ctx
@@ -531,18 +545,33 @@ class Orchestration:
                           "for a new attempt (a supervised plan asks the person first);",
                           "- REJECT_SUBTASK with `text` = the guidance that resolves it: it goes to FIX_REQUIRED, then REQUEST_EXECUTION;",
                           "- REPORT_BLOCKED when only the person can resolve it.", ""]
+        if task["state"] in (S.FIX_REQUIRED, S.RUNNING):
+            # The gate's reasons stay in view until the fixes pass a new evaluation: the event that announced them is
+            # read once, and a step that could not act on it (an assumption made the task wait) would lose them (T-6).
+            uow.cur.execute("SELECT requirements, outcome FROM quality_gate_evaluations WHERE task_id = %s "
+                            "ORDER BY evaluated_at DESC LIMIT 1", (task["id"],))
+            evaluation = uow.cur.fetchone()
+            if evaluation is not None and evaluation["outcome"] == "FAIL":
+                # APPROVAL_REQUIRED counts too: a rejected gate exception leaves the task FIX_REQUIRED with it.
+                failing = [f"- {r['name']}: {r['detail']}" for r in evaluation["requirements"]
+                           if r.get("status") in ("FAIL", "APPROVAL_REQUIRED")]
+                lines += ["## What the last Quality Gate evaluation requires", "", *[f[:1500] for f in failing], ""]
+                if subtasks and all(x["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in subtasks):
+                    lines += ["Every subtask is accepted, so starting them again does nothing: add new subtasks (new keys) with "
+                              "SET_PLAN that fix these points, then REQUEST_EXECUTION; or REJECT_SUBTASK one whose work must "
+                              "change.", ""]
         uow.cur.execute("SELECT type, summary FROM events WHERE task_id = %s AND seq > %s AND type NOT IN "
                         "('GRANT_ISSUED', 'GRANT_REVOKED', 'WORKER_CREATED', 'AGENT_ASSIGNED') "
                         "ORDER BY seq DESC LIMIT 40", (task["id"], task["orchestrator_cursor_seq"]))
         recent = list(reversed(uow.cur.fetchall()))
         if recent:
             lines += ["## Since your last step", ""] + [f"- {e['type']}: {e['summary'][:240]}" for e in recent] + [""]
-        uow.cur.execute("SELECT type, reason FROM orchestrator_actions WHERE task_id = %s AND outcome = 'REJECTED' "
+        uow.cur.execute("SELECT type, reason, payload FROM orchestrator_actions WHERE task_id = %s AND outcome = 'REJECTED' "
                         "AND created_at > now() - interval '1 day' ORDER BY created_at DESC LIMIT 10", (task["id"],))
         rejected = uow.cur.fetchall()
         if rejected:
             lines += ["## Your rejected actions (fix and retry if still needed)", ""] + \
-                     [f"- {r['type']}: {r['reason']}" for r in rejected] + [""]
+                     [f"- {r['type']}: {r['reason']}" + _deferred(r) for r in rejected] + [""]
         budget = budgets.state(uow, task)
         if budget:
             lines += ["## Budget", "", f"state {budget['state']}; consumed {json.dumps(budget['consumed'])}; "
