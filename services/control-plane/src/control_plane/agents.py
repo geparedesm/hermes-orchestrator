@@ -7,7 +7,7 @@ last run: the view says how old it is, and a window whose reset time has passed 
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import os
@@ -67,6 +67,31 @@ def record_usage(uow: UnitOfWork, execution: Row, rate_limits: list[dict[str, An
             "execution_id = EXCLUDED.execution_id WHERE provider_usage.observed_at <= EXCLUDED.observed_at",
             (execution["provider"], execution["provider_identity"] or "default", window["window"], window["used_percent"],
              window["resets_at"], window.get("observed_at"), execution.get("started_at"), execution["id"]))
+
+
+QUOTA_FALLBACK_WAIT = timedelta(minutes=30)  # when the provider's own reset time is unknown
+
+
+def out_of_credit(uow: UnitOfWork, identity: str) -> dict[str, datetime]:
+    """Agents out of credit, with the time their plan resets: a usage window at 100% (the provider's own reset time),
+    or a recent quota failure with no window to say when (then half an hour, as before). Work for them waits until
+    then instead of failing and being retried."""
+    now = datetime.now(timezone.utc)
+    until: dict[str, datetime] = {}
+    uow.cur.execute("SELECT provider, max(resets_at) AS resets_at FROM provider_usage WHERE identity = %s AND used_percent >= 100 "
+                    "AND resets_at > now() GROUP BY provider", (identity,))
+    for row in uow.cur.fetchall():
+        until[row["provider"]] = row["resets_at"]
+    # A quota failure no later run of that agent succeeded after (its credit did not come back meanwhile).
+    uow.cur.execute("SELECT e.provider, max(e.ended_at) AS at FROM executions e WHERE e.failure_class = 'QUOTA' "
+                    "AND e.provider IS NOT NULL AND coalesce(e.provider_identity, 'default') = %s "
+                    "AND e.ended_at > now() - interval '7 days' AND NOT EXISTS "
+                    "(SELECT 1 FROM executions s WHERE s.provider = e.provider AND coalesce(s.provider_identity, 'default') = %s "
+                    "AND s.state = 'SUCCEEDED' AND s.agent_run AND s.ended_at > e.ended_at) GROUP BY e.provider", (identity, identity))
+    for row in uow.cur.fetchall():
+        if row["provider"] not in until and row["at"] + QUOTA_FALLBACK_WAIT > now:
+            until[row["provider"]] = row["at"] + QUOTA_FALLBACK_WAIT
+    return until
 
 
 def default_model(uow: UnitOfWork, provider: str) -> str | None:
