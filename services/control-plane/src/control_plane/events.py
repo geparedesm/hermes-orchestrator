@@ -24,6 +24,7 @@ ATTENTION_EVENTS = frozenset(
         "AUTH_REQUIRED",
         "BLOCKED",
         "PAUSED_BUDGET",
+        "WAITING_FOR_CREDIT",
         "TEST_FAILED",
         "READY_FOR_MERGE",
         "RECOVERY_FAILED",

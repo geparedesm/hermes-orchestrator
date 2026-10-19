@@ -915,3 +915,75 @@ def test_a_kept_accepted_subtask_still_counts_for_dependency_cycles(api, service
     services.scheduler.run_once()
     step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("b", depends_on=["a"])]})
     assert "dependency cycle" in actions(services, task)[-1][2]
+
+
+# ------------------------------------------------------------------ agents out of credit
+
+QUOTA_RESULT = b'{"type":"result","subtype":"error","is_error":true,"result":"You have hit your usage limit"}'
+
+
+def out_of_credit(services, provider, hours=2):
+    """Stand-in for the usage an execution of `provider` reported: its session window is used up."""
+    q(services, "INSERT INTO provider_usage (provider, identity, window_kind, used_percent, resets_at, observed_at) "
+      "VALUES (%s, 'default', 'session', 100, now() + make_interval(hours => %s), now()) ON CONFLICT (provider, identity, window_kind) "
+      "DO UPDATE SET used_percent = 100, resets_at = EXCLUDED.resets_at, observed_at = now()", provider, hours)
+
+
+def credit_back(services, provider):
+    q(services, "UPDATE provider_usage SET resets_at = now() - interval '1 minute' WHERE provider = %s", provider)
+
+
+def test_a_review_waits_for_its_reviewer_credit_then_starts_by_itself(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    assert dev["provider"] == "codex"
+    out_of_credit(services, "claude")
+    develop(services, agents, repo, dev, {"a.py": "a = 1\n"})
+    assert active(services, task, "REVIEWER") == []  # never launched only to fail
+    [pending] = q(services, "SELECT * FROM pending_launches WHERE kind = 'SUBTASK_REVIEW'")
+    assert "claude is out of credit until" in pending["reason"]
+    services.scheduler.run_once()
+    services.scheduler.run_once()
+    notices = q(services, "SELECT summary FROM events WHERE type = 'WAITING_FOR_CREDIT'")
+    assert len(notices) == 1 and notices[0]["summary"].startswith("claude is out of credit until")
+    assert state(api, task) == "RUNNING" and subtasks(services, task)["a"]["state"] == "IN_REVIEW"
+    credit_back(services, "claude")
+    services.scheduler.run_once()
+    [rev] = active(services, task, "REVIEWER")
+    assert rev["provider"] == "claude"
+
+
+def test_a_review_that_hits_the_quota_waits_instead_of_counting_as_a_failure(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    develop(services, agents, repo, active(services, task, "DEVELOPER")[0], {"a.py": "a = 1\n"})
+    for _ in range(3):  # more than the review retries a real failure gets
+        [rev] = active(services, task, "REVIEWER")
+        agents.finish_agent(str(rev["id"]), QUOTA_RESULT, exit_code=1)
+        services.scheduler.run_once()
+        assert subtasks(services, task)["a"]["state"] == "IN_REVIEW"
+        assert "claude is out of credit until" in q(services, "SELECT reason FROM pending_launches")[0]["reason"]
+        q(services, "UPDATE executions SET ended_at = ended_at - interval '31 minutes' WHERE failure_class = 'QUOTA'")
+        services.scheduler.run_once()  # the fallback wait (no usage window) has passed: it is tried again
+    assert state(api, task) == "RUNNING"
+
+
+def test_the_orchestrator_moves_to_the_other_agent_before_a_step_when_its_own_is_out_of_credit(api, services, agents, task):
+    plan_and_start(services, agents, task)
+    out_of_credit(services, "claude")
+    q(services, "UPDATE tasks SET step_requested = true WHERE key = %s", task)
+    services.scheduler.run_once()
+    [step_execution] = active(services, task, "ORCHESTRATOR")
+    assert step_execution["provider"] == "codex"
+    assert "FAILOVER_COMPLETED" in [r["type"] for r in q(services, "SELECT type FROM events")]
+
+
+def test_when_both_agents_are_out_of_credit_steps_wait_without_blocking_the_task(api, services, agents, task):
+    out_of_credit(services, "codex")
+    [execution] = active(services, task, "ORCHESTRATOR")
+    agents.finish_agent(str(execution["id"]), QUOTA_RESULT, exit_code=1)
+    services.scheduler.run_once()
+    services.scheduler.run_once()
+    assert state(api, task) == "PLANNING"
+    assert q(services, "SELECT orchestrator_failures FROM tasks WHERE key = %s", task)[0]["orchestrator_failures"] == 0
+    assert active(services, task, "ORCHESTRATOR") == []
+    assert "is out of credit until" in q(services, "SELECT reason FROM pending_launches WHERE kind = 'STEP'")[0]["reason"]

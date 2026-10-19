@@ -115,3 +115,15 @@ Each agent's "Default model" list comes from the provider itself, never from a l
   `haiku`; https://code.claude.com/docs/en/model-config), which always resolve to the latest model of each family.
 
 Models seen in completed runs, and a model set by hand, are added to the list, so nothing configured disappears.
+
+## Agents out of credit
+
+An agent is out of credit until its plan resets: a usage window at 100% gives the provider's own reset time; a quota
+failure with no window to say when counts for 30 minutes (and ends as soon as a later run of that agent succeeds).
+Work for such an agent is held like work for a paused agent, never launched only to fail:
+
+- a cross-review (subtask or integration) waits in the launch queue and starts by itself after the reset; a review
+  that hits the quota is not a failed review and does not count towards the review retries;
+- an orchestrator step moves to the other agent when it is available; when both are out of credit, the step waits
+  and the quota failure does not count towards blocking the task;
+- the person gets one `WAITING_FOR_CREDIT` notice per task and reset time ("nothing to do: it continues by itself").
