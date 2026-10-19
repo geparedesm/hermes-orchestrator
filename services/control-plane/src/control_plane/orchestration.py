@@ -1564,10 +1564,13 @@ class Orchestration:
             # Not a failure: the review waits for its reviewer (heal_reviews asks again each pass; it starts once back).
             self._note_waiting(uow, task, "INTEGRATION_REVIEW", held)
             return
+        # A person's retry or resume starts the count again: failures before it already blocked the task once.
         uow.cur.execute("SELECT count(*) AS n FROM executions WHERE task_id = %s AND role = 'REVIEWER' AND subtask_id IS NULL "
                         "AND provider = %s AND spec->'purpose'->>'commit' = %s AND state <> 'SUCCEEDED' AND state <> ALL(%s) "
-                        "AND failure_class IS DISTINCT FROM 'QUOTA'",
-                        (task["id"], provider, commit, list(ACTIVE)))
+                        "AND failure_class IS DISTINCT FROM 'QUOTA' AND created_at > coalesce((SELECT max(occurred_at) "
+                        "FROM events WHERE task_id = %s AND type = 'TASK_STATE_CHANGED' AND data->>'trigger' = 'USER'), "
+                        "'-infinity')",
+                        (task["id"], provider, commit, list(ACTIVE), task["id"]))
         failed = int(uow.cur.fetchone()["n"])  # type: ignore[index]
         if failed > MAX_REVIEW_RETRIES:
             self._move(uow, task, S.BLOCKED, reason=f"{reason}; the integration review failed {failed} times (retry the task)")
