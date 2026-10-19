@@ -28,6 +28,42 @@ def test_a_human_test_session_is_never_replaced_automatically(controller, monkey
     assert calls == [('GET', '/v1/previews')]
 
 
+@pytest.mark.parametrize('candidate, task_state', [
+    ({'state': 'TESTING', 'expires_at': '2999-01-01T00:00:00+00:00'}, 'RUNNING'),  # feedback sent it back to work
+    ({'state': 'TESTING', 'expires_at': '2000-01-01T00:00:00+00:00'}, 'READY_FOR_MERGE'),  # expired
+    ({'state': 'READY', 'expires_at': '2000-01-01T00:00:00+00:00'}, 'READY_FOR_MERGE'),
+])
+def test_a_version_that_can_no_longer_be_approved_is_retired(controller, monkeypatch, candidate, task_state):
+    calls = []
+    def api(method, path, body=None):
+        calls.append((method, path))
+        if path == '/v1/previews':
+            return {'candidates': [{'id': 'c1', 'environment': 'odoo', 'manifest': {'tasks': [{'task': 'T-9'}]}, **candidate}]}
+        if path == '/v1/tasks/T-9':
+            return {'state': task_state}
+        if path == '/v1/projects':
+            return {'projects': []}
+        if path.startswith('/v1/tasks?'):
+            return {'tasks': []}
+        return {}
+    monkeypatch.setattr(controller, 'api', api)
+    controller.cycle()
+    assert ('POST', '/v1/previews/c1/retire') in calls
+
+
+def test_a_current_test_session_is_kept(controller, monkeypatch):
+    calls = []
+    def api(method, path, body=None):
+        calls.append((method, path))
+        if path == '/v1/previews':
+            return {'candidates': [{'id': 'c1', 'environment': 'odoo', 'state': 'TESTING', 'expires_at': '2999-01-01T00:00:00+00:00',
+                                    'manifest': {'tasks': [{'task': 'T-9'}]}}]}
+        return {'state': 'READY_FOR_MERGE'}
+    monkeypatch.setattr(controller, 'api', api)
+    controller.cycle()
+    assert ('POST', '/v1/previews/c1/retire') not in calls
+
+
 def test_archived_source_cannot_escape_the_build_directory(controller, tmp_path):
     repo = tmp_path / 'repo'
     repo.mkdir()
