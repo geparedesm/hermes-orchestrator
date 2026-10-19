@@ -750,6 +750,26 @@ def test_a_failed_integration_review_is_retried_then_blocks_with_the_reason(api,
     assert "integration review by claude failed" in row["state_reason"] and "failed 3 times" in row["state_reason"]
 
 
+def test_a_retry_gives_the_integration_review_fresh_attempts(api, services, agents, repo, task):
+    """T-8: after a retry, one more max-turns failure blocked the task at once ("failed 5 times"): the count included
+    the failures that had already blocked it."""
+    review = _to_integration_review(services, agents, repo, task)
+    assert review["spec"]["assignment"]["max_turns"] == 120  # reviewers get more turns than a development step
+    for _ in range(3):
+        answer(services, agents, review["id"], {}, ok=False)
+        if state(api, task) == "REVIEW":
+            [review] = active(services, task, "REVIEWER")
+    assert state(api, task) == "BLOCKED"
+    assert api.post(f"/v1/tasks/{task}/retry").status_code == 200
+    with services.ctx.db.transaction() as cur:  # stand-in: the retried task reached the integration review again
+        cur.execute("UPDATE tasks SET state = 'REVIEW' WHERE key = %s", (task,))
+    services.orchestration._integration_review_later(task, "claude")
+    [review] = active(services, task, "REVIEWER")
+    answer(services, agents, review["id"], {}, ok=False)
+    assert state(api, task) == "REVIEW"  # reviewed again, not blocked by the failures before the retry
+    assert len(active(services, task, "REVIEWER")) == 1
+
+
 def test_a_lost_integration_review_is_requested_again(api, services, agents, repo, task):
     review = _to_integration_review(services, agents, repo, task)
     with services.ctx.db.transaction() as cur:  # stand-in: the review was lost (the platform never saw it finish)

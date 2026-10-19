@@ -54,6 +54,8 @@ log = logging.getLogger(__name__)
 S = TaskState
 GATE_EXCEPTION = "quality_gate_exception"
 BLOCKING_ALWAYS = {"HIGH", "CRITICAL"}
+# Reviewers read the whole diff and may run the tests: more turns than a development step (60) needs.
+REVIEW_MAX_TURNS = 120
 STEP_TIMEOUT_SECONDS = 1800
 
 
@@ -396,6 +398,7 @@ class Reviews:
             prompt = feature_context(self.ctx, uow, task, self._request_text(uow, task)) + "\n\n" + prompt
         return self.executions.request(uow, principal=principal, task_key=task["key"], req=ExecutionRequest(
             role="REVIEWER", provider=provider, prompt=prompt, workspace=ws["path"], result_schema="review-result",
+            max_turns=REVIEW_MAX_TURNS,
             capabilities={"workspace": "READ", "git": "READ", "tests": "EXECUTE", **({"test_services": True} if services else {})},
             subtask_id=subtask["id"] if subtask else None, lease_epoch=lease_epoch,
             purpose={"review": True, "commit": commit, "developers": developers,
