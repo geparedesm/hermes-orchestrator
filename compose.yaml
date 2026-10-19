@@ -97,6 +97,8 @@ services:
       HO_MERGE_KEY_FILE: /run/secrets/ho_merge_key
       HO_HERMES_WEBHOOK_URL: ${HO_HERMES_WEBHOOK_URL:-}
       HO_HERMES_WEBHOOK_SECRET_FILE: /run/secrets/ho_hermes_webhook_secret
+      HO_DELIVERY_MODE: ${HO_DELIVERY_MODE:-}
+      HO_HUMAN_TEST_REQUIRED: ${HO_HUMAN_TEST_REQUIRED:-false}
       HO_APPROVERS: ${HO_APPROVERS:-}
       HO_NOTIFY_LANGUAGE: ${HO_NOTIFY_LANGUAGE:-en}
       HO_VERSION: ${HO_VERSION:-dev}

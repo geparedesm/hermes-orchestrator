@@ -19,3 +19,8 @@ project-secrets/
 config/models.lock.json
 # Local recovery snapshots contain runtime data and are not source files.
 backups/
+
+# Local preview image references and deployment identity
+deploy/preview/runtime.env
+deploy/preview/controller.lock
+deploy/preview/current.json

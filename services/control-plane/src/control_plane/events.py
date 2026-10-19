@@ -32,6 +32,7 @@ ATTENTION_EVENTS = frozenset(
         "TASK_FAILED",
         "PLATFORM_DEGRADED",
         "NOTIFICATION_TEST",
+        "PREVIEW_READY",
     }
 )
 # Aggregated into a periodic digest. Everything else (grants, workers, routing, steps) is audit only.

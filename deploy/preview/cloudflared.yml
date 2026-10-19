@@ -1,0 +1,7 @@
+tunnel: 486c9a65-a163-45f5-a913-b76b3cc1bf2d
+credentials-file: /run/secrets/cloudflare_tunnel
+ingress:
+  - hostname: test.gp-developer.com
+    service: http://gateway:8085
+  - service: http_status:404
+protocol: http2

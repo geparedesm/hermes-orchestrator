@@ -13,8 +13,9 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
+from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, ValidationError
@@ -26,7 +27,21 @@ _spec.loader.exec_module(_client)  # type: ignore[union-attr]
 
 PRINCIPAL = "dashboard:operator"
 TASK_ACTIONS = ("pause", "resume", "cancel", "retry")
-router = APIRouter()
+def same_origin_mutation(request: Request) -> None:
+    """Preview application code must not submit authenticated Dashboard actions across origins."""
+    origin = request.headers.get('origin')
+    if request.method in ('GET', 'HEAD', 'OPTIONS') or not origin:
+        return
+    try:
+        parsed = urlsplit(origin)
+        valid = parsed.scheme in ('http', 'https') and parsed.netloc == request.headers.get('host')
+    except ValueError:
+        valid = False
+    if not valid:
+        raise HTTPException(status_code=403, detail='Dashboard actions require the Dashboard origin')
+
+
+router = APIRouter(dependencies=[Depends(same_origin_mutation)])
 
 
 class DecisionBody(BaseModel):
@@ -60,6 +75,10 @@ class NewTaskBody(BaseModel):
     attachments: list[AttachmentBody] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
     # Review the plan before work starts (only adds supervision to the project's setting).
     approve_plan: bool = False
+    delivery_mode: Literal["SUBTASKS", "FEATURE"] | None = None
+    human_test_required: bool | None = None
+    model_overrides: dict[str, dict[str, str]] = Field(default_factory=dict)
+
 
 
 class NewProjectBody(BaseModel):
@@ -137,6 +156,31 @@ def agent_model(provider: str, body: AgentModelBody) -> Any:
     return _call(_api().set_agent_model, provider, body.model)
 
 
+@router.post("/agents/{provider}/models/{role}")
+def role_model(provider: str, role: str, body: AgentModelBody) -> Any:
+    return _call(_api().set_role_model, provider, role, body.model)
+
+
+@router.get("/previews")
+def previews() -> Any:
+    return _call(_api().previews)
+
+
+class PreviewFeedbackBody(BaseModel):
+    candidate_id: UUID
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/tasks/{key}/preview-feedback")
+def preview_feedback(key: str, body: PreviewFeedbackBody) -> Any:
+    return _call(_api().preview_feedback, key, str(body.candidate_id), body.text)
+
+
+@router.post("/previews/{candidate_id}/{verb}")
+def preview_action(candidate_id: UUID, verb: str) -> Any:
+    return _call(_api().preview_action, str(candidate_id), verb)
+
+
 @router.post("/agents/{provider}/{verb}")
 def agent_action(provider: str, verb: str) -> Any:
     if verb not in ("pause", "resume"):
@@ -190,9 +234,13 @@ async def create_task(request: Request) -> Any:
         if any(not k.startswith("T-") or not k[2:].isdigit() for k in keys):
             raise HTTPException(status_code=400, detail="dependencies are task keys such as T-12")
         files = [a.model_dump() for a in body.attachments]
+        delivery = {k: v for k, v in {"delivery_mode": body.delivery_mode,
+                    "human_test_required": body.human_test_required, "model_overrides": body.model_overrides}.items()
+                    if v is not None and v != {}}
         return await run_in_threadpool(_call, lambda: _api().create(
             body.project, body.request.strip(), (body.title or "").strip() or None, body.priority, budget=body.budget,
-            depends_on=keys, idempotency_key=body.idempotency_key, attachments=files, approve_plan=body.approve_plan))
+            depends_on=keys, idempotency_key=body.idempotency_key, attachments=files, approve_plan=body.approve_plan,
+            **delivery))
 
 
 @router.get("/tasks/{key}/attachments/{attachment_id}")

@@ -94,8 +94,13 @@ def out_of_credit(uow: UnitOfWork, identity: str) -> dict[str, datetime]:
     return until
 
 
-def default_model(uow: UnitOfWork, provider: str) -> str | None:
+def default_model(uow: UnitOfWork, provider: str, role: str | None = None) -> str | None:
     """The model a person chose for this agent in the Dashboard (None: the CLI's own default)."""
+    if role:
+        uow.cur.execute("SELECT model FROM role_models WHERE provider = %s AND role = %s", (provider, role))
+        selected = uow.cur.fetchone()
+        if selected:
+            return selected["model"]
     uow.cur.execute("SELECT model FROM provider_models WHERE provider = %s", (provider,))
     row = uow.cur.fetchone()
     return row["model"] if row else None
@@ -131,6 +136,10 @@ class Agents:
         limited = {r["provider"] for r in uow.cur.fetchall()}
         uow.cur.execute("SELECT provider, model, updated_at FROM provider_models")
         models = {r["provider"]: {"model": r["model"], "updated_at": r["updated_at"]} for r in uow.cur.fetchall()}
+        uow.cur.execute("SELECT provider, role, model FROM role_models")
+        role_models: dict[str, dict[str, str]] = {}
+        for r in uow.cur.fetchall():
+            role_models.setdefault(r["provider"], {})[r["role"]] = r["model"]
         # Models observed in runs complete the provider's catalog (a model it no longer lists, or one set by hand).
         uow.cur.execute("SELECT DISTINCT provider, units->>'model' AS model FROM usage_records WHERE units ? 'model'")
         observed_models: dict[str, set[str]] = {}
@@ -154,6 +163,7 @@ class Agents:
             out.append({"provider": provider, "identity": identity, "login": login.get(provider, "UNKNOWN"),
                         "enabled": provider not in off, "status": status, "running": running.get(provider, 0),
                         "session": windows.get("session"), "week": windows.get("week"),
+                        "role_models": role_models.get(provider, {}),
                         "model": models.get(provider, {}).get("model"),
                         "model_updated_at": models.get(provider, {}).get("updated_at"),
                         "model_options": options,
@@ -182,6 +192,28 @@ class Agents:
             record_event(uow.cur, "AGENT_MODEL_RESET", actor=principal.value,
                          summary=f"{provider} default model reset by {principal.value}",
                          data={"provider": provider}, pending=uow.events)
+        return next(a for a in self.view(uow) if a["provider"] == provider)
+
+    def set_role_model(self, uow: UnitOfWork, provider: str, role: str, model: str | None,
+                       *, principal: Principal) -> dict[str, Any]:
+        if principal.value not in self.ctx.platform["platform"]["approvers"]:
+            raise Forbidden(f"{principal.value} may not change agent models")
+        if provider not in ADAPTERS:
+            raise NotFound(f"no agent {provider!r}")
+        if role not in ("ORCHESTRATOR", "DEVELOPER", "REVIEWER"):
+            raise BadRequest("role must be ORCHESTRATOR, DEVELOPER or REVIEWER")
+        if model is not None and not _MODEL.fullmatch(model):
+            raise BadRequest("invalid model identifier")
+        if model:
+            uow.cur.execute("INSERT INTO role_models (provider, role, model, updated_by) VALUES (%s, %s, %s, %s) "
+                            "ON CONFLICT (provider, role) DO UPDATE SET model = EXCLUDED.model, "
+                            "updated_by = EXCLUDED.updated_by, updated_at = now()",
+                            (provider, role, model, principal.value))
+        else:
+            uow.cur.execute("DELETE FROM role_models WHERE provider = %s AND role = %s", (provider, role))
+        record_event(uow.cur, "ROLE_MODEL_CHANGED", actor=principal.value,
+                     summary=f"{provider} {role} model {'changed' if model else 'reset'}",
+                     data={"provider": provider, "role": role, "model": model}, pending=uow.events)
         return next(a for a in self.view(uow) if a["provider"] == provider)
 
     def set_enabled(self, uow: UnitOfWork, provider: str, enabled: bool, *, principal: Principal) -> dict[str, Any]:

@@ -46,6 +46,8 @@ class Settings:
     hermes_webhook_url: str | None = None
     hermes_webhook_secret: str | None = None  # HMAC V2 key shared with the Hermes webhook route
     extra_approvers: tuple[str, ...] = ()
+    delivery_mode: str | None = None
+    human_test_required: bool = False
     version: str = "dev"  # HO_VERSION: the image tag this stack runs
     notification_language: str = "en"  # HO_NOTIFY_LANGUAGE: en or es, for chat notifications
 
@@ -90,6 +92,8 @@ class Settings:
             orchestration=env.get("HO_ORCHESTRATION", "false").lower() == "true",
             hermes_webhook_url=env.get("HO_HERMES_WEBHOOK_URL") or None,
             hermes_webhook_secret=_read_secret(env.get("HO_HERMES_WEBHOOK_SECRET_FILE")),
+            delivery_mode=env.get("HO_DELIVERY_MODE") or None,
+            human_test_required=env.get("HO_HUMAN_TEST_REQUIRED", "false").lower() == "true",
             extra_approvers=tuple(a.strip() for a in env.get("HO_APPROVERS", "").split(",") if a.strip()),
             version=env.get("HO_VERSION") or "dev",
             notification_language=(env.get("HO_NOTIFY_LANGUAGE") or "en").strip().lower()[:2],
@@ -102,6 +106,12 @@ class Settings:
             config["platform"]["projects_root_host"] = self.projects_root_host
         config["platform"]["version"] = self.version
         config["platform"]["notification_language"] = self.notification_language if self.notification_language in ("en", "es") else "en"
+        if self.delivery_mode:
+            if self.delivery_mode not in ('FEATURE', 'SUBTASKS'):
+                raise RuntimeError('HO_DELIVERY_MODE must be FEATURE or SUBTASKS')
+            config['project_defaults'].setdefault('delivery', {})['mode'] = self.delivery_mode
+        if self.human_test_required:
+            config['project_defaults'].setdefault('delivery', {})['human_test_required'] = True
         if self.extra_approvers:
             # Chat identities allowed to approve (for example telegram:<user id>), set by the operator in .env.
             config["platform"]["approvers"] = sorted(set(config["platform"]["approvers"]) | set(self.extra_approvers))

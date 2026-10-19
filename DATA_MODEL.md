@@ -358,3 +358,11 @@ Backup classes (§79): PostgreSQL dump and platform configuration daily; allowli
 | [schemas/manifest.schema.json](schemas/manifest.schema.json) | Task Manifest (§48); example in [schemas/examples/manifest.json](schemas/examples/manifest.json) |
 
 Action proposal schemas for the orchestrator step protocol (ARCHITECTURE §6.1) and Agent Manager and Git Service request schemas are defined in Phase 2 with their implementations.
+
+### Delivery workflow (migration 0021)
+
+`role_models(provider, role)` stores human-selected planning/development/review models. Tasks pin delivery mode,
+human-test requirement and per-provider/role model overrides. `feature_plans(task_id, version)` references the
+structured plan artifact, whose hash participates in plan approval. `preview_candidates` stores an immutable manifest,
+version, image/source metadata, lifecycle and expiry; a partial unique index allows only one active candidate per
+environment. A merge approval's subject includes the candidate identity/hash and all shared-version task keys.

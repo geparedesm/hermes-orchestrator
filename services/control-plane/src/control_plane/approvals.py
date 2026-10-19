@@ -132,9 +132,38 @@ class Approvals:
         )
         return row
 
-    def decide(self, uow: UnitOfWork, approval_id: UUID | str, *, principal: Principal, approve: bool, note: str | None) -> Row:
+    def decide(self, uow: UnitOfWork, approval_id: UUID | str, *, principal: Principal, approve: bool, note: str | None,
+               _group_candidate_id: str | None = None) -> Row:
         if principal.value not in self.ctx.platform["platform"]["approvers"]:
             raise Forbidden(f"{principal.value} is not an allowed approver")
+        peek = self.get(uow, approval_id)
+        human_test = (peek['subject'] or {}).get('human_test') or {}
+        members = human_test.get('tasks') or []
+        if approve and peek['action'] == 'MERGE' and len(members) > 1 and _group_candidate_id is None:
+            candidate_id = human_test['candidate_id']
+            uow.cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))', ('preview-approval:' + candidate_id,))
+            uow.cur.execute("SELECT manifest_hash, state FROM preview_candidates WHERE id = %s FOR SHARE", (candidate_id,))
+            candidate = uow.cur.fetchone()
+            if not candidate or candidate['state'] != 'TESTING' or candidate['manifest_hash'] != human_test['manifest_hash']:
+                raise Conflict('open the current shared version before authorizing all its tasks')
+            decisions = []
+            for key in sorted(members):
+                uow.cur.execute("SELECT t.state, g.merge_approval_id FROM tasks t JOIN git_changes g ON g.task_id = t.id "
+                                "WHERE t.key = %s", (key,))
+                member = uow.cur.fetchone()
+                if not member or member['state'] != 'READY_FOR_MERGE' or not member['merge_approval_id']:
+                    raise Conflict('a task in the shared version changed; prepare and test a new version')
+                approval = self.get(uow, member['merge_approval_id'])
+                binding = (approval['subject'] or {}).get('human_test') or {}
+                if binding.get('candidate_id') != candidate_id or binding.get('manifest_hash') != human_test['manifest_hash']:
+                    raise Conflict('every task needs a merge approval bound to the same shared version')
+                decisions.append(approval['id'])
+            for member_id in decisions:
+                result = self.decide(uow, member_id, principal=principal, approve=True, note=note,
+                                     _group_candidate_id=candidate_id)
+                if result['state'] != ApprovalState.CONSUMED:
+                    raise Conflict('a task changed while approving the group; no group approval was applied')
+            return self.get(uow, approval_id)
         row = self.get(uow, approval_id, lock=True)
         if row["state"] != ApprovalState.PENDING:
             raise Conflict(f"approval is {row['state']}, not PENDING")

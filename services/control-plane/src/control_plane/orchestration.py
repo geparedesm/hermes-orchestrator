@@ -505,10 +505,14 @@ class Orchestration:
                  "Accepted subtask work lives in its workspace until integration, so the mounted main branch does not show it:",
                  "that is normal. Start READY subtasks with REQUEST_EXECUTION; the platform prepares each one's base from the",
                  "accepted work it depends on, and when those dependencies conflict its developer reconciles them first.", "",
-                 "## Request", "", self.reviews._request_text(uow, task).strip()[:5000], "",
+                 "## Request", "", self.reviews._request_text(uow, task).strip(), "",
                  "## Project files", "", f"The tracked files of the project's main branch are mounted read-only at /projects/{self._slug(uow, task)} "
                  "(no Git metadata; files the project ignores, such as local secrets, are not there). Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
                  "accurate `files`.", ""]
+        if task.get("delivery_mode") == "FEATURE":
+            from .delivery import PLANNING_INSTRUCTIONS
+            lines = [line.replace("Plan small, independent subtasks", "Plan one complete implementation assignment") for line in lines]
+            lines += ["## Feature delivery mode", "", PLANNING_INSTRUCTIONS, ""]
         uow.cur.execute("SELECT name FROM task_attachments WHERE task_id = %s ORDER BY position", (task["id"],))
         attached = [r["name"] for r in uow.cur.fetchall()]
         if attached:
@@ -520,7 +524,7 @@ class Orchestration:
                             "WHERE r.task_id = %s ORDER BY r.version DESC LIMIT 1", (task["id"],))
             row = uow.cur.fetchone()
             text = self.ctx.artifacts.read(row["path"]).decode("utf-8", "replace") if row else ""
-            lines += [f"## Requirements (version {task['current_requirements_version']})", "", text[:5000], ""]
+            lines += [f"## Requirements (version {task['current_requirements_version']})", "", (text if task.get("delivery_mode") == "FEATURE" else text[:5000]), ""]
         else:
             lines += ["## Requirements", "", "None yet: start with SET_REQUIREMENTS, then SET_PLAN.", ""]
         # The person's answers, in full and outside the requirements' cut above (docs/design/clarifications.md).
@@ -715,7 +719,7 @@ class Orchestration:
         if kind == "ASK_QUESTIONS":
             return self._ask_questions(uow, task, action.get("questions") or [])
         if kind == "SET_PLAN":
-            return self._set_plan(uow, task, action.get("subtasks") or [])
+            return self._set_plan(uow, task, action.get("subtasks") or [], document=action.get("text"))
         if kind == "REQUEST_EXECUTION":
             return self._request_execution(uow, task, epoch, action)
         if kind == "ACCEPT_SUBTASK":
@@ -844,7 +848,10 @@ class Orchestration:
             self._move(uow, task, S.APPROVAL_REQUIRED, reason="a high-impact assumption needs a human decision")
         return None
 
-    def _set_plan(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]]) -> str:
+    def _set_plan(self, uow: UnitOfWork, task: Row, items: list[dict[str, Any]], *, document: str | None = None) -> str:
+        if task.get("delivery_mode") == "FEATURE":
+            from .delivery import validate_feature_plan
+            validate_feature_plan(items, document)
         if not items:
             raise ValueError("a plan needs at least one subtask")
         keys = [str(i.get("key") or "").strip() for i in items]
@@ -873,7 +880,13 @@ class Orchestration:
             kept_deps[k] = [r["local_key"] for r in uow.cur.fetchall()]
         _check_acyclic({**graph, **kept_deps})
         # Accepted subtasks a plan leaves out are kept either way: they do not make a resubmitted plan a new one.
-        if task["current_plan_version"] and self._same_plan(uow, {k: v for k, v in current.items() if k not in kept}, keys, items, graph):
+        document_changed = False
+        if document and task.get("delivery_mode") == "FEATURE" and task["current_plan_version"]:
+            uow.cur.execute("SELECT a.sha256 FROM feature_plans p JOIN artifacts a ON a.id = p.document_artifact_id "
+                            "WHERE p.task_id = %s AND p.version = %s", (task["id"], task["current_plan_version"]))
+            previous_document = uow.cur.fetchone()
+            document_changed = not previous_document or previous_document["sha256"] != hashlib.sha256(document.encode()).hexdigest()
+        if task["current_plan_version"] and not document_changed and self._same_plan(uow, {k: v for k, v in current.items() if k not in kept}, keys, items, graph):
             # Only an approval that was cleared (a revision, a stale consumption) is asked for again: a rejected plan resent
             # unchanged is refused like any unchanged plan, so a rejection never comes back as the same question.
             if self._supervised(uow, task) and task.get("plan_approval_state") is None:
@@ -943,6 +956,12 @@ class Orchestration:
         artifact = self.ctx.artifacts.write(uow.cur, project_id=task["project_id"], task_id=task["id"], kind="plan",
                                             name=f"plan-v{version}.json", content=json.dumps(items, indent=2).encode()[:200_000],
                                             media_type="application/json")
+        if document:
+            artifact = self.ctx.artifacts.write(uow.cur, project_id=task["project_id"], task_id=task["id"],
+                                                kind="plan", name=f"plan-v{version}.md",
+                                                content=document.encode(), media_type="text/markdown")
+            uow.cur.execute("INSERT INTO feature_plans (document_artifact_id, task_id, version) VALUES (%s, %s, %s)",
+                            (artifact.id, task["id"], version))
         self._event(uow, task, "PLAN_VERSIONED", f"plan version {version}: {len(items)} subtask(s), {len(new_keys)} new",
                     {"version": version, "artifact": str(artifact.id)})
         task = self._task(uow, task["id"])  # the new plan version
@@ -1085,7 +1104,14 @@ class Orchestration:
                         "FROM subtasks s WHERE s.task_id = %s AND s.plan_version = %s AND s.state <> 'CANCELLED' ORDER BY s.key",
                         (task["id"], version))
         items = [{k: (list(v) if isinstance(v, list) else v) for k, v in r.items()} for r in uow.cur.fetchall()]
-        return {"kind": "plan", "plan_version": version,
+        document_metadata = {}
+        if task.get("delivery_mode") == "FEATURE":
+            uow.cur.execute("SELECT a.sha256 FROM feature_plans p JOIN artifacts a ON a.id = p.document_artifact_id "
+                            "WHERE p.task_id = %s AND p.version = %s", (task["id"], version))
+            document = uow.cur.fetchone()
+            if document:
+                document_metadata["plan_document_sha256"] = document["sha256"]
+        return {"kind": "plan", "plan_version": version, **document_metadata,
                 "plan_digest": hashlib.sha256(json.dumps(items, sort_keys=True, default=str).encode()).hexdigest(),
                 "requirements_version": task["current_requirements_version"], "requirements_digest": self._requirements_digest(uow, task),
                 "subtasks": items}
@@ -1285,6 +1311,9 @@ class Orchestration:
                             *(["", "## Project knowledge for these files"] + [f"- [{k['trust']}] {k['title']}: {k['body'][:300]}"
                                                                              for k in knowledge] if knowledge else []), "",
                             "Work only on this subtask. Run the relevant tests, fix failures, and commit locally when done."])
+        if task.get("delivery_mode") == "FEATURE":
+            from .delivery import feature_context
+            prompt = feature_context(self.ctx, uow, task, self.reviews._request_text(uow, task)) + "\n\n" + prompt
         capabilities = {"workspace": "WRITE", "git": "LOCAL_COMMIT", "tests": "EXECUTE", "egress": "STANDARD"}
         services = testenv.request_body(self.git._context(uow, task["key"])[1], self._config(uow, task), workspace["path"])
         if services:
@@ -1294,6 +1323,14 @@ class Orchestration:
                    "subtask_id": str(subtask["id"]), "lease_epoch": epoch,
                    "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry,
                                **({"test_environment": services} if services else {})}}
+        if task.get("delivery_mode") == "FEATURE":
+            uow.cur.execute("SELECT id FROM executions WHERE task_id = %s AND subtask_id = %s AND role = 'DEVELOPER' "
+                            "AND provider = %s AND workspace = %s AND provider_session_id IS NOT NULL "
+                            "AND state IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'LOST') ORDER BY created_at DESC LIMIT 1",
+                            (task["id"], subtask["id"], provider, f"{self.git._context(uow, task['key'])[1]['relative_path']}/{workspace['path']}"))
+            previous = uow.cur.fetchone()
+            if previous:
+                request["resume"] = str(previous["id"])
         if task["state"] == S.QUEUED:
             task = self._move(uow, task, S.RUNNING, reason="subtask work started")
         elif task["state"] == S.FIX_REQUIRED:

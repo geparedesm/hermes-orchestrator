@@ -391,6 +391,9 @@ class Reviews:
             "Report every problem as a finding with a severity: CRITICAL and HIGH block the merge; MEDIUM and LOW are advice.",
             "Report requirements the change does not meet in unmet_requirements.",
         ])
+        if task.get("delivery_mode") == "FEATURE":
+            from .delivery import feature_context
+            prompt = feature_context(self.ctx, uow, task, self._request_text(uow, task)) + "\n\n" + prompt
         return self.executions.request(uow, principal=principal, task_key=task["key"], req=ExecutionRequest(
             role="REVIEWER", provider=provider, prompt=prompt, workspace=ws["path"], result_schema="review-result",
             capabilities={"workspace": "READ", "git": "READ", "tests": "EXECUTE", **({"test_services": True} if services else {})},

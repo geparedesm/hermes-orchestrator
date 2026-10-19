@@ -348,3 +348,17 @@ Classification (§24):
 | 18 Hermes not required for authorized work | ARCHITECTURE §14 |
 | 19 No silently discarded duplicates | T14; DATA_MODEL `task_relationships` |
 | 20 No dual leaders | T07; DATA_MODEL `task_leases` |
+
+### Shared human-test previews
+
+The optional preview subsystem is operated separately from agent workers. Its gateway validates the existing Hermes
+operator session, strips Hermes cookies and identity headers before application requests, and creates only a
+preview-local Odoo session. Database management routes are refused. HTTP mutations require the configured public
+origin; WebSocket handshakes require that origin and the same verified operator. The application's database and
+network are isolated from production, with no Internet egress. The Cloudflare connector is a separate tunnel.
+
+Candidates pin source commits, image digest, configuration, requirements and Quality Gate evidence. Opening a
+candidate records testing only. A shared-version approval explicitly lists every included task, validates every
+member and consumes their approvals in one transaction; separate Git repositories still merge independently.
+Source changes, expired versions, retired candidates and missing group members cannot bypass human acceptance.
+Only the operator deployment path may attest a candidate READY. Workers receive no preview credentials or Docker socket.

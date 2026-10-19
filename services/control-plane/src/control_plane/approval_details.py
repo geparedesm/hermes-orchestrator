@@ -10,6 +10,7 @@ approval never hides it: `details` falls back to the approval's own summary.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 import re
 from typing import Any
 
@@ -174,14 +175,30 @@ def _merge(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     pr = subject.get("pr_number")
     approved = bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
     good = tests == "PASSED" and approved and subject.get("quality_gate")
+    human_test = subject.get("human_test")
+    human_status = None
+    if human_test:
+        uow.cur.execute("SELECT state, expires_at, manifest_hash FROM preview_candidates WHERE id = %s",
+                        (human_test['candidate_id'],))
+        candidate = uow.cur.fetchone()
+        available = bool(candidate and candidate['state'] in ('READY', 'TESTING')
+                         and candidate['expires_at'] > datetime.now(timezone.utc)
+                         and candidate['manifest_hash'] == human_test['manifest_hash'])
+        human_status = {'available': available, 'can_approve': bool(available and candidate['state'] == 'TESTING'),
+                        'state': candidate['state'] if candidate else 'UNAVAILABLE'}
+
     return {
-        "headline": f"The work is finished and checked. Add it to {branch}?",
+        "human_test": human_status,
+        "headline": (f"Test version {human_test['version']} and authorize {', '.join(human_test.get('tasks') or []) or 'this task'}." if human_test
+                     else f"The work is finished and checked. Add it to {branch}?"),
         "highlights": [("Tests passed" if tests == "PASSED" else f"Tests: {(tests or 'not run').lower()}"),
                        ("Reviewed and approved" if approved else "Review: " + reviews),
                        f"{len(included)} part(s) included" if included else "One change"],
-        "recommendation": _recommend("approve", "Tests passed and the review approved it.") if good
+        "recommendation": _recommend("look", "Test the linked candidate before authorizing this merge.") if human_test
+        else _recommend("approve", "Tests passed and the review approved it.") if good
         else _recommend("look", "Not every check passed: see the technical details."),
-        "changes": included or [{"kind": "~", "text": integrated or "the task's integrated change"}],
+        "changes": ([{"kind": "~", "text": f"Test version {human_test['version']}: {human_test['url']}"}] if human_test else [])
+                   + (included or [{"kind": "~", "text": integrated or "the task's integrated change"}]),
         "why": f"Nothing enters {branch} without your approval, bound to these exact commits.",
         "if_yes": f"{'Pull request #' + str(pr) if pr else 'The change'} is merged into {branch}, then verified after the merge.",
         "if_no": "Nothing is merged; the task goes back for fixes.",
