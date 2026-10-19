@@ -14,7 +14,7 @@ from typing import Any
 EMOJI = {
     "QUESTIONS_ASKED": "❓",
     "APPROVAL_REQUIRED": "🟡", "READY_FOR_MERGE": "🚀", "TASK_COMPLETED": "✅", "BLOCKED": "⛔", "TEST_FAILED": "❌",
-    "TASK_FAILED": "❌", "AUTH_REQUIRED": "🔑", "PAUSED_BUDGET": "💰", "RECOVERY_FAILED": "⚠️", "PLATFORM_DEGRADED": "⚠️",
+    "TASK_FAILED": "❌", "AUTH_REQUIRED": "🔑", "PAUSED_BUDGET": "💰", "WAITING_FOR_CREDIT": "⏳", "RECOVERY_FAILED": "⚠️", "PLATFORM_DEGRADED": "⚠️",
     "NOTIFICATION_TEST": "🧪", "DIGEST": "📋",
 }
 
@@ -36,6 +36,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "task_failed": "{emoji} *{task} failed*\n{summary}",
         "auth": "{emoji} *A login has expired*\n{summary}\nOn your Mac: `make auth-claude` or `make auth-codex`.",
         "budget": "{emoji} *{task} ran out of budget*\n{summary}\nTo raise it: `/orch budget {task} agent_launches=10`",
+        "credit": "{emoji} *{task} waits for an agent's credit*\n{summary}\nNothing to do: it continues by itself.",
         "platform": "{emoji} *Platform problem*\n{summary}",
         "test": "{emoji} *Test*\nhermes-orchestrator notifications reach this chat.",
         "digest": "{emoji} *Progress* ({count})",
@@ -61,6 +62,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "task_failed": "{emoji} *{task} falló*\n{summary}",
         "auth": "{emoji} *Hay que volver a iniciar sesión*\n{summary}\nEn tu Mac: `make auth-claude` o `make auth-codex`.",
         "budget": "{emoji} *{task} se quedó sin presupuesto*\n{summary}\nPara ampliarlo: `/orch budget {task} agent_launches=10`",
+        "credit": "{emoji} *{task} espera a que un agente recupere crédito*\n{summary}\nNo tienes que hacer nada: continúa sola.",
         "platform": "{emoji} *Problema en la plataforma*\n{summary}",
         "test": "{emoji} *Prueba*\nLos avisos de hermes-orchestrator llegan a este chat.",
         "digest": "{emoji} *Avances* ({count})",
@@ -198,7 +200,7 @@ def render(payload: dict[str, Any], ctx: Context, lang: str = "en", now: datetim
     if event == "QUESTIONS_ASKED" and ctx.clarification is not None:
         return questions(ctx, lang)
     simple = {"READY_FOR_MERGE": "ready", "TASK_COMPLETED": "completed", "TEST_FAILED": "test_failed",
-              "TASK_FAILED": "task_failed", "AUTH_REQUIRED": "auth", "PAUSED_BUDGET": "budget",
+              "TASK_FAILED": "task_failed", "AUTH_REQUIRED": "auth", "PAUSED_BUDGET": "budget", "WAITING_FOR_CREDIT": "credit",
               "RECOVERY_FAILED": "platform", "PLATFORM_DEGRADED": "platform", "NOTIFICATION_TEST": "test"}
     if event == "BLOCKED":
         words = _WORDS[lang]
