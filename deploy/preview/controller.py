@@ -54,8 +54,11 @@ def cycle():
         finished = bool(members) and all(state in ('DONE', 'CANCELLED') for state in states)
         stale_preparation = (active['state'] == 'PREPARING'
             and (datetime.now(timezone.utc) - datetime.fromisoformat(active['created_at'])).total_seconds() > 600)
-        stale_ready = active['state'] == 'READY' and any(state != 'READY_FOR_MERGE' for state in states)
-        if finished or stale_preparation or stale_ready:
+        # A version whose tasks changed (feedback sent one back to work) or that expired can no longer be approved: it
+        # is retired, or the one-active-candidate rule would keep its corrected replacement from ever being prepared.
+        stale = active['state'] in ('READY', 'TESTING') and any(state != 'READY_FOR_MERGE' for state in states)
+        expired = bool(active.get('expires_at')) and datetime.fromisoformat(active['expires_at']) <= datetime.now(timezone.utc)
+        if finished or stale_preparation or stale or expired:
             # Approving/completing the group ends the test session; no unfinished test is replaced.
             api('POST', '/v1/previews/' + active['id'] + '/retire', {})
         else:
