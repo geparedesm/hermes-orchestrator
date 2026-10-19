@@ -499,7 +499,12 @@ class QualityGate:
             uow.cur.execute("SELECT * FROM review_findings WHERE review_id = %s AND status = 'OPEN'", (item["id"],))
             findings += uow.cur.fetchall()
         blocking = BLOCKING_ALWAYS | set((config.get("quality_gate") or {}).get("block_on_findings", []))
-        current_target = self.ctx.git.refs(project["relative_path"], [changes["target_branch"]])["refs"][changes["target_branch"]]
+        # The target as integration saw it: for a GitHub project, origin's branch (Git Service integrates onto it, so
+        # its pull request stays mergeable); the local branch may hold the user's unpushed commits.
+        branch = changes["target_branch"]
+        target_refs = self.ctx.git.refs(project["relative_path"], [branch, f"refs/remotes/origin/{branch}"])
+        github = target_refs["remote"]["kind"] == "github"
+        current_target = target_refs["refs"][f"refs/remotes/origin/{branch}" if github else branch]
         violations = self._violations(uow, task)
         changed = plan.get("changed_files") or []
 
