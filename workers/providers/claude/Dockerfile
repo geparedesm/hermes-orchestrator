@@ -1,11 +1,12 @@
 # syntax=docker/dockerfile:1
 # Claude Code worker layer (MASTER_SPEC sections 19-20). Composable: BASE is
 # agent-base or a toolchain image. The CLI comes from its official npm package
-# at a pinned version; the package ships a native binary, so no Node.js runtime
-# is added to the image.
+# at a pinned version. pen.dev uses a separate private Node.js runtime for headless design tools.
 ARG BASE
 ARG NODE_IMAGE
 FROM ${NODE_IMAGE} AS cli
+ARG PEN_CLI_VERSION=0.3.12
+RUN npm install --prefix /opt/pen --no-audit --no-fund "@pen.dev/cli@${PEN_CLI_VERSION}"
 ARG CLAUDE_CODE_VERSION
 # CLI_SELF_CHECK=0 only for cross-architecture builds: QEMU cannot run Claude Code's native binary
 # (scripts/check-multiarch.sh checks its architecture instead); native builds always run it.
@@ -17,6 +18,8 @@ FROM ${BASE}
 ARG CLAUDE_CODE_VERSION
 ARG CLI_SELF_CHECK=1
 USER root
+COPY --from=cli /usr/local/bin/node /opt/ho/pen-node/bin/node
+COPY --from=cli /opt/pen /opt/ho/pen
 COPY --from=cli /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /opt/ho/claude/bin/claude
 COPY --chmod=755 ho-agent-run ho-auth-login /opt/ho/bin/
 RUN ln -s /opt/ho/claude/bin/claude /usr/local/bin/claude \

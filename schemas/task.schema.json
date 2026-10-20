@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "project", "request", "requested_by", "idempotency_key"],
   "properties": {
+    "ui_design_required": {"type": "boolean", "description": "Require a pen.dev proposal and explicit human visual approval. False never disables automatic UI detection."},
     "delivery_mode": {"enum": ["SUBTASKS", "FEATURE"]},
     "human_test_required": {"type": "boolean"},
     "model_overrides": {"type": "object", "additionalProperties": false, "properties": {"claude": {"type": "object", "additionalProperties": false, "properties": {"ORCHESTRATOR": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}, "DEVELOPER": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}, "REVIEWER": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}}}, "codex": {"type": "object", "additionalProperties": false, "properties": {"ORCHESTRATOR": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}, "DEVELOPER": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}, "REVIEWER": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}}}}},
@@ -106,6 +107,7 @@
       "properties": {
         "delivery_mode": {"enum": ["SUBTASKS", "FEATURE"]},
         "human_test_required": {"type": "boolean"},
+        "ui_design_required": {"type": "boolean"},
         "model_overrides": {"type": "object", "additionalProperties": false, "properties": {"claude": {"type": "object", "additionalProperties": false, "properties": {"ORCHESTRATOR": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}, "DEVELOPER": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}, "REVIEWER": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}}}, "codex": {"type": "object", "additionalProperties": false, "properties": {"ORCHESTRATOR": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}, "DEVELOPER": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}, "REVIEWER": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@\\[\\]-]{0,99}$"}}}}},
 
         "key": { "$ref": "#/$defs/taskKey" },

@@ -273,7 +273,7 @@
         "properties": {
           "id": { "$ref": "#/$defs/uuid" },
           "action": {
-            "enum": ["MERGE", "SCOPE_EXPANSION", "BUDGET_INCREASE", "BUDGET_UNLIMITED", "HIGH_RISK_OPERATION", "ENVIRONMENT_ACCESS", "PROJECT_CONFIG_CHANGE", "ASSUMPTION", "UPDATE", "PROJECT_READY", "CREATE_CHILD", "PLAN"]
+            "enum": ["MERGE", "SCOPE_EXPANSION", "BUDGET_INCREASE", "BUDGET_UNLIMITED", "HIGH_RISK_OPERATION", "ENVIRONMENT_ACCESS", "PROJECT_CONFIG_CHANGE", "ASSUMPTION", "UPDATE", "PROJECT_READY", "CREATE_CHILD", "PLAN", "CREATE_PROJECT", "UI_DESIGN"]
           },
           "state": { "enum": ["PENDING", "APPROVED", "REJECTED", "EXPIRED", "INVALIDATED", "CONSUMED"] },
           "state_hash": { "$ref": "#/$defs/sha256" },

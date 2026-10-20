@@ -48,7 +48,8 @@
               "PROPOSE_KNOWLEDGE",
               "SUBMIT_FOR_QUALITY_GATE",
               "REPORT_BLOCKED",
-              "WAIT"
+              "WAIT",
+              "REQUEST_UI_DESIGN"
             ]
           },
           "text": {

@@ -20,6 +20,7 @@ ALWAYS_BLOCKING_FINDINGS = frozenset({"HIGH", "CRITICAL"})
 ALWAYS_REQUIRE_APPROVAL = frozenset(
     {
         ApprovalAction.MERGE,
+        ApprovalAction.UI_DESIGN,
         ApprovalAction.BUDGET_UNLIMITED,
         ApprovalAction.HIGH_RISK_OPERATION,
         ApprovalAction.ENVIRONMENT_ACCESS,

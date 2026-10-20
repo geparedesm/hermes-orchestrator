@@ -66,7 +66,7 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
     app = FastAPI(title="Hermes Orchestrator Agent Manager", version="0.1.0", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     # An execution request carries its attachments (base64): bounded while it arrives, a few at a time.
-    app.add_middleware(BodyLimit, default=4 * 1024 * 1024, large={("POST", "/v1/executions"): attachments.MAX_REQUEST_BYTES})
+    app.add_middleware(BodyLimit, default=4 * 1024 * 1024, large={("POST", "/v1/executions"): 2 * attachments.MAX_REQUEST_BYTES})
 
     def error(status: int, code: str, message: str) -> JSONResponse:
         return JSONResponse({"error": code, "message": message}, status_code=status)

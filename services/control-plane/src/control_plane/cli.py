@@ -74,6 +74,10 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("show", "pause", "resume", "cancel", "retry", "events"):
         task.add_parser(name).add_argument("key")
     task.add_parser("queue")
+    task.add_parser("design", help="inspect the current pen.dev design and approval").add_argument("key")
+    design_review = task.add_parser("design-reviewed", help="attest that both downloaded UI images were reviewed")
+    design_review.add_argument("key")
+    design_review.add_argument("design_id")
     rv = task.add_parser("revise", help="new requirements version; the orchestrator analyses the impact")
     rv.add_argument("key")
     rv.add_argument("text")
@@ -218,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "unregister":
             return _call("DELETE", f"/v1/projects/{args.slug}", mutate=True)
     if g == "task":
+        if cmd == "design":
+            return _call("GET", f"/v1/tasks/{args.key}/ui-design")
+        if cmd == "design-reviewed":
+            return _call("POST", f"/v1/tasks/{args.key}/ui-design/{args.design_id}/reviewed", body={}, mutate=True)
         if cmd == "create":
             body: dict[str, Any] = {"project": args.project, "request": args.request}
             if args.title:

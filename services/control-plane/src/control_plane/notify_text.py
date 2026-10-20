@@ -99,6 +99,8 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
                                   "no, keep the current one"),
         "ENVIRONMENT_ACCESS": ("{summary}. Allow it?", "yes, allow it", "no"),
         "UPDATE": ("Update the platform from *{from_version}* to *{to_version}*?", "yes, update", "no, not now"),
+        "UI_DESIGN": ("Review both proposed UI images. Approve this design before frontend implementation?",
+                      "implement this design", "revise the design using my feedback"),
         "PLAN": ("The plan for this task is ready ({plan_count} subtask(s)). Start the work with this plan?",
                  "yes, start with this plan", "no, plan again"),
         "CREATE_CHILD": ("Create *{child}* ({child_title}) in project *{project}*: a new folder {child_path} and the "
@@ -129,6 +131,8 @@ _APPROVAL: dict[str, dict[str, tuple[str, str, str]]] = {
                                   "no, mantener la actual"),
         "ENVIRONMENT_ACCESS": ("{summary}. ¿Lo permito?", "sí, permitirlo", "no"),
         "UPDATE": ("¿Actualizo la plataforma de *{from_version}* a *{to_version}*?", "sí, actualizar", "ahora no"),
+        "UI_DESIGN": ("Revisa las dos imágenes propuestas. ¿Apruebas este diseño antes de implementar el frontend?",
+                      "implementar este diseño", "revisar el diseño con mis comentarios"),
         "PLAN": ("El plan de esta tarea está listo ({plan_count} subtarea(s)). ¿Empiezo el trabajo con este plan?",
                  "sí, empieza con este plan", "no, planifica de nuevo"),
         "CREATE_CHILD": ("¿Creo *{child}* ({child_title}) en el proyecto *{project}*: una carpeta nueva {child_path} y el "
