@@ -39,3 +39,9 @@ Release ui-design-20261019: all generic, Node, Python and Odoo worker builds com
 UPDATE 53 is CONSUMED; update 01a154b9-3b83-7fe1-816c-c4a8be4e180d finished successfully. Backup: backups/20261019T151308Z. All six services are healthy; the official check passed schema 0022, dependency health, orchestration plugin and Dashboard. Live Hermes has image delivery enabled with an explicit WhatsApp destination; its bridge reports connected. The new task-design CLI responds successfully. All three PEN_CLI_KEY files are readable by the running manager without displaying their contents.
 
 A post-deployment check found init-secrets.sh reset the project-store ACL mask. Restored manager-only traversal and changed initialization to preserve operator-configured ACLs. Re-ran initialization and verified all three keys remained readable. No user frontend was changed and no real task spanning image delivery and human UI approval was exercised.
+
+## T-9 project-read regression
+
+T-9 stopped because the policy engine removed project_read from its DEVELOPER designer grant, although ui/portfolio.pen was tracked in the repository. The designer therefore received neither the source nor the existing design. Added an internal validated-designer flag at grant creation, a narrowly scoped schema exception, and an Agent Manager check requiring the fenced UI_DESIGN purpose and the task's own project. The mount remains an immutable tracked read view with workspace and Git access set to NONE.
+
+Validation: 392 unit tests passed before the additional manager regression; the complete manager test file then passed all 8 tests. The 12 UI integration tests passed with new assertions requiring the project-read grant and view path. Policy tests reject other projects and write-capable requests; manager tests reject missing design fencing and cross-project reads. Ruff, schemas and diff checks passed. Deployment and a new T-9 design execution remain pending at preparation time.

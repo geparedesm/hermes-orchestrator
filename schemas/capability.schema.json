@@ -134,7 +134,7 @@
           "items": {
             "$ref": "#/$defs/slug"
           },
-          "description": "Registered projects mounted read-only (orchestrator only)."
+          "description": "Registered projects mounted read-only; restricted to orchestrators and validated UI designers."
         },
         "git": {
           "enum": [
@@ -380,14 +380,38 @@
       }
     },
     {
-      "description": "project_read is only for the orchestrator.",
+      "description": "Only orchestrators and developers without workspace or Git access may read project views.",
       "if": {
-        "properties": {
-          "role": {
-            "not": {
-              "const": "ORCHESTRATOR"
+        "not": {
+          "anyOf": [
+            {
+              "properties": {
+                "role": {
+                  "const": "ORCHESTRATOR"
+                }
+              }
+            },
+            {
+              "properties": {
+                "role": {
+                  "const": "DEVELOPER"
+                },
+                "capabilities": {
+                  "properties": {
+                    "workspace": {
+                      "const": "NONE"
+                    },
+                    "git": {
+                      "const": "NONE"
+                    },
+                    "project_read": {
+                      "maxItems": 1
+                    }
+                  }
+                }
+              }
             }
-          }
+          ]
         }
       },
       "then": {

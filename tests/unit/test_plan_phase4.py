@@ -98,3 +98,26 @@ def test_secret_store(tmp_path):
     values = store.values_for(["demo/test/DB_URL", "demo/test/MISSING"])
     assert store.redact("url=postgres://u:pw-123456@db/x", values) == "url=[REDACTED:DB_URL]"
     assert store.redact_bytes(b"postgres://u:pw-123456@db/x", values) == b"[REDACTED:DB_URL]"
+
+
+def test_ui_designer_project_view_is_read_only_and_fenced(platform, tmp_path):
+    body = request(platform, purpose={"ui_design": str(uuid.uuid4()), "kind": "UI_DESIGN", "fenced": True})
+    body["grant"]["capabilities"]["project_read"] = ["demo"]
+    sha = "a" * 40
+    view = tmp_path / "demo" / ".hermes" / "read" / sha
+    view.mkdir(parents=True)
+    (tmp_path / "demo" / ".git").mkdir()
+    body["project_read"] = [{"slug": "demo", "path": f"demo/.hermes/read/{sha}", "sha": sha}]
+    result = plan(platform, body, tmp_path)
+    mount = next(m for m in result.mounts if m.target == "/projects/demo")
+    assert mount.read_only
+    assert mount.source == str(view)
+    assert not any(m.target == "/workspace" for m in result.mounts)
+    for purpose in ({}, {"ui_design": "x"}, {"ui_design": "x", "kind": "UI_DESIGN"}):
+        body["purpose"] = purpose
+        with pytest.raises(Rejected, match="fenced UI designer"):
+            plan(platform, body, tmp_path)
+    body["purpose"] = {"ui_design": "x", "kind": "UI_DESIGN", "fenced": True}
+    body["grant"]["capabilities"]["project_read"] = ["other"]
+    with pytest.raises(Rejected, match="own project"):
+        plan(platform, body, tmp_path)

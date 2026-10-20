@@ -174,6 +174,7 @@ class GrantRequest:
     tests: str = "NONE"
     artifacts: str = "NONE"
     project_read: Sequence[str] = ()
+    ui_designer: bool = False  # Internal: set only after control-plane design assignment validation.
     resource_profile: str = "NORMAL"
     timeout_minutes: int = 60
     lease_epoch: int = 1
@@ -254,9 +255,13 @@ def evaluate_grant(request: GrantRequest, config: Json, platform: Json, *, now: 
     if timeout != request.timeout_minutes:
         notes.append(f"resources.timeout_minutes: capped at {max_timeout}")
 
-    project_read = sorted(set(request.project_read)) if request.role == Role.ORCHESTRATOR else []
-    if request.project_read and request.role != Role.ORCHESTRATOR:
-        notes.append("project_read: only the orchestrator may read projects")
+    designer_read = (request.ui_designer and request.role == Role.DEVELOPER
+                     and request.workspace == "NONE" and request.git == "NONE"
+                     and set(request.project_read) <= {request.project})
+    can_read = request.role == Role.ORCHESTRATOR or designer_read
+    project_read = sorted(set(request.project_read)) if can_read else []
+    if request.project_read and not can_read:
+        notes.append("project_read: only the orchestrator or a validated read-only UI designer may read projects")
 
     approval_ids = sorted({a.approval_id for a in request.approvals})
     grant: Json = {

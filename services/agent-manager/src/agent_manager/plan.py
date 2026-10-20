@@ -242,6 +242,12 @@ def build_plan(
         if request.get(key) != grant[key]:
             raise Rejected(f"{key} does not match the grant")
     caps = grant["capabilities"]
+    if caps.get("project_read") and grant["role"] != "ORCHESTRATOR":
+        purpose = request.get("purpose") or {}
+        if (grant["role"] != "DEVELOPER" or not purpose.get("ui_design")
+                or purpose.get("kind") != "UI_DESIGN" or not purpose.get("fenced")
+                or caps["project_read"] != [grant["project"]]):
+            raise Rejected("only a fenced UI designer may read its own project view")
     if caps["docker"] != "NONE":  # also enforced by the schema; kept as an explicit invariant
         raise Rejected("executions never receive Docker access")
     expires_at = datetime.fromisoformat(grant["expires_at"])
