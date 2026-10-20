@@ -35,7 +35,7 @@ from .agentmgr import AgentManagerError
 from .auth import Principal
 from .context import Context, UnitOfWork
 from .db import Row, jsonb
-from .errors import BadRequest, Conflict, NotFound, UpstreamError
+from .errors import BadRequest, Conflict, Forbidden, NotFound, UpstreamError
 from .events import record_event
 from .tasks import Tasks
 
@@ -179,6 +179,21 @@ class Executions:
         if req.prompt and role not in AGENT_ROLES:
             raise BadRequest(f"{role.value} executions run commands; only agent roles take a prompt")
 
+        design_service = getattr(self, "ui_designs", None)
+        approved_design = None
+        reference_design = None
+        ui_design = req.purpose.get("ui_design")
+        if ui_design:
+            if principal.value != "control-plane:orchestrator" or role != Role.DEVELOPER or req.workspace or req.resume \
+                    or req.capabilities.get("workspace", "NONE") != "NONE" or req.capabilities.get("git", "NONE") != "NONE":
+                raise Forbidden("UI designers run only as isolated read-only control-plane assignments")
+            uow.cur.execute("SELECT * FROM ui_designs WHERE id = %s AND task_id = %s FOR UPDATE", (ui_design, task["id"]))
+            design = uow.cur.fetchone()
+            if not design or design["state"] != "PREPARING" or design["execution_id"] or not design_service.matches(design, task):
+                raise Conflict("UI design request is stale or already started")
+        elif design_service and (role == Role.DEVELOPER or req.capabilities.get("workspace") == "WRITE"):
+            approved_design = design_service.ensure_approved(uow, task, req.prompt or "")
+
         resume_row = None
         if req.resume:
             if not req.prompt:
@@ -252,6 +267,26 @@ class Executions:
             uow.cur.execute("SELECT artifact_id, name, media_type, size_bytes, sha256 FROM task_attachments "
                             "WHERE task_id = %s ORDER BY position", (task["id"],))
             attached = [{**a, "artifact_id": str(a["artifact_id"])} for a in uow.cur.fetchall()]
+        if req.prompt and ui_design:
+            uow.cur.execute("SELECT * FROM ui_designs WHERE task_id = %s AND version < %s AND manifest <> '{}'::jsonb "
+                            "ORDER BY version DESC LIMIT 1", (task['id'], design['version']))
+            reference_design = uow.cur.fetchone()
+            if reference_design:
+                attached += design_service.package(uow, reference_design)
+                req.prompt += ("\n\nThe previous proposal is attached as ui-design.pen, ui-desktop.png, ui-mobile.png, "
+                               "ui-design.md. Open the .pen only through ho-pen interactive --in; revise that proposal "
+                               "using human feedback, preserve unaffected parts, and export all four deliverables again.")
+        if req.prompt and role in (Role.DEVELOPER, Role.REVIEWER) and design_service and not ui_design and task.get("ui_design_required"):
+            design = design_service.ensure_approved(uow, task)
+            if design:
+                approved_design = design
+                attached += design_service.package(uow, design)
+                names = [a["name"].lower() for a in attached]
+                if len(set(names)) != len(names):
+                    raise Conflict("task attachment names conflict with the reserved ui- design package")
+                req.prompt += ("\n\nFollow the approved pen.dev UI design in ui-desktop.png, ui-mobile.png and ui-design.md "
+                               "under /run/ho-input/attachments. Do not read the encrypted ui-design.pen as text. "
+                               "Reviewers must compare the implemented UI to both approved images and request changes for deviations.")
         if req.prompt:
             assert provider is not None
             caps_granted = grant["capabilities"]
@@ -293,6 +328,10 @@ class Executions:
                                   "result_schema": req.result_schema}
         if attached:
             spec["attachments"] = attached
+        if approved_design:
+            spec['ui_design_id'] = str(approved_design['id'])
+        if reference_design:
+            spec['design_package_id'] = str(reference_design['id'])
         if workspace:
             spec["workspace"] = workspace
         if grant["capabilities"]["project_read"]:
@@ -315,6 +354,8 @@ class Executions:
              bool(req.prompt), resume_row["id"] if resume_row else retry_of, epoch, req.subtask_id, jsonb(reservation)),
         )
         row = uow.cur.fetchone()
+        if ui_design:
+            uow.cur.execute("UPDATE ui_designs SET execution_id = %s WHERE id = %s", (execution_id, ui_design))
         assert row is not None
         uow.cur.execute(
             """
@@ -418,6 +459,27 @@ class Executions:
             row = self.get(uow, execution_id, lock=True)
             if row["state"] != "REQUESTED":
                 return
+            uow.cur.execute("SELECT * FROM tasks WHERE id = %s FOR UPDATE", (row["task_id"],))
+            dispatch_task = uow.cur.fetchone()
+            design_service = getattr(self, "ui_designs", None)
+            if design_service and (row["role"] == "DEVELOPER" or
+                                   row["spec"]["grant"]["capabilities"].get("workspace") == "WRITE") \
+                    and design_service.required(uow, dispatch_task):
+                design_id = (row["spec"].get("purpose") or {}).get("ui_design")
+                try:
+                    if TaskState(dispatch_task["state"]) not in ACTIVE_STATES:
+                        raise Conflict("task no longer permits work")
+                    if design_id:
+                        design = design_service.current(uow, dispatch_task)
+                        if not design_service.matches(design, dispatch_task) or str(design["id"]) != design_id:
+                            raise Conflict("UI design was superseded before dispatch")
+                    else:
+                        approved_design = design_service.ensure_approved(uow, dispatch_task)
+                        if approved_design and (row["spec"].get("ui_design_id") != str(approved_design["id"])):
+                            raise Conflict("execution was prepared for a different UI design")
+                except (Conflict, OSError) as exc:
+                    self._finish(uow, row, "CANCELLED", failure_class="POLICY", reason=str(exc))
+                    return
             # While Agent Manager is DEGRADED every dispatch path waits (no attempt is spent); the health probe
             # keeps checking and dispatching resumes when it recovers.
             uow.cur.execute("SELECT 1 FROM component_health WHERE component = 'agent_manager' AND state = 'DEGRADED'")
@@ -818,6 +880,9 @@ class Executions:
             if row["agent_run"] and path.startswith("ho/"):
                 continue  # raw provider stream: parsed by the adapter, never stored (section 86)
             safe = re.sub(r"[^A-Za-z0-9._-]", "_", path.replace("/", "__"))[:120] or "output"
+            if path.endswith(".pen"):
+                store(safe.lstrip("."), content, "application/vnd.pen.design")
+                continue
             try:
                 text, _ = redact(content.decode("utf-8"))
                 store(safe.lstrip("."), text.encode(), "text/plain")

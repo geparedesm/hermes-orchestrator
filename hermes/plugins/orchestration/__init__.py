@@ -292,6 +292,8 @@ def _cli_run(args) -> None:
 
 
 def register(ctx) -> None:
+    from .visual_delivery import register as register_visual_delivery
+    register_visual_delivery(ctx)
     for name, schema, fn in TOOLS:
         ctx.register_tool(name=name, toolset="orchestration", schema=schema, handler=_tool(fn),
                           description=schema["description"])

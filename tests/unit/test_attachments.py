@@ -170,3 +170,19 @@ def test_attachments_are_written_read_only_for_the_agent():
     assert members["prompt.md"].uid == 10001
     assert members["attachments"].isdir() and members["attachments"].mode == 0o555 and members["attachments"].uid == 0
     assert members["attachments/spec.md"].mode == 0o444 and members["attachments/spec.md"].uid == 0
+
+
+def test_approved_design_package_has_separate_attachment_limits(platform, tmp_path):
+    user_files = {f'reference-{i}.txt': b'reference' for i in range(10)}
+    design_files = {'ui-desktop.png': PNG, 'ui-mobile.png': PNG, 'ui-design.md': b'# UI', 'ui-design.pen': b'opaque'}
+    body = attach(request(platform), {**user_files, **design_files})
+    body['ui_design_id'] = str(uuid.uuid4())
+    result = plan(platform, body, tmp_path)
+    assert result.attachments == {**user_files, **design_files}
+    del body['ui_design_id']
+    with pytest.raises(Rejected, match='at most 10'):
+        plan(platform, body, tmp_path)
+    body = attach(request(platform), {'ui-desktop.png': PNG})
+    body['ui_design_id'] = str(uuid.uuid4())
+    with pytest.raises(Rejected, match='all four files'):
+        plan(platform, body, tmp_path)

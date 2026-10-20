@@ -1,0 +1,21 @@
+#!/bin/bash
+# Headless design tools only: the outer metered Claude/Codex worker makes all AI decisions.
+set -euo pipefail
+case "${1:-}" in
+  interactive|version|--version|--help|-h) ;;
+  *) echo 'Use ho-pen interactive for design operations; nested AI-agent runs are not enabled.' >&2; exit 2 ;;
+esac
+for argument in "$@"; do
+  case "$argument" in
+    --app|-a|--app=*) echo 'UI designs use headless pen.dev, not a desktop/VS Code app.' >&2; exit 2 ;;
+  esac
+done
+if [[ "${1:-}" == interactive ]]; then
+  if [[ -z "${PEN_CLI_KEY:-}" ]]; then
+    secret_file=/run/ho/secrets/PEN_CLI_KEY
+    [[ -s "$secret_file" ]] || { echo 'pen.dev requires a granted PEN_CLI_KEY secret.' >&2; exit 3; }
+    PEN_CLI_KEY="$(cat "$secret_file")"
+    export PEN_CLI_KEY
+  fi
+fi
+exec /opt/ho/pen-node/bin/node /opt/ho/pen/node_modules/@pen.dev/cli/dist/index.mjs "$@"

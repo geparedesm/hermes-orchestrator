@@ -8,7 +8,7 @@ even when its delivery fails and answers a repeat with `duplicate` (200), so the
 number: a retry after a failure is delivered again (at least once), while a resend of the same attempt
 is still deduplicated.
 
-Attention notifications go out one by one, in order. Routine ones are aggregated into one digest at most
+Attention notifications go out one by one, in order. A UI approval prompt waits for its image receipts without holding other tasks' notices. Routine ones are aggregated into one digest at most
 every ROUTINE_DIGEST, however large the backlog. The oldest pending notification gates delivery, so order survives an outage, and
 its backoff (10 s doubling to 15 min) is the outbox's backoff while Hermes is unreachable.
 """
@@ -168,6 +168,13 @@ class Outbox:
         for row in [r for r in rows if r["priority"] == "ATTENTION"]:
             note = context_of(row)
             payload = row["payload"]
+            if note.approval and note.approval.get('action') == 'UI_DESIGN' and note.approval.get('state') == 'PENDING':
+                from .ui_designs import IMAGES
+                with self.ctx.unit_of_work() as uow:
+                    uow.cur.execute('SELECT delivered_images FROM ui_designs WHERE approval_id = %s', (note.approval['id'],))
+                    design = uow.cur.fetchone()
+                if not design or not set(IMAGES) <= set(design['delivered_images']):
+                    continue  # images first; do not hold other tasks while the plugin records this proposal's receipts
             error, sent = self._send([row], f"{row['id']}:{int(row['attempts']) + 1}", lambda _, p=payload, c=note, i=row["id"]: {
                 "text": notify_text.render(p, c, lang), "event": p.get("type"), "task": c.task, "project": c.project,
                 "priority": "ATTENTION", "id": str(i)})

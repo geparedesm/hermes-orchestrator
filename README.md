@@ -164,6 +164,8 @@ ho review run T-1 --provider claude      # cross-review by the provider that did
 ho gate evaluate T-1                     # Quality Gate -> READY_FOR_MERGE
 ```
 
+Frontend tasks first create a desktop/mobile proposal in headless pen.dev and wait for an explicit visual approval. Developers and reviewers receive the approved images and specification. Setup, credentials, review commands, and revision behavior: [UI design approval](docs/design/ui-design-approval.md).
+
 ## 11. Monitoring
 
 - Dashboard → **Orchestration**: required actions, queue, running work, provider usage by model, a board, and each task's plan, reviews, tests, budget, timeline, and manifests.

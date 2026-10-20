@@ -85,6 +85,8 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     verifications = Verifications(ctx, tasks, executions, git)
     reviews = Reviews(ctx, tasks, executions, git)
     gate = QualityGate(ctx, tasks, approvals, git, reviews)
+    from .ui_designs import UIDesigns
+    UIDesigns(ctx, tasks, approvals, executions)
     scheduler.hooks += [git.sync, verifications.sync, gate.sync]
     tasks.on_budget_resume.append(verifications.relaunch_waiting)  # as after a budget raise
     orchestrator = None
@@ -971,6 +973,65 @@ def create_app(services: Services) -> FastAPI:
             result = services.orchestration.revise(uow, key, text, principal=who)
             previews.retire(uow, body.candidate_id, who)
             return jsonable(result)
+
+    @app.get("/v1/ui-designs/deliveries")
+    def ui_deliveries(caller: Identity = Depends(identity)) -> dict[str, Any]:
+        if caller.name != 'hermes-plugin':
+            raise Forbidden('UI delivery is reserved for the Hermes plugin')
+        with ctx.unit_of_work() as uow:
+            uow.cur.execute("SELECT d.*, t.key, a.number FROM ui_designs d JOIN tasks t ON t.id = d.task_id "
+                            "JOIN approvals a ON a.id = d.approval_id WHERE d.state = 'PENDING' AND a.state = 'PENDING' "
+                            "AND t.state = 'APPROVAL_REQUIRED' ORDER BY d.created_at LIMIT 10")
+            return {'designs': jsonable(uow.cur.fetchall())}
+
+    @app.get("/v1/tasks/{key}/ui-design")
+    def ui_design_status(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            return {'required': task['ui_design_required'], 'design': jsonable(services.executions.ui_designs.current(uow, task))}
+
+    @app.get("/v1/tasks/{key}/ui-design/{design_id}/{name}")
+    def ui_design_file(key: str, design_id: UUID, name: str, _: Identity = Depends(identity)) -> Response:
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key)
+            content, media = services.executions.ui_designs.file(uow, task, design_id, name)
+        return Response(content, media_type=media, headers={'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+                        'Content-Disposition': f'attachment; filename="{name}"'})
+
+    @app.post("/v1/tasks/{key}/ui-design/{design_id}/delivered/{name}")
+    def ui_design_delivered(key: str, design_id: UUID, name: str, caller: Identity = Depends(identity)) -> dict[str, Any]:
+        if caller.name != 'hermes-plugin':
+            raise Forbidden('only Hermes records image delivery')
+        from .ui_designs import IMAGES
+        if name not in IMAGES:
+            raise NotFound('unknown design image')
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key, lock=True)
+            design = services.executions.ui_designs.current(uow, task)
+            if not design or design['id'] != design_id or design['state'] != 'PENDING':
+                raise Conflict('this UI design is no longer pending')
+            uow.cur.execute("UPDATE ui_designs SET delivered_images = array_append(delivered_images, %s) "
+                            "WHERE id = %s AND NOT (%s = ANY(delivered_images))", (name, design_id, name))
+            return {'delivered': name}
+
+    @app.post("/v1/tasks/{key}/ui-design/{design_id}/reviewed")
+    def ui_design_reviewed(key: str, design_id: UUID, who: Principal = Depends(principal)) -> dict[str, Any]:
+        # Operator fallback after opening the authenticated image downloads (for hosts without a chat channel).
+        if who.value not in ctx.platform['platform']['approvers']:
+            raise Forbidden('only an approver can attest that the design images were reviewed')
+        from .ui_designs import IMAGES
+        with ctx.unit_of_work() as uow:
+            task = services.tasks.get(uow, key, lock=True)
+            design = services.executions.ui_designs.current(uow, task)
+            if not services.executions.ui_designs.matches(design, task) or design['id'] != design_id or design['state'] != 'PENDING':
+                raise Conflict('this UI design is no longer pending')
+            services.executions.ui_designs.package(uow, design)
+            uow.cur.execute('UPDATE ui_designs SET delivered_images = %s WHERE id = %s', (list(IMAGES), design_id))
+            from .events import record_event
+            record_event(uow.cur, 'UI_DESIGN_REVIEWED', actor=who.value, project_id=task['project_id'], task_id=task['id'],
+                         summary='Human attested review of desktop and mobile UI design images',
+                         data={'design_id': str(design_id)}, pending=uow.events)
+            return {'reviewed': str(design_id)}
 
     @app.get("/v1/tasks/{key}/attachments")
     def list_attachments(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:

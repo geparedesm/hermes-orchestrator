@@ -134,6 +134,7 @@ class Orchestration:
         self.reviews = reviews
         self.gate = gate
         self.leases = Leases(ctx)
+        self.ui_designs = executions.ui_designs
         executions.on_agent_result.append(self._on_agent_result)
         executions.on_finished.append(self._on_execution_finished)
         reviews.on_recorded.append(self._on_review)
@@ -485,7 +486,12 @@ class Orchestration:
 
     def context_bundle(self, uow: UnitOfWork, task: Row) -> str:
         """Everything the orchestrator needs for one step, from durable state (section 47); bounded size."""
-        lines = [f"# Orchestrator step: task {task['key']}", "", f"Current task state: {task['state']} (events below are history; "
+        lines = ["UI rule: any frontend or UI task requires REQUEST_UI_DESIGN after SET_REQUIREMENTS and SET_PLAN. "
+                 "The platform creates the design in headless pen.dev, delivers desktop/mobile images and waits for human approval. "
+                 "Never implement UI in research or bypass visual approval. Missing pen.dev authentication is BLOCKED. "
+                 "After rejection, request a revised UI design using the person's feedback. After approval, REQUEST_EXECUTION. "
+                 "Explicitly use REQUEST_UI_DESIGN for UI work even when filenames or request wording are ambiguous.",
+                 f"# Orchestrator step: task {task['key']}", "", f"Current task state: {task['state']} (events below are history; "
                  "this state is authoritative).", "",
                  "You lead this task. Return actions; the platform validates and executes them and enforces policy, budgets,",
                  "and approvals. The platform automatically runs cross-review by the other provider after each developer",
@@ -620,6 +626,11 @@ class Orchestration:
         if knowledge:
             lines += ["## Project knowledge", ""] + [f"- [{k['category']}, {k['trust']}] {k['title']}: {k['body'][:200]}"
                                                      for k in knowledge] + [""]
+        design = self.ui_designs.current(uow, task)
+        if design:
+            lines.insert(0, f"UI design v{design['version']}: {design['state']}; "
+                         f"current requirements/plan: {bool(self.ui_designs.matches(design, task))}. "
+                         + (f"Feedback: {design['feedback']}" if design.get('feedback') else ''))
         return "\n".join(lines)[:20000]
 
     def _on_agent_result(self, uow: UnitOfWork, execution: Row, result: Any) -> None:
@@ -720,6 +731,8 @@ class Orchestration:
             return self._ask_questions(uow, task, action.get("questions") or [])
         if kind == "SET_PLAN":
             return self._set_plan(uow, task, action.get("subtasks") or [], document=action.get("text"))
+        if kind == "REQUEST_UI_DESIGN":
+            return self._request_ui_design(uow, task, epoch)
         if kind == "REQUEST_EXECUTION":
             return self._request_execution(uow, task, epoch, action)
         if kind == "ACCEPT_SUBTASK":
@@ -810,6 +823,14 @@ class Orchestration:
         uow.cur.execute("INSERT INTO requirement_versions (id, task_id, version, artifact_id, source, change_reason) "
                         "VALUES (%s, %s, %s, %s, %s, %s)", (uuid7(), task["id"], version, artifact.id, source, reason[:300]))
         uow.cur.execute("UPDATE tasks SET current_requirements_version = %s WHERE id = %s", (version, task["id"]))
+        self.ui_designs.required(uow, task, text)
+        if task.get('ui_design_required'):
+            uow.cur.execute("SELECT id FROM executions WHERE task_id = %s AND role = 'DEVELOPER' AND state = ANY(%s)",
+                            (task['id'], list(ACTIVE)))
+            for execution in uow.cur.fetchall():
+                self.executions.stop(uow, execution['id'], actor='control-plane', reason='requirements changed; UI design approval must be renewed')
+        self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"],
+                                       action=ApprovalAction.UI_DESIGN, reason="requirements revised")
         self._event(uow, task, "REQUIREMENTS_VERSIONED", f"requirements version {version} ({source.lower()})", {"version": version})
         return f"version {version}"
 
@@ -854,6 +875,8 @@ class Orchestration:
             validate_feature_plan(items, document)
         if not items:
             raise ValueError("a plan needs at least one subtask")
+        self.ui_designs.required(uow, task, "\n".join(str(i.get('title', '')) + ' ' + str(i.get('description', '')) for i in items),
+                                [p for i in items for p in (i.get('files') or [])])
         keys = [str(i.get("key") or "").strip() for i in items]
         # Say which key and why: a bare "invalid keys" made T-6's orchestrator retry blindly until it was blocked.
         invalid = [k for k in keys if not re.match(r"^[A-Za-z0-9_-]{1,20}$", k)]
@@ -965,6 +988,8 @@ class Orchestration:
         self._event(uow, task, "PLAN_VERSIONED", f"plan version {version}: {len(items)} subtask(s), {len(new_keys)} new",
                     {"version": version, "artifact": str(artifact.id)})
         task = self._task(uow, task["id"])  # the new plan version
+        self.approvals.invalidate_open(uow, project_id=task['project_id'], task_id=task['id'],
+                                       action=ApprovalAction.UI_DESIGN, reason='implementation plan changed')
         self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.PLAN,
                                        reason="superseded by a new plan")
         if self._supervised(uow, task):
@@ -1129,6 +1154,39 @@ class Orchestration:
             self._move(uow, task, S.APPROVAL_REQUIRED, reason=f"plan v{version} waits for your approval")
         return f"version {version}: waiting for the person's approval"
 
+    def _request_ui_design(self, uow: UnitOfWork, task: Row, epoch: int) -> str:
+        if not task["current_plan_version"] or not task["current_requirements_version"]:
+            raise Conflict("set requirements and a plan before requesting a UI design")
+        self._check_plan_approved(uow, task)
+        design, created = self.ui_designs.prepare(uow, task)
+        if not created:
+            return f"UI design v{design['version']} is {design['state'].lower()}"
+        config = self._config(uow, task)
+        if not any(s['name'] == 'PEN_CLI_KEY' and s['environment'] in ('local', 'test') for s in config.get('secrets', [])):
+            reason = "pen.dev needs PEN_CLI_KEY configured as a local/test project secret; frontend implementation is blocked"
+            uow.cur.execute("UPDATE ui_designs SET state = 'FAILED', feedback = %s WHERE id = %s", (reason, design['id']))
+            self._move(uow, task, S.BLOCKED, reason=reason)
+            return reason
+        provider = self._route(uow, task, 'RESEARCH')
+        if provider is None:
+            raise Conflict("no provider is available for UI design")
+        from .ui_designs import DESIGN_INSTRUCTIONS
+        from .delivery import feature_context
+        previous_feedback = ''
+        uow.cur.execute("SELECT feedback FROM ui_designs WHERE task_id = %s AND feedback IS NOT NULL ORDER BY version DESC LIMIT 1",
+                        (task['id'],))
+        previous = uow.cur.fetchone()
+        if previous:
+            previous_feedback = "\n\nHuman feedback or previous failure: " + previous['feedback']
+        plan_context = "\n\nCurrent plan assignments:\n" + "\n".join(
+            f"{s['title']}: {s['description']}" for s in self._subtasks(uow, task))
+        prompt = DESIGN_INSTRUCTIONS + plan_context + "\n\n" + feature_context(self.ctx, uow, task, self.reviews._request_text(uow, task)) + previous_feedback
+        self.launch(uow, task, 'UI_DESIGN', {"role": "DEVELOPER", "provider": provider, "prompt": prompt,
+                    "capabilities": {"project_read": True, "egress": "STANDARD", "artifacts": "WRITE"},
+                    "secrets": ["PEN_CLI_KEY"], "env": {"NODE_USE_ENV_PROXY": "1"}, "lease_epoch": epoch,
+                    "purpose": {"ui_design": str(design['id']), "kind": "UI_DESIGN", "fenced": True}})
+        return f"UI design v{design['version']} requested; no frontend implementation before image approval"
+
     def _check_plan_approved(self, uow: UnitOfWork, task: Row) -> None:
         """A supervised task starts work only on a plan explicitly approved: missing approval state is not permission
         (a revision or a failed consumption clears it, and the plan must be approved again)."""
@@ -1178,6 +1236,12 @@ class Orchestration:
         uow.cur.execute("UPDATE clarifications SET state = 'CANCELLED', cancel_reason = %s WHERE task_id = %s AND state = 'PENDING' "
                         "RETURNING id", (reason, task["id"]))
         waited = uow.cur.fetchone() is not None
+        uow.cur.execute("SELECT 1 FROM ui_designs WHERE task_id = %s AND state = 'PENDING'", (task['id'],))
+        waited = uow.cur.fetchone() is not None or waited
+        self.approvals.invalidate_open(uow, project_id=task['project_id'], task_id=task['id'],
+                                       action=ApprovalAction.UI_DESIGN, reason=reason)
+        uow.cur.execute("UPDATE ui_designs SET state = 'SUPERSEDED' WHERE task_id = %s AND state IN ('PREPARING', 'PENDING', 'APPROVED')",
+                        (task['id'],))
         if task.get("plan_approval_state") == "PENDING":
             waited = True
         self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.PLAN, reason=reason)
@@ -1265,6 +1329,11 @@ class Orchestration:
         if subtask["state"] not in ("READY", "FIX_REQUIRED"):
             raise Conflict(f"{subtask['key']} is {subtask['state']}")
         self._check_plan_approved(uow, task)
+        if self.ui_designs.required(uow, task, subtask["title"] + " " + subtask["description"],
+                                   (subtask["estimated_scope"] or {}).get("files") or []):
+            design = self.ui_designs.current(uow, task)
+            if not self.ui_designs.matches(design, task) or design["state"] != "APPROVED":
+                return self._request_ui_design(uow, task, epoch)
         if task["state"] == S.PLANNING and task["current_plan_version"]:
             task = self._move(uow, task, S.QUEUED, reason="plan accepted")  # a plan exists (for example after a release)
         if task["state"] not in (S.QUEUED, S.RUNNING, S.FIX_REQUIRED):
@@ -1286,6 +1355,9 @@ class Orchestration:
                  kind: str, fresh: bool = False, retry: bool = False) -> Row | None:
         """Launch a developer execution for a subtask in its workspace (a fresh one for a new attempt)."""
         self._check_plan_approved(uow, self._task(uow, task["id"]))  # no subtask starts before its supervised plan is approved
+        self.ui_designs.ensure_approved(uow, self._task(uow, task["id"]),
+                                       subtask["title"] + " " + subtask["description"],
+                                       (subtask["estimated_scope"] or {}).get("files") or [])
         workspace = None
         if subtask["workspace_id"] and not fresh:
             uow.cur.execute("SELECT * FROM workspaces WHERE id = %s AND status = 'ACTIVE'", (subtask["workspace_id"],))

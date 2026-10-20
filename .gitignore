@@ -24,3 +24,6 @@ backups/
 deploy/preview/runtime.env
 deploy/preview/controller.lock
 deploy/preview/current.json
+
+.env.pre-update
+.env.bak

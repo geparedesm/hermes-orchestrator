@@ -430,6 +430,14 @@ def details(uow: UnitOfWork, approval: Row, defaults: dict[str, Any] | None = No
             out = _create_child(approval)
         elif action == "CREATE_PROJECT":
             out = _create_project(approval)
+        elif action == "UI_DESIGN":
+            out = {"headline": f"Approve the desktop and mobile UI design v{subject.get('version')} before implementation?",
+                   "highlights": ["Review both pen.dev images before deciding."], "recommendation": None,
+                   "changes": [{"kind": "~", "text": "Implement the visual proposal in the attached desktop/mobile images"}],
+                   "why": "Every frontend change requires an explicit visual approval of this design version.",
+                   "if_yes": "Frontend implementation may start using this exact design package.",
+                   "if_no": "Hermes revises the design using your feedback and sends new images.",
+                   "facts": [["Design version", str(subject.get('version'))], ["Package", subject.get('manifest_hash', '')]], "links": []}
         elif action == "PLAN":
             out = _plan(approval)
         elif action == "UPDATE":

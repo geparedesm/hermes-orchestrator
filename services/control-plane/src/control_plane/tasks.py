@@ -158,6 +158,10 @@ class Tasks:
         )
         task = uow.cur.fetchone()
         assert task is not None
+        from .ui_designs import detects_ui
+        if body.get("ui_design_required") or detects_ui(body["request"] + " " + title):
+            uow.cur.execute("UPDATE tasks SET ui_design_required = true WHERE id = %s", (task_id,))
+            task["ui_design_required"] = True
         self._create_budget(uow, task_id, budget_profile)
         attached: list[Row] = []
         if files:

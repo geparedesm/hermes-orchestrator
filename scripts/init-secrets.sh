@@ -19,4 +19,6 @@ chmod 644 secrets/ho_*
 # Project secrets store for the Secrets Broker (see .env.example). Created empty;
 # the operator adds <project>/<environment>/<NAME> files.
 mkdir -p project-secrets
-chmod 700 project-secrets
+# Keep operator-configured manager traversal ACLs: chmod 700 clears their mask.
+# New stores are already private because of umask 077.
+chmod u=rwx,o= project-secrets

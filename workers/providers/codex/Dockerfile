@@ -6,12 +6,16 @@
 ARG BASE
 ARG NODE_IMAGE
 FROM ${NODE_IMAGE} AS cli
+ARG PEN_CLI_VERSION=0.3.12
+RUN npm install --prefix /opt/pen --no-audit --no-fund "@pen.dev/cli@${PEN_CLI_VERSION}"
 ARG CODEX_VERSION
 RUN npm install --global --no-audit --no-fund "@openai/codex@${CODEX_VERSION}" && codex --version
 
 FROM ${BASE}
 ARG CODEX_VERSION
 USER root
+COPY --from=cli /usr/local/bin/node /opt/ho/pen-node/bin/node
+COPY --from=cli /opt/pen /opt/ho/pen
 COPY --from=cli /usr/local/bin/node /opt/ho/node/bin/node
 COPY --from=cli /usr/local/lib/node_modules/@openai /opt/ho/codex/node_modules/@openai
 COPY --chmod=755 codex /usr/local/bin/codex

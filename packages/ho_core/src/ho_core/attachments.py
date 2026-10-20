@@ -24,6 +24,7 @@ TEXT_TYPES = {
     "log": "text/plain",
 }
 BINARY_TYPES = {
+    "pen": ("application/vnd.pen.design", ()),  # opaque; interpreted only by pen.dev
     "png": ("image/png", (b"\x89PNG\r\n\x1a\n",)),
     "jpg": ("image/jpeg", (b"\xff\xd8\xff",)),
     "jpeg": ("image/jpeg", (b"\xff\xd8\xff",)),
@@ -80,6 +81,8 @@ def check(name: str, content: bytes) -> Checked:
         return Checked(clean, TEXT_TYPES[extension], len(content))
     media_type, signatures = BINARY_TYPES[extension]
     matches = (content[:4] == b"RIFF" and content[8:12] == b"WEBP") if extension == "webp" else content.startswith(signatures)
+    if extension == "pen":
+        matches = True
     if not matches:
         raise InvalidAttachment(f"{clean}: content is not a {extension.upper()} file")
     return Checked(clean, media_type, len(content))

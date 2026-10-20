@@ -10,3 +10,11 @@ docs
 !services/**/README.md
 # Platform templates ship whole, Markdown included (docs/design/new-projects.md)
 !templates/**
+
+.env
+project-secrets
+backups
+temp
+
+.env.pre-update
+.env.bak

@@ -176,7 +176,17 @@ def _attachments(request: dict[str, Any], role: str) -> dict[str, bytes]:
             raise Rejected(f"attachment {ref['name']!r} does not match its reference")
         decoded.append((ref["name"], content))
     try:
-        checked = attachment_rules.check_all(decoded)
+        if request.get('ui_design_id') or request.get('design_package_id'):
+            design_names = {'ui-desktop.png', 'ui-mobile.png', 'ui-design.md', 'ui-design.pen'}
+            design_files = [(n, c) for n, c in decoded if n in design_names]
+            user_files = [(n, c) for n, c in decoded if n not in design_names]
+            if {n for n, _ in design_files} != design_names:
+                raise Rejected('approved UI design package must include all four files')
+            attachment_rules.check_all(user_files)
+            attachment_rules.check_all(design_files)
+            checked = [attachment_rules.check(n, c) for n, c in decoded]
+        else:
+            checked = attachment_rules.check_all(decoded)
     except attachment_rules.InvalidAttachment as exc:
         raise Rejected(f"attachment refused: {exc}") from exc
     if [c.name for c in checked] != [name for name, _ in decoded]:
