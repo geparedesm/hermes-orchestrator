@@ -287,3 +287,8 @@ make test-security         # the security suite (docs/security-tests.md)
 make lint validate-schemas
 scripts/smoke-phaseN.sh    # end-to-end tests on throwaway stacks, N = 2..11
 ```
+
+
+Worker images deleted from Docker are restored automatically from the local archive produced by
+`make images`; missing images wait before spending a launch. See [image recovery](docs/recovery.md#missing-pinned-worker-images)
+for storage requirements and recovery when the archive is unavailable.
