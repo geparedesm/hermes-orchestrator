@@ -14,6 +14,7 @@ docs
 .env
 project-secrets
 backups
+config/image-cache
 temp
 
 .env.pre-update

@@ -89,7 +89,18 @@ tmp="$(mktemp config/.images.lock.XXXXXX)"
   printf '%s\n' "${LOCK[@]}" | sort -u
 } > "$tmp"
 chmod 644 "$tmp"  # mktemp makes it 0600; Agent Manager reads it as another user (Linux enforces this; Docker Desktop does not)
+# Keep a local, deduplicated recovery archive outside Docker's image store. Publish it atomically
+# before the new pins, so every published generation has a recovery source. No provider login is included.
+mkdir -p config/image-cache
+chmod 755 config/image-cache  # Agent Manager reads this through its read-only config mount.
+archive_tmp="$(mktemp config/image-cache/.execution-images.XXXXXX)"
+trap 'rm -f "$archive_tmp" "$tmp"' EXIT
+image_ids="$(sed -n 's/^  [a-z0-9-]*: "\(sha256:[0-9a-f]*\)"$/\1/p' "$tmp" | sort -u)"
+docker image save $image_ids | gzip -1 > "$archive_tmp"
+chmod 644 "$archive_tmp"
+mv "$archive_tmp" config/image-cache/execution-images.tar
 mv "$tmp" config/images.lock.yaml
+trap - EXIT
 # The new pins get their own tag too, so the next build keeps them alive while it runs. Pin tags of images no longer
 # in the lock (a toolchain or provider removed) are dropped, so Docker can reclaim them.
 pinned_names="$(sed -n 's/^  \([a-z0-9-]*\): "sha256:[0-9a-f]*"$/\1/p' config/images.lock.yaml)"

@@ -115,15 +115,17 @@ def settle(uow: UnitOfWork, task: Row, reservation: dict[str, int] | None, *, us
     _save(uow, task, budget, consumed, reserved)
 
 
-def release(uow: UnitOfWork, task: Row, reservation: dict[str, int] | None) -> None:
-    """Drop a reservation for an execution that never started (refused before launch)."""
-    if not reservation:
+def release(uow: UnitOfWork, task: Row, reservation: dict[str, int] | None, *, refund_launch: bool = False) -> None:
+    """Release a refused launch, including its immediate launch charge; caller clears its reservation atomically."""
+    if reservation is None:
         return
     budget = _lock(uow, task)
-    reserved = dict(budget.get("reserved") or {})
+    consumed, reserved = dict(budget["consumed"]), dict(budget.get("reserved") or {})
+    if refund_launch:
+        consumed["agent_launches"] = max(0, int(consumed.get("agent_launches", 0)) - 1)
     for counter, amount in reservation.items():
         reserved[counter] = max(0, int(reserved.get(counter, 0)) - amount)
-    _save(uow, task, budget, dict(budget["consumed"]), reserved)
+    _save(uow, task, budget, consumed, reserved)
 
 
 def charge(uow: UnitOfWork, task: Row, counter: str, amount: int = 1) -> None:

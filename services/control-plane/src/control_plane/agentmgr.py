@@ -85,6 +85,9 @@ class AgentManagerClient:
     def credentials(self) -> dict[str, Any]:
         return self._call("GET", "/v1/credentials")
 
+    def ensure_image(self, name: str) -> dict[str, Any]:
+        return self._call("POST", f"/v1/images/{name}/ensure")
+
     def images(self) -> dict[str, Any]:
         return self._call("GET", "/v1/images")
 

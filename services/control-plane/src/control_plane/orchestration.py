@@ -36,7 +36,7 @@ from .auth import Principal
 from .budgets import BudgetExhausted
 from .context import Context, UnitOfWork
 from .db import Row, jsonb
-from .errors import ApiError, BadRequest, Conflict, Forbidden, NotFound, UpstreamError
+from .errors import ApiError, BadRequest, Conflict, Forbidden, NotFound, UpstreamError, WorkerImageRejected
 from .events import record_event
 from .executions import ACTIVE, ExecutionRequest, Executions
 from .gitops import CONTROL_PLANE, GitChanges
@@ -254,6 +254,9 @@ class Orchestration:
                     if kind == "SUBTASK_REVIEW" and subtask is not None:  # a queued cross-review
                         return self._launch_review(uow, task, subtask, request)
                     return self._start(uow, task, request)
+            except WorkerImageRejected as exc:
+                self._move(uow, task, S.BLOCKED, reason=str(exc)[:300])
+                return None
             except BudgetExhausted as exc:
                 blocker = f"budget: {exc}"
                 uow.after_commit.append(lambda key=task["key"], reason=str(exc): self.executions.pause_for_budget(key, reason))
@@ -1478,6 +1481,12 @@ class Orchestration:
     def _step_failed(self, uow: UnitOfWork, execution: Row, failure: str | None) -> None:
         task = self._task(uow, execution["task_id"])
         lease = self.leases.get(uow, task["id"], lock=True)
+        if execution.get("state") == "FAILED" and not execution.get("started_at") and (failure == "POLICY"
+                                               or (execution.get("spec") or {}).get("image_wait_since")):
+            # A refused launch is not an agent reasoning failure; switching providers cannot repair policy.
+            if S(task["state"]) in STEP_STATES:
+                self._move(uow, task, S.BLOCKED, reason=(execution.get("failure_reason") or "worker launch refused")[:300])
+            return
         if failure == FailureClass.QUOTA.value and lease and OTHER[lease["provider"]] not in self._available(uow):
             # Both agents are out of credit (or the other is paused): the next step waits for the credit (launch holds
             # it) instead of counting towards blocking the task.

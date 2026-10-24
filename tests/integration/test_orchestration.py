@@ -1007,3 +1007,73 @@ def test_when_both_agents_are_out_of_credit_steps_wait_without_blocking_the_task
     assert q(services, "SELECT orchestrator_failures FROM tasks WHERE key = %s", task)[0]["orchestrator_failures"] == 0
     assert active(services, task, "ORCHESTRATOR") == []
     assert "is out of credit until" in q(services, "SELECT reason FROM pending_launches WHERE kind = 'STEP'")[0]["reason"]
+
+
+def test_missing_image_queues_without_budget_and_recovers_automatically(api, services, repo, agents):
+    from control_plane.agentmgr import AgentManagerError
+
+    assert api.post("/v1/projects", {"path": "demo"}).status_code == 201
+    approval = api.post("/v1/projects/demo/scan").json()["approval"]["id"]
+    api.post(f"/v1/approvals/{approval}/decision", {"decision": "APPROVE"})
+    key = api.post("/v1/tasks", {"project": "demo", "request": "Add a greeting endpoint"}).json()["key"]
+    agents.image_error = AgentManagerError(409, "image_unavailable", "restoring pinned worker image")
+    for _ in range(3):
+        services.scheduler.run_once()
+    assert state(api, key) == "PLANNING"
+    assert not executions(services, key, "ORCHESTRATOR")
+    assert q(services, "SELECT consumed FROM budgets WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", key)[0]["consumed"]["agent_launches"] == 0
+    waits = q(services, "SELECT * FROM events WHERE task_id = (SELECT id FROM tasks WHERE key = %s) AND type = 'LAUNCH_WAITING'", key)
+    assert len(waits) == 1 and "restoring pinned worker image" in waits[0]["summary"]
+    agents.image_error = None
+    services.scheduler.run_once()
+    assert len(active(services, key, "ORCHESTRATOR")) == 1
+    assert len(executions(services, key, "ORCHESTRATOR")) == 1
+
+
+def test_refused_orchestrator_blocks_with_real_cause_without_failover(api, services, repo, agents):
+    from control_plane.agentmgr import AgentManagerError
+
+    assert api.post("/v1/projects", {"path": "demo"}).status_code == 201
+    approval = api.post("/v1/projects/demo/scan").json()["approval"]["id"]
+    api.post(f"/v1/approvals/{approval}/decision", {"decision": "APPROVE"})
+    key = api.post("/v1/tasks", {"project": "demo", "request": "Add a greeting endpoint"}).json()["key"]
+    agents.fail_with = AgentManagerError(403, "rejected", "worker image has no platform role")
+    services.scheduler.run_once()
+    assert state(api, key) == "BLOCKED"
+    view = api.get(f"/v1/tasks/{key}").json()
+    assert view["state_reason"] == "worker image has no platform role"
+    assert len(executions(services, key, "ORCHESTRATOR")) == 1
+    assert not q(services, "SELECT 1 FROM events WHERE task_id = (SELECT id FROM tasks WHERE key = %s) AND type = 'FAILOVER_COMPLETED'", key)
+
+
+
+def test_image_policy_preflight_blocks_with_cause_and_no_attempt(api, services, repo, agents):
+    from control_plane.agentmgr import AgentManagerError
+
+    assert api.post("/v1/projects", {"path": "demo"}).status_code == 201
+    approval = api.post("/v1/projects/demo/scan").json()["approval"]["id"]
+    api.post(f"/v1/approvals/{approval}/decision", {"decision": "APPROVE"})
+    key = api.post("/v1/tasks", {"project": "demo", "request": "Add a greeting endpoint"}).json()["key"]
+    agents.image_error = AgentManagerError(403, "image_not_allowed", "image is not pinned in images.lock.yaml")
+    services.scheduler.run_once()
+    assert state(api, key) == "BLOCKED"
+    assert api.get(f"/v1/tasks/{key}").json()["state_reason"] == "image is not pinned in images.lock.yaml"
+    assert not executions(services, key, "ORCHESTRATOR")
+
+
+
+def test_stale_unstarted_orchestrator_cancellation_does_not_block_new_lead(api, services, repo, agents):
+    from control_plane.agentmgr import AgentManagerError
+
+    assert api.post("/v1/projects", {"path": "demo"}).status_code == 201
+    approval = api.post("/v1/projects/demo/scan").json()["approval"]["id"]
+    api.post(f"/v1/approvals/{approval}/decision", {"decision": "APPROVE"})
+    key = api.post("/v1/tasks", {"project": "demo", "request": "Add a greeting endpoint"}).json()["key"]
+    agents.fail_with = AgentManagerError(0, "unavailable", "connection refused")
+    services.scheduler.run_once()
+    execution = active(services, key, "ORCHESTRATOR")[0]
+    # Test-only stand-in for a new leader acquiring its next lease epoch.
+    q(services, "UPDATE task_leases SET epoch = epoch + 1 WHERE task_id = %s", execution["task_id"])
+    services.executions.dispatch(execution["id"])
+    assert state(api, key) == "PLANNING"
+    assert api.get(f"/v1/executions/{execution['id']}").json()["state"] == "CANCELLED"
