@@ -36,6 +36,21 @@ Approve the resulting configuration proposal through the normal onboarding flow.
 
 The official CLI reference is <https://docs.pen.dev/for-developers/pen-cli>. `ho-pen` permits tool-shell/help/version commands and refuses nested AI-agent mode. Existing Claude/Codex subscriptions continue to drive the outer, budgeted worker.
 
+## What the person sees
+
+`design.md` starts with a `## Summary for the reviewer` section: a few plain bullets, in the notification language
+(`HO_NOTIFY_LANGUAGE`), on what changes on each screen. Older designs without it fall back to the "after" part of
+their before/after section. The control plane returns it as `summary` in `GET /v1/tasks/<key>/ui-design` and in the
+plugin's delivery list.
+
+- Chat: a message with the summary of changes, then the desktop and mobile images, then the approval request, which
+  also offers `diseño T-8` / `design T-8` (`/orch design T-8`) to send the changes and both images again. Every send is
+  logged with the message ID the channel returned.
+- Dashboard (`ui/hermes-dashboard.pen`, "Orchestration — Approvals · UI design" and "UI design · Full size"): the
+  UI_DESIGN decision shows the changes, both images (opened full size in a viewer), the channel they were sent to, the
+  designer's model and `design.md`, with "Approve design" and "Send back with changes" (which needs a note). The plugin
+  serves only `desktop.png`, `mobile.png` and `design.md`; the page reads them through the Dashboard's authentication.
+
 ## Inspection and decisions
 
 - `ho task design T-8`: current design version, manifest and state.
