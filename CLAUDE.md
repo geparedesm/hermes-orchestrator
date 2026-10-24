@@ -67,7 +67,11 @@ Integration tests use the real Git Service in process and `tests/integration/fak
 
 - Branch `codex/phase-N-<topic>`; commits `[feat|fix|docs] Message` + `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; PR body ends with the Claude Code line; give the merge one-liner after opening a PR.
 - Each phase: design → (Codex adversarial review for critical phases) → build → `/codex:review --base main` → `docs/validation/phase-N.md`, `PHASES.md` status, design-doc updates (ARCHITECTURE, SECURITY_MODEL, DATA_MODEL, NETWORK_MODEL).
+- Codex reviews (`/codex:*`, plugin installed at project scope; model in `.codex/config.toml`) share the ChatGPT quota with Hermes's Codex agents: run them only where the line above asks or before opening a PR, never in a loop, and keep the stop-time review gate off.
 - Operator project for real runs: `~/HermesProjects/hello-api`. Test harnesses may set task states directly in SQL only as a documented stand-in.
 - Smoke tests use throwaway provider identities (`HO_PROVIDER_IDENTITY`); never touch `cred-*-default`.
+- Work on a branch in a separate worktree (`git worktree add <path outside the repo> -b <branch> origin/main`), never in this checkout: the running Hermes mounts `hermes/plugins/orchestration` from it, so edits here reach the live Dashboard and plugin before any UPDATE. Update this checkout's `main` only to deploy.
 - Code and docs in English; talk to the user in Spanish.
+- When a request can be read in more than one way (which project, which scope, which version), state the readings and ask before acting; never pick one silently.
+- State the assumptions a change relies on (what a role does, where something runs) and check them in the code before deciding on them.
 - Design before frontend code: any UI (Dashboard tab, plugin views, pages) is first designed in `ui/*.pen` with pencil.dev (pencil MCP, skill `pen-dev`: `web-app`, `table`, `design-system`, `code` guides) and approved by the user; frontend code is then built from that design. Style: minimal and user-friendly (`get_style` Minimalistic Swiss 7 / Minimalistic Panel 2 / Soft Bento), one reusable component set, high contrast, no decorative gradients or cards for everything.
