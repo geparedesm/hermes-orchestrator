@@ -166,6 +166,46 @@ ho gate evaluate T-1                     # Quality Gate -> READY_FOR_MERGE
 
 Frontend tasks first create a desktop/mobile proposal in headless pen.dev and wait for an explicit visual approval. Developers and reviewers receive the approved images and specification. Setup, credentials, review commands, and revision behavior: [UI design approval](docs/design/ui-design-approval.md).
 
+### Task lifecycle
+
+What happens to a new task with `HO_ORCHESTRATION=true`. States come from `ho_core/statemachine.py`; dashed edges send work back.
+
+```mermaid
+flowchart TD
+    create([Task created]) --> plan["PLANNING<br/>Orchestrator plans the feature"]
+    plan -.->|when requested| planok{{"You approve the plan"}}
+    plan -->|UI work| design["REQUEST_UI_DESIGN<br/>Designer drafts desktop/mobile in headless pen.dev"]
+    design --> designok{{"APPROVAL_REQUIRED · UI_DESIGN<br/>You approve the images"}}
+    designok -.->|rejected, with feedback| plan
+    designok -->|approved| queue
+    plan -->|no UI| queue["QUEUED<br/>Waits for a worker and provider quota"]
+    queue --> run["RUNNING<br/>Developer implements the feature and its tests"]
+    run --> test["TESTING<br/>Project test command in an isolated runner"]
+    test -.->|fails| fix["FIX_REQUIRED<br/>Same developer corrects"]
+    test --> review["REVIEW<br/>Cross-review by the other provider,<br/>against the approved design for UI work"]
+    review -.->|changes requested| fix
+    fix --> run
+    review -.->|review cycle limit| alt["Alternate developer<br/>from the other provider"]
+    alt --> run
+    alt -.->|also fails| blocked[/"BLOCKED<br/>Waits for a person"/]
+    review -->|approved| gate["QUALITY_GATE<br/>Build, tests, full suite;<br/>HIGH/CRITICAL findings block"]
+    gate -.->|fails| fix
+    gate -->|human test required, the default| preview["Preview candidate<br/>Deployed to the preview environment"]
+    gate -->|no human test| approve
+    preview --> approve{{"READY_FOR_MERGE<br/>You test the preview and authorize the merge"}}
+    approve -.->|request changes| plan
+    approve -->|authorized| merge["MERGING → VERIFYING<br/>Git Service merges, post-merge tests run"]
+    merge --> done([DONE])
+    merge -.->|fails| blocked
+
+    classDef agent stroke:#b4561f,stroke-width:2px
+    classDef human stroke:#6a46b8,stroke-width:2px
+    class plan,design,run,review,fix,alt agent
+    class planok,designok,approve human
+```
+
+Orange nodes run an agent; purple nodes wait for you; the rest is the platform. Each agent role uses the model chosen for it: per task (task creation form), per project (`agents.models` in `.hermes/project.yaml`), or by default (Dashboard → Agents: Planning, Implementation, Review). The UI designer runs in the DEVELOPER role of the planning provider. The preview environment and the human-test decision are described in [Feature delivery](docs/design/feature-delivery.md).
+
 ## 11. Monitoring
 
 - Dashboard → **Orchestration**: required actions, queue, running work, provider usage by model, a board, and each task's plan, reviews, tests, budget, timeline, and manifests.
