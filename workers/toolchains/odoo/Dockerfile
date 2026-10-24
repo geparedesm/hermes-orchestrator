@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # Toolchain profile "odoo" (docs/design/child-projects.md): Odoo, pinned by date and SHA-256 in
 # workers/versions.env, with its Python dependencies in /opt/odoo/venv, and `ho-odoo-test`, which installs a module
-# from /workspace into a throwaway database on the test PostgreSQL service and runs its tests.
+# from /workspace into a throwaway database on the test PostgreSQL service and runs its tests. Chromium (Debian's
+# package) and websocket-client (ODOO_EXTRA_PYTHON) let HttpCase browser tests and tours run, offline.
 # Composable: BASE is agent-base or another toolchain image.
 ARG BASE
 FROM ${BASE}
@@ -14,6 +15,7 @@ RUN apt-get update \
  && apt-get install --no-install-recommends -y python3 python3-venv python3-dev python-is-python3 build-essential \
       libpq-dev libxml2-dev libxslt1-dev libldap2-dev libsasl2-dev libjpeg-dev zlib1g-dev libffi-dev \
       postgresql-client fonts-dejavu-core \
+      chromium fonts-liberation \
  && rm -rf /var/lib/apt/lists/*
 # Exactly the approved release: the archive is checked against its SHA-256 before anything is extracted.
 RUN test -n "$ODOO_SERIES" -a -n "$ODOO_RELEASE" -a -n "$ODOO_SHA256" \
