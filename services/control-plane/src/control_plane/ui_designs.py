@@ -16,6 +16,12 @@ from .events import record_event
 
 IMAGES = ('desktop.png', 'mobile.png')
 PACKAGE = (*IMAGES, 'design.md', 'design.pen')
+# design.md sections a person reads before deciding, in order of preference (older designs have only before/after).
+SUMMARY_HEADINGS = ('summary for the reviewer', 'before / after', 'before/after')
+SUMMARY_LIMIT = 1500
+LANGUAGE_NAMES = {'en': 'English', 'es': 'Spanish'}
+_HEADING = re.compile(r'^#{2,3}\s+(.+?)\s*#*\s*$')
+_AFTER = re.compile(r'^\s*[*_]*after[*_]*\s*:?[*_]*\s*:?\s*', re.I)
 _UI = re.compile(r'\b(front[ -]?end|ui|ux|portfolio|portafolio|landing|dashboard|interfaz|pantalla|maquetacion|'
                  r'pagina web|sitio web|website|web page|user interface|visual design|diseno visual|css|html)\b|\.pen\b', re.I)
 _UI_PATH = re.compile(r'(^|/)(ui|frontend|templates|views|static|components|pages)(/|$)|'
@@ -25,6 +31,30 @@ _UI_PATH = re.compile(r'(^|/)(ui|frontend|templates|views|static|components|page
 def detects_ui(text: str, files: list[str] | tuple[str, ...] = ()) -> bool:
     plain = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
     return bool(_UI.search(plain) or any(_UI_PATH.search(p) for p in files))
+
+
+def review_summary(markdown: str, limit: int = SUMMARY_LIMIT) -> str:
+    """The changes a person reviews with the images: the reviewer summary, else the before/after section."""
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in markdown.splitlines():
+        heading = _HEADING.match(line)
+        if heading:
+            current = heading.group(1).strip().lower()
+            sections.setdefault(current, [])
+        elif current is not None:
+            sections[current].append(line)
+    heading = next((h for h in SUMMARY_HEADINGS if '\n'.join(sections.get(h, [])).strip()), None)
+    lines = sections[heading] if heading else []
+    if heading and heading != SUMMARY_HEADINGS[0]:
+        # A before/after section: what the person will see is the "after" part, when the designer marked one.
+        after = next((i for i, line in enumerate(lines) if _AFTER.match(line)), None)
+        if after is not None:
+            lines = [_AFTER.sub('', lines[after])] + lines[after + 1:]
+    text = '\n'.join(lines).strip()
+    if len(text) > limit:
+        text = text[:limit].rsplit(' ', 1)[0].rstrip() + '…'
+    return text
 
 
 DESIGN_INSTRUCTIONS = """Create the proposed UI in pen.dev BEFORE implementing any frontend code.
@@ -43,6 +73,9 @@ Write ONLY these deliverables under /output/design/:
 - desktop.png and mobile.png: actual PNG exports of the respective proposed frames, made by pen.dev.
 - design.md: human-readable changes, frame names, breakpoints, typography, colors, spacing, interactions,
   assets and implementation guidance; explain before/after differences when an interface exists.
+  Start design.md with a `## Summary for the reviewer` section: 3 to 8 short bullets, in plain words, on what
+  the person will see change on each screen. It is sent with the images for the approval, so name no file,
+  model, ID or code; keep it under 1,200 characters.
 Export with execute({input:'Export([desktopId], "png", "/tmp/pen-desktop"); Export([mobileId], "png", "/tmp/pen-mobile")'}), using the real frame IDs.
 IMPORTANT: Export writes a DIRECTORY containing <frame-id>.png, not a PNG at the outputPath itself.
 Copy /tmp/pen-desktop/<desktopId>.png to /output/design/desktop.png and
@@ -230,6 +263,21 @@ class UIDesigns:
             raise Conflict('UI design was superseded')
         self.package(uow, design)
         return self._request_approval(uow, task, design)
+
+    def summary(self, uow, design):
+        """The reviewer summary of a design's own design.md; empty when it has none or the file is unavailable."""
+        ref = (design.get('manifest') or {}).get('design.md') if design else None
+        if not ref:
+            return ''
+        uow.cur.execute('SELECT path FROM artifacts WHERE id = %s AND purged_at IS NULL', (ref['artifact_id'],))
+        artifact = uow.cur.fetchone()
+        try:
+            content = self.ctx.artifacts.read(artifact['path']) if artifact else b''
+        except (OSError, ValueError):
+            return ''
+        if sha256_hex(content) != ref['sha256']:
+            return ''
+        return review_summary(content.decode('utf-8', 'replace'))
 
     def file(self, uow, task, design_id, name):
         design = self.current(uow, task)

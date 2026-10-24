@@ -982,13 +982,29 @@ def create_app(services: Services) -> FastAPI:
             uow.cur.execute("SELECT d.*, t.key, a.number FROM ui_designs d JOIN tasks t ON t.id = d.task_id "
                             "JOIN approvals a ON a.id = d.approval_id WHERE d.state = 'PENDING' AND a.state = 'PENDING' "
                             "AND t.state = 'APPROVAL_REQUIRED' ORDER BY d.created_at LIMIT 10")
-            return {'designs': jsonable(uow.cur.fetchall())}
+            designs = uow.cur.fetchall()
+            for design in designs:
+                design['summary'] = services.executions.ui_designs.summary(uow, design)
+            return {'designs': jsonable(designs)}
 
     @app.get("/v1/tasks/{key}/ui-design")
     def ui_design_status(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
             task = services.tasks.get(uow, key)
-            return {'required': task['ui_design_required'], 'design': jsonable(services.executions.ui_designs.current(uow, task))}
+            designs = services.executions.ui_designs
+            design = designs.current(uow, task)
+            if design:
+                design['summary'] = designs.summary(uow, design)
+                design['current'] = bool(designs.matches(design, task))
+                uow.cur.execute('SELECT number FROM approvals WHERE id = %s', (design['approval_id'],))
+                approval = uow.cur.fetchone()
+                design['number'] = approval['number'] if approval else None
+                # The model the provider reported for the designer execution (none before usage was recorded).
+                uow.cur.execute("SELECT units->>'model' AS model FROM usage_records WHERE execution_id = %s "
+                                "AND units ? 'model' LIMIT 1", (design['execution_id'],))
+                usage = uow.cur.fetchone()
+                design['designer_model'] = usage['model'] if usage else None
+            return {'required': task['ui_design_required'], 'design': jsonable(design)}
 
     @app.get("/v1/tasks/{key}/ui-design/{design_id}/{name}")
     def ui_design_file(key: str, design_id: UUID, name: str, _: Identity = Depends(identity)) -> Response:

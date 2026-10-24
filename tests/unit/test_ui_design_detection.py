@@ -30,3 +30,16 @@ def test_headless_wrapper_refuses_nested_ai_runs():
     result = subprocess.run(['bash', str(wrapper), '--prompt', 'design something'], capture_output=True)
     assert result.returncode == 2
     assert b'nested AI-agent runs' in result.stderr
+
+
+def test_review_summary_prefers_the_reviewer_section_then_before_after():
+    from control_plane.ui_designs import review_summary
+    both = "# T\n\n## Before / after\nOld vs new.\n\n## Summary for the reviewer\n- New filters\n- Document preview\n\n## Colors\nPurple\n"
+    assert review_summary(both) == "- New filters\n- Document preview"
+    before_after = "# T\n## Before / after\n**Before** (`views/x.xml`): a plain list.\n\n**After:**\n- A table\n- Filters\n## Assets\nNone\n"
+    assert review_summary(before_after) == "- A table\n- Filters"
+    assert review_summary("## Before / after\nAfter: one table.\n") == "one table."
+    assert review_summary("## Before / after\nOnly a description.\n") == "Only a description."
+    assert review_summary("# Only a title\nSome text\n") == ""
+    long = review_summary("## Summary for the reviewer\n" + "word " * 600, limit=50)
+    assert len(long) <= 51 and long.endswith("…")

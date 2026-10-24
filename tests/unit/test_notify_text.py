@@ -86,3 +86,10 @@ def test_a_decision_lists_its_first_changes():
     text = render({"type": "APPROVAL_REQUIRED", "summary": "x"}, ctx, "en", now=NOW)
     assert "*What changes:*\n➕ Can create modules\n✏️ Toolchain profiles: python → odoo\n✏️ Command test: a → b\n… and 1 more in the Dashboard" in text
     assert "Qué cambia" in render({"type": "APPROVAL_REQUIRED", "summary": "x"}, ctx, "es", now=NOW)
+
+
+def test_a_ui_design_decision_offers_to_see_the_design_again():
+    text = ask("UI_DESIGN", {"kind": "ui_design", "version": 1})
+    assert "🎨 *diseño T-15*: ver otra vez el diseño propuesto" in text
+    assert "🎨 *design T-15*: see the proposed design again" in ask("UI_DESIGN", {"kind": "ui_design"}, lang="en")
+    assert "diseño T-15" not in ask("MERGE", {"target_branch": "main"})

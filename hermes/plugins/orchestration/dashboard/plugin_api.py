@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
 import re
 from pathlib import Path
 from typing import Any, Literal
@@ -252,6 +253,35 @@ def attachment(key: str, attachment_id: UUID) -> Response:
     return Response(content, media_type="application/octet-stream", headers={
         "Content-Disposition": headers.get("content-disposition") or headers.get("Content-Disposition") or "attachment",
         "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+
+@router.get("/tasks/{key}/ui-design")
+def ui_design(key: str) -> Any:
+    """The task's current UI design proposal: version, state, the changes it makes, and its files."""
+    if not re.match(r"^T-[0-9]+$", key):
+        raise HTTPException(status_code=404, detail="unknown task")
+    result = _call(_api().ui_design, key)
+    # Where the images go, for "Sent to WhatsApp"; only the platform name, never the chat it is sent to.
+    if os.environ.get("HO_UI_DESIGN_DELIVERY", "").lower() == "true":
+        result["delivery_platform"] = os.environ.get("HO_UI_DESIGN_DELIVER_PLATFORM", "").strip().lower() or None
+    return result
+
+
+UI_DESIGN_FILES = {"desktop.png": "image/png", "mobile.png": "image/png", "design.md": "text/markdown; charset=utf-8"}
+
+
+@router.get("/tasks/{key}/ui-design/{design_id}/{name}")
+def ui_design_file(key: str, design_id: UUID, name: str) -> Response:
+    # Only the two exported images and the design notes; the encrypted design.pen stays with the platform. The
+    # control plane checked each file's type and hash; the page reads them as blobs, never as navigable documents.
+    if not re.match(r"^T-[0-9]+$", key) or name not in UI_DESIGN_FILES:
+        raise HTTPException(status_code=404, detail="unknown design file")
+    content, _ = _call(_api().ui_design_file, key, str(design_id), name)
+    if name.endswith(".png") and not content.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(status_code=502, detail="the design image is not a PNG")
+    return Response(content, media_type=UI_DESIGN_FILES[name], headers={
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'",
+        "Content-Disposition": f'{"inline" if name.endswith(".png") else "attachment"}; filename="{name}"'})
 
 
 @router.post("/tasks/{key}/manifest")

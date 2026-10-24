@@ -126,6 +126,13 @@ class TaskApi:
     def attachment(self, key: str, attachment_id: str) -> tuple[bytes, dict[str, str]]:
         return self.call("GET", f"/v1/tasks/{key}/attachments/{attachment_id}", raw=True, timeout=60)
 
+    def ui_design(self, key: str) -> Any:
+        return self.call("GET", f"/v1/tasks/{_key(key)}/ui-design")
+
+    def ui_design_file(self, key: str, design_id: str, name: str) -> tuple[bytes, dict[str, str]]:
+        return self.call("GET", f"/v1/tasks/{_key(key)}/ui-design/{urllib.parse.quote(design_id, safe='')}/"
+                         f"{urllib.parse.quote(name, safe='')}", raw=True, timeout=60)
+
     def action(self, key: str, verb: str) -> Any:
         if verb not in ("pause", "resume", "cancel", "retry"):
             raise ApiError(400, f"unknown task action {verb}")
