@@ -129,6 +129,9 @@
     inbox: "M22 12h-6l-2 3h-4l-2-3H2M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z",
     home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z", kanban: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8 7v7M12 7v4M16 7v9",
     approve: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM8 12l3 3 5-6", activity: "M22 12h-4l-3 9L9 3l-3 9H2",
+    image: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21",
+    maximize: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7", download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
+    message: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   };
   function Icon(props) {
     return h("svg", { className: cx("orch-icon", props.className), viewBox: "0 0 24 24", width: props.size || 16, height: props.size || 16,
@@ -277,6 +280,131 @@
       h("div", null, h("strong", null, lead), r.text ? h("span", null, " — " + r.text) : null));
   }
 
+  // ------------------------------------------------------------ UI design proposals (ui/hermes-dashboard.pen,
+  // "Orchestration — Approvals · UI design" and "UI design · Full size")
+
+  const DESIGN_VIEWS = [["desktop.png", "Desktop", "1440 px"], ["mobile.png", "Mobile", "390 px"]];
+  const CHANNELS = { whatsapp: "WhatsApp", telegram: "Telegram", slack: "Slack", discord: "Discord", signal: "Signal" };
+
+  function designFile(task, design, name) {
+    // Through the Dashboard's own authentication; the page shows a local copy, never the API URL.
+    return SDK.authedFetch("/api/plugins/orchestration/tasks/" + task + "/ui-design/" + design.id + "/" + name).then(function (r) {
+      if (!r.ok) throw new Error("unavailable (" + r.status + ")");
+      return r.blob();
+    });
+  }
+  function useDesignImages(task, design) {
+    const [images, setImages] = useState({});
+    const id = design && design.id;
+    useEffect(function () {
+      if (!id) return undefined;
+      const urls = [];
+      let live = true;
+      DESIGN_VIEWS.forEach(function (v) {
+        designFile(task, design, v[0]).then(function (blob) {
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          if (live) setImages(function (s) { const n = Object.assign({}, s); n[v[0]] = { url: url }; return n; });
+        }).catch(function (e) {
+          if (live) setImages(function (s) { const n = Object.assign({}, s); n[v[0]] = { error: message(e) }; return n; });
+        });
+      });
+      return function () { live = false; urls.forEach(function (u) { URL.revokeObjectURL(u); }); };
+    }, [task, id]);
+    return images;
+  }
+  // The reviewer summary as plain lines, without list markers or markdown emphasis.
+  function summaryLines(text) {
+    return String(text || "").split(/\r?\n/).map(function (line) {
+      return line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").replace(/\*\*|__|`/g, "").trim();
+    }).filter(Boolean);
+  }
+  function saveDesignNotes(task, design) {
+    return designFile(task, design, "design.md").then(function (blob) {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = task + "-ui-v" + design.version + "-design.md";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    });
+  }
+
+  function DesignViewer(props) {
+    const [view, setView] = useState(props.start);
+    const close = props.close;
+    useEffect(function () {
+      function onKey(e) { if (e.key === "Escape") close(); }
+      window.addEventListener("keydown", onKey);
+      return function () { window.removeEventListener("keydown", onKey); };
+    }, [close]);
+    const current = DESIGN_VIEWS.find(function (v) { return v[0] === view; });
+    const image = props.images[view] || {};
+    return h("div", { className: "orch-viewer", role: "dialog", "aria-modal": "true", "aria-label": props.title },
+      h("div", { className: "orch-viewer-bar" },
+        h("div", { className: "orch-viewer-title" }, h("strong", null, props.title),
+          h("div", { className: "orch-segments", role: "tablist" }, DESIGN_VIEWS.map(function (v) {
+            return h("button", { key: v[0], type: "button", role: "tab", "aria-selected": v[0] === view,
+              className: cx("orch-segment", v[0] === view && "orch-segment-on"), onClick: function () { setView(v[0]); } }, v[1]);
+          }))),
+        h("div", { className: "orch-viewer-tools" },
+          image.url ? h("a", { className: "orch-link", href: image.url, download: props.name + "-" + view },
+            h(Icon, { name: "download", size: 14 }), "Download PNG") : null,
+          h(Button, { small: true, icon: "x", onClick: close }, "Close"))),
+      h("div", { className: "orch-viewer-stage" }, image.url ? h("img", { src: image.url, alt: current[1] + " design" })
+        : h(Loading, { error: image.error })),
+      h("div", { className: "orch-muted orch-small" }, "Scroll to see the whole proposal · Esc closes"));
+  }
+
+  // What a UI design proposal changes and both images, inside its UI_DESIGN decision.
+  function DesignReview(props) {
+    const [state, setState] = useState({ data: null, error: null });
+    const [viewer, setViewer] = useState(null);
+    const [notesError, setNotesError] = useState(null);
+    useEffect(function () {
+      let live = true;
+      api("/tasks/" + props.task + "/ui-design").then(function (d) { if (live) setState({ data: d, error: null }); })
+        .catch(function (e) { if (live) setState({ data: null, error: message(e) }); });
+      return function () { live = false; };
+    }, [props.task, props.approval]);
+    const design = state.data && state.data.design;
+    const images = useDesignImages(props.task, design);
+    const closeViewer = useCallback(function () { setViewer(null); }, []);
+    if (state.error) return h("div", { className: "orch-alert" }, h(Icon, { name: "alert" }), "The design could not be loaded: " + state.error);
+    if (!design) return h(Loading, null);
+    const lines = summaryLines(design.summary);
+    const delivered = DESIGN_VIEWS.every(function (v) { return (design.delivered_images || []).indexOf(v[0]) >= 0; });
+    const channel = CHANNELS[state.data.delivery_platform] || capital(state.data.delivery_platform) || "chat";
+    return h("div", { className: "orch-design" },
+      h("div", { className: "orch-stack orch-design-summary" },
+        h("div", { className: "orch-approval-label" }, "What changes"),
+        lines.length ? h("ul", { className: "orch-design-changes" }, lines.map(function (line, i) { return h("li", { key: i }, line); }))
+          : h("p", { className: "orch-muted orch-small" }, "This design has no summary of changes; review both images.")),
+      h("div", { className: "orch-design-shots" }, DESIGN_VIEWS.map(function (v) {
+        const image = images[v[0]] || {};
+        return h("figure", { key: v[0], className: "orch-design-shot orch-design-" + v[1].toLowerCase() },
+          h("button", { type: "button", className: "orch-design-frame", disabled: !image.url,
+            "aria-label": "Open the " + v[1].toLowerCase() + " design at full size", onClick: function () { setViewer(v[0]); } },
+          image.url ? h("img", { src: image.url, alt: v[1] + " design" })
+            : h("span", { className: "orch-muted orch-small" }, image.error ? "Image " + image.error : "Loading…")),
+          h("figcaption", null, h("span", null, v[1] + " · " + v[2]),
+            h("button", { type: "button", className: "orch-link", disabled: !image.url, onClick: function () { setViewer(v[0]); } },
+              h(Icon, { name: "maximize", size: 13 }), "Full size")));
+      })),
+      h("div", { className: "orch-design-facts" },
+        h("span", null, h(Icon, { name: "message", size: 13 }), delivered ? "Sent to " + channel : "Not sent to " + channel + " yet"),
+        design.designer_model ? h("span", null, h(Icon, { name: "cpu", size: 13 }), "Designed by " + design.designer_model) : null,
+        h("button", { type: "button", className: "orch-link", onClick: function () {
+          setNotesError(null);
+          saveDesignNotes(props.task, design).catch(function (e) { setNotesError(message(e)); });
+        } }, h(Icon, { name: "file", size: 13 }), "design.md"),
+        notesError ? h("span", { className: "orch-bad" }, "design.md " + notesError) : null),
+      viewer ? h(DesignViewer, { title: props.task + " · UI design v" + design.version, name: props.task + "-ui-v" + design.version,
+        images: images, start: viewer, close: closeViewer }) : null);
+  }
+
   // One decision, explained the way the chat explains it, with the two outcomes as the buttons.
   function ApprovalCard(props) {
     const a = props.approval;
@@ -308,7 +436,8 @@
         .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(null); });
     }
 
-    return h("article", { className: "orch-approval" },
+    const design = a.action === "UI_DESIGN" && a.task;
+    return h("article", { className: cx("orch-approval", design && "orch-approval-design") },
       h("div", { className: "orch-approval-head" },
         h("span", { className: "orch-approval-icon" }, h(Icon, { name: "alert", size: 16 })),
         h("strong", null, "Decision needed"),
@@ -318,15 +447,26 @@
       a.task ? h("div", { className: "orch-approval-task" }, h(TaskLink, { task: a.task, open: props.open }),
         a.task_title ? h("span", null, a.task_title) : null, a.project ? h(Pill, null, a.project) : null)
         : a.project ? h("div", { className: "orch-approval-task" }, h(Pill, null, a.project)) : null,
-      h("p", { className: "orch-approval-question" }, (d && d.headline) || plain.question),
-      d && (d.highlights || []).length ? h("ul", { className: "orch-highlights" },
+      h("p", { className: "orch-approval-question" }, design ? "Review the proposed screens before any code is written." : (d && d.headline) || plain.question),
+      design ? h(DesignReview, { task: a.task, approval: a.id }) : null,
+      d && !design && (d.highlights || []).length ? h("ul", { className: "orch-highlights" },
         d.highlights.map(function (x, i) { return h("li", { key: i }, x); })) : null,
       d ? h(Advice, { recommendation: d.recommendation, yes: plain.yes, no: plain.no }) : null,
       preview && !props.hidePreviewOpen ? h("div", { className: "orch-stack" },
         h("p", { className: "orch-muted orch-small" }, "Test version " + preview.version + " before authorizing this merge. Opening it does not approve anything."),
         h(Button, { disabled: !!busy || !(human && human.available), onClick: openPreview }, "Open test environment"),
         !canApprove ? h("p", { className: "orch-muted orch-small" }, "Open the current test version first. Unavailable or expired versions cannot be approved.") : null) : null,
-      rejecting ? h("div", { className: "orch-reject" },
+      design ? h("div", { className: "orch-stack" },
+        h("label", { className: "orch-reject-label" }, "What should change? Only needed to send it back.",
+          h("textarea", { value: note, rows: 2, maxLength: 1000,
+            placeholder: "For example: show the contracts as a list inside the tenant page",
+            onChange: function (e) { setNote(e.target.value); } })),
+        h("div", { className: "orch-approval-actions" },
+          h(Button, { kind: "good", icon: "check", disabled: !!busy, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : "Approve design"),
+          h(Button, { kind: "bad-outline", icon: "x", disabled: !!busy || !note.trim(), title: note.trim() ? null : "Write what should change first",
+            onClick: function () { decide("REJECT"); } }, busy === "REJECT" ? "Saving…" : "Send back with changes"),
+          props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Open task") : null))
+      : rejecting ? h("div", { className: "orch-reject" },
         h("label", { className: "orch-reject-label" }, "Why? (optional — the agents read it and act on it)",
           h("textarea", { value: note, rows: 3, maxLength: 1000, autoFocus: true,
             placeholder: "For example: each implementation subtask must write its own tests",
