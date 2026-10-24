@@ -222,3 +222,21 @@ def test_a_command_is_judged_blocked_on_its_whole_text_before_it_is_cut_short():
     assert len(event.data["command"]) == 500 and event.data["blocked"] is False
     assert command_event("COMMAND_STARTED", "sudo -u postgres psql").data["blocked"] is True
     assert command_event("COMMAND_STARTED", "ls -la").data["blocked"] is False  # not flagged at all
+
+
+def test_validated_ui_designer_reads_only_its_project(platform):
+    grant, _ = evaluate_grant(request(Role.DEVELOPER, ui_designer=True, project_read=["demo"]),
+                              config(platform), platform, now=NOW)
+    assert grant["capabilities"]["project_read"] == ["demo"]
+    assert grant["capabilities"]["workspace"] == "NONE"
+    assert grant["capabilities"]["git"] == "NONE"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"project_read": ["other"]}, {"workspace": "WRITE"}, {"git": "LOCAL_COMMIT"}, {"role": Role.REVIEWER},
+])
+def test_ui_designer_read_exception_refuses_other_projects_and_writes(platform, overrides):
+    values = {"ui_designer": True, "project_read": ["demo"], **overrides}
+    role = values.pop("role", Role.DEVELOPER)
+    grant, _ = evaluate_grant(request(role, **values), config(platform), platform, now=NOW)
+    assert grant["capabilities"]["project_read"] == []

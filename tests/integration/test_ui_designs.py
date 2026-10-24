@@ -35,6 +35,10 @@ def finish_design(services, agents, task, files=None):
     spec = agents.specs[str(execution['id'])]
     assert spec.get('workspace') is None
     assert spec['grant']['capabilities']['workspace'] == 'NONE'
+    assert spec['grant']['capabilities']['git'] == 'NONE'
+    assert spec['grant']['capabilities']['project_read'] == ['demo']
+    assert len(spec['project_read']) == 1
+    assert spec['project_read'][0]['slug'] == 'demo'
     assert spec['env']['NODE_USE_ENV_PROXY'] == '1'
     extra = {'design/' + name: content for name, content in (files if files is not None else FILES).items()}
     result = {**orch.DONE, 'changed_files': [], 'commits': []}

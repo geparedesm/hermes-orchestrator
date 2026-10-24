@@ -248,6 +248,7 @@ class Executions:
             tests=caps.get("tests", "NONE"),
             artifacts=caps.get("artifacts", "NONE"),
             project_read=[project["slug"]] if caps.get("project_read") else (),
+            ui_designer=bool(ui_design),
             resource_profile=req.resource_profile or config["resources"]["default_profile"],
             timeout_minutes=req.timeout_minutes,
             provider_identity=self.ctx.provider_identity,
