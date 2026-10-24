@@ -1173,8 +1173,10 @@ class Orchestration:
         provider = self._route(uow, task, 'RESEARCH')
         if provider is None:
             raise Conflict("no provider is available for UI design")
-        from .ui_designs import DESIGN_INSTRUCTIONS
+        from .ui_designs import DESIGN_INSTRUCTIONS, LANGUAGE_NAMES
         from .delivery import feature_context
+        from .notify_text import language
+        reviewer_language = LANGUAGE_NAMES[language(self.ctx.platform["platform"].get("notification_language"))]
         previous_feedback = ''
         uow.cur.execute("SELECT feedback FROM ui_designs WHERE task_id = %s AND feedback IS NOT NULL ORDER BY version DESC LIMIT 1",
                         (task['id'],))
@@ -1183,7 +1185,8 @@ class Orchestration:
             previous_feedback = "\n\nHuman feedback or previous failure: " + previous['feedback']
         plan_context = "\n\nCurrent plan assignments:\n" + "\n".join(
             f"{s['title']}: {s['description']}" for s in self._subtasks(uow, task))
-        prompt = DESIGN_INSTRUCTIONS + plan_context + "\n\n" + feature_context(self.ctx, uow, task, self.reviews._request_text(uow, task)) + previous_feedback
+        prompt = (DESIGN_INSTRUCTIONS + f"Write the `## Summary for the reviewer` section in {reviewer_language}.\n"
+                  + plan_context + "\n\n" + feature_context(self.ctx, uow, task, self.reviews._request_text(uow, task)) + previous_feedback)
         self.launch(uow, task, 'UI_DESIGN', {"role": "DEVELOPER", "provider": provider, "prompt": prompt,
                     "capabilities": {"project_read": True, "egress": "STANDARD", "artifacts": "WRITE"},
                     "secrets": ["PEN_CLI_KEY"], "env": {"NODE_USE_ENV_PROXY": "1"}, "lease_epoch": epoch,

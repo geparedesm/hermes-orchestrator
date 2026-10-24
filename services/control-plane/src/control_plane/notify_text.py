@@ -19,14 +19,15 @@ EMOJI = {
 }
 
 # Reply words the chat plugin understands (hermes/plugins/orchestration: SHORT_REPLIES).
-_WORDS = {"en": {"yes": "yes", "no": "no", "see": "see", "retry": "retry", "cancel": "cancel"},
-          "es": {"yes": "si", "no": "no", "see": "ver", "retry": "reintentar", "cancel": "cancelar"}}
+_WORDS = {"en": {"yes": "yes", "no": "no", "see": "see", "retry": "retry", "cancel": "cancel", "design": "design"},
+          "es": {"yes": "si", "no": "no", "see": "ver", "retry": "reintentar", "cancel": "cancelar", "design": "diseño"}}
 
 _TEXT: dict[str, dict[str, str]] = {
     "en": {
         "decide": "{emoji} *I need your decision*",
         "reply": "*Reply with one option:*",
         "see": "see the task's details",
+        "see_design": "see the proposed design again (its changes and both images)",
         "expires": "⏳ Expires in {left}",
         "ready": "{emoji} *{task} is ready to merge*\n“{title}” passed tests, review, and the quality gate. The merge approval comes next.",
         "completed": "{emoji} *{task} completed*\n“{title}” is merged and verified.",
@@ -53,6 +54,7 @@ _TEXT: dict[str, dict[str, str]] = {
         "decide": "{emoji} *Necesito tu decisión*",
         "reply": "*Responde con una opción:*",
         "see": "ver el detalle de la tarea",
+        "see_design": "ver otra vez el diseño propuesto (sus cambios y las dos imágenes)",
         "expires": "⏳ Caduca en {left}",
         "ready": "{emoji} *{task} lista para unir*\n«{title}» pasó los tests, la revisión y el control de calidad. Ahora te pido aprobar el merge.",
         "completed": "{emoji} *{task} completada*\n«{title}» ya está unida y verificada.",
@@ -315,6 +317,8 @@ def _approval(ctx: Context, lang: str, now: datetime) -> str:
              f"✅ *{words['yes']} {ref}*: {yes.format(**fields)}", f"❌ *{words['no']} {ref}*: {no.format(**fields)}"]
     if ctx.task:
         lines.append(f"🔎 *{words['see']} {ctx.task}*: {text['see']}")
+        if approval.get("action") == "UI_DESIGN":
+            lines.append(f"🎨 *{words['design']} {ctx.task}*: {text['see_design']}")
     expires = approval.get("expires_at")
     if isinstance(expires, datetime):
         lines.append(text["expires"].format(left=_left(expires - now, text)))

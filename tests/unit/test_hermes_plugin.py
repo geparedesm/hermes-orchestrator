@@ -172,7 +172,8 @@ def test_expired_approvals_are_requested_again_by_a_person():
 def test_short_replies_become_orch_commands():
     cases = {"si 12": "/orch approve 12", "Sí 12": "/orch approve 12", "*si 12*": "/orch approve 12", "yes #7": "/orch approve 7",
              "no 12": "/orch reject 12", "no 12 falta el test": "/orch reject 12 'falta el test'", "ver t-15": "/orch status T-15",
-             "reintentar T-15": "/orch retry T-15", "cancelar t-15": "/orch cancel T-15", "renovar 3": "/orch renew 3"}
+             "reintentar T-15": "/orch retry T-15", "cancelar t-15": "/orch cancel T-15", "renovar 3": "/orch renew 3",
+             "diseño t-10": "/orch design T-10", "design T-10": "/orch design T-10"}
     for text, command in cases.items():
         assert plugin.short_reply_command(text) == command, text
     for text in ("hola", "si", "si doce", "/orch approve 12", "si 12 y algo más", "ver 15"):

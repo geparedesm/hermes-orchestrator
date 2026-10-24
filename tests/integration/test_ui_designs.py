@@ -16,7 +16,7 @@ task = orch.task
 pytestmark = [pytest.mark.integration, pytest.mark.orchestration]
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=')
 FILES = {'desktop.png': PNG, 'mobile.png': PNG, 'design.pen': b'opaque encrypted design',
-         'design.md': b'# Proposal\nDesktop and mobile; colors and spacing.\n'}
+         'design.md': b'# Proposal\n\n## Summary for the reviewer\n- The list shows a document column\n\n## Colors\nPurple.\n'}
 
 
 def plan(services, agents, task, *, with_key=True):
@@ -80,6 +80,11 @@ def test_design_images_required_then_explicit_human_approval_releases_developer(
     for name, expected in FILES.items():
         response = api.get(f"/v1/tasks/{task}/ui-design/{design['id']}/{name}")
         assert response.status_code == 200 and response.content == expected
+    status = api.get(f'/v1/tasks/{task}/ui-design').json()['design']
+    assert status['summary'] == '- The list shows a document column'
+    assert status['current'] is True and status['number'] is not None
+    deliveries = api.get('/v1/ui-designs/deliveries', token=PLUGIN_TOKEN, principal='hermes:visual-delivery').json()['designs']
+    assert [d['summary'] for d in deliveries] == ['- The list shows a document column']
     approval = str(design['approval_id'])
     assert api.post(f'/v1/approvals/{approval}/decision', {'decision': 'APPROVE'}).status_code == 409
     receipt(api, task, design)

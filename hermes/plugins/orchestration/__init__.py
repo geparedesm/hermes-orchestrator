@@ -30,6 +30,7 @@ HELP = """/orch commands:
   approvals                      pending approvals
   approve <id|number> | reject <id|number> [note]   (or reply "yes 12" / "no 12")
   renew <id>                     request an expired approval again
+  design <T-n>                   send the pending UI design again (its changes and both images)
   answer <number> 1a 2b 3: text  answer planning questions (or: answer <number> ok, for the recommended answers;
                                  reply "r 21 1a 2b" in chat)
   pause|resume|cancel|retry <T-n>
@@ -53,6 +54,7 @@ SHORT_REPLIES = [
     (re.compile(rf"^(?:r|resp|respuesta|answer)\s+{_NUMBER}\s+(.{{1,1500}})$", re.S), "/orch answer {0} {1}"),
     (re.compile(rf"^(?:ver|see|estado|status)\s+{_TASK}$"), "/orch status {0}"),
     (re.compile(rf"^(?:reintentar|retry)\s+{_TASK}$"), "/orch retry {0}"),
+    (re.compile(rf"^(?:diseno|design)\s+{_TASK}$"), "/orch design {0}"),
     (re.compile(rf"^(?:cancelar|cancel)\s+{_TASK}$"), "/orch cancel {0}"),
 ]
 
@@ -150,6 +152,17 @@ def run_verb(api: TaskApi, words: list[str], *, human: bool) -> str:
         if _LANG == "es":
             return f"🔁 Pedida de nuevo: {approval.get('summary') or approval['action']}\nResponde *si {ref}* para aprobarla o *no {ref}* para rechazarla."
         return f"🔁 Requested again: {approval.get('summary') or approval['action']}\nReply *yes {ref}* to approve or *no {ref}* to reject."
+    if verb == "design":
+        _need(args, 1, "design <T-n>")
+        from .visual_delivery import request_resend
+        key = args[0].upper()
+        if not request_resend(key):
+            if _LANG == "es":
+                return "El envío de imágenes de diseño no está activado (HO_UI_DESIGN_DELIVERY)."
+            return "UI design image delivery is not enabled (HO_UI_DESIGN_DELIVERY)."
+        if _LANG == "es":
+            return f"🎨 Enviando de nuevo el diseño de {key}: los cambios y las dos imágenes."
+        return f"🎨 Sending the {key} design again: its changes and both images."
     if verb == "answer":
         _need(args, 2, "answer <number> 1a 2b 3: text   (or: answer <number> ok)")
         recommended, answers = parse_answers(" ".join(args[1:]))
