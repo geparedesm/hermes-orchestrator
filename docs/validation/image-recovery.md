@@ -34,10 +34,11 @@ Tests use no real provider credentials. The Docker test deletes only its unique 
 
 ## Activation
 
-Service changes are prepared for the `auto-image-recovery-20261023` image tag. Activation requires
-an action-bound human UPDATE approval, as with other platform updates. Until activation the live
-services still use their previous behavior. Rebuilding the original approved execution images is an
-operational repair; it does not by itself activate the new service code.
+Activated on 2026-10-22. UPDATE approval #58 (`ui-design-read-20261020` → `auto-image-recovery-20261023`)
+was requested at 19:21 UTC, approved by `host-cli:operator` and consumed at 20:36 UTC. Control plane,
+Agent Manager and Git Service restarted on the `auto-image-recovery-20261023` images at 20:39 UTC and
+reported healthy. The code in those images is the code merged in PR #80. Rebuilding the original approved
+execution images was a separate operational repair; it did not by itself activate the new service code.
 
 
 ## Operational repair and prepared activation
@@ -52,5 +53,5 @@ The prepared release reuses the unchanged, already deployed Git Service image. A
 service images through the approved UPDATE start/backup/check/finish protocol and
 `docker compose up -d --no-build --wait` with the target version configured. Keep the previous
 version and backup for rollback if checks fail. Rebuilding workers again during activation is unnecessary:
-the exact pins and recovery archive have already been generated and verified. No UPDATE was consumed
-or service activated as part of this preparation.
+the exact pins and recovery archive have already been generated and verified. This preparation itself
+consumed no UPDATE; the activation that followed is recorded under Activation above.
