@@ -1,0 +1,3 @@
+# Codex in this repository (reviews from Claude Code's /codex:* commands and direct use) uses the model
+# Hermes's Codex agents use, so a local review matches the platform's cross-review.
+model = "gpt-6.1-sol"
