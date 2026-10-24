@@ -27,6 +27,11 @@ class FakeAgentManager:
         self.volumes: set[tuple[str, str]] = {("claude", "default"), ("codex", "default")}
         self.networks: list[dict[str, Any]] = []  # managed networks left behind (orphan tests)
 
+    def ensure_image(self, name: str) -> dict[str, Any]:
+        if getattr(self, "image_error", None):
+            raise self.image_error
+        return {"image": name, "present": True}
+
     def create(self, spec: dict[str, Any]) -> dict[str, Any]:
         if self.fail_with:
             raise self.fail_with

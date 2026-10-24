@@ -22,7 +22,7 @@ from ho_core.bodylimit import BodyLimit
 from pydantic import BaseModel, Field
 
 from .docker_ops import CapacityExceeded, CredentialMissing, DockerOps, EnvironmentFailed
-from .images import ImageNotAllowed
+from .images import ImageNotAllowed, ImageUnavailable
 from .plan import Rejected, build_plan
 
 log = logging.getLogger(__name__)
@@ -79,6 +79,10 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
     @app.exception_handler(ImageNotAllowed)
     async def image_not_allowed(_: Request, exc: ImageNotAllowed) -> JSONResponse:
         return error(403, "image_not_allowed", str(exc))
+
+    @app.exception_handler(ImageUnavailable)
+    async def image_unavailable(_: Request, exc: ImageUnavailable) -> JSONResponse:
+        return error(409, "image_unavailable", str(exc))
 
     @app.exception_handler(CapacityExceeded)
     async def capacity(_: Request, exc: CapacityExceeded) -> JSONResponse:
@@ -162,6 +166,11 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
     @app.get("/v1/images", dependencies=[Depends(authorized)])
     def images_view() -> dict[str, Any]:
         return ops.images()
+
+    @app.post("/v1/images/{name}/ensure", dependencies=[Depends(authorized)])
+    def ensure_image(name: str) -> dict[str, Any]:
+        image = ops.ensure_image(name)
+        return {"image": name, "id": image.id, "present": True}
 
     @app.get("/v1/managed", dependencies=[Depends(authorized)])
     def managed() -> dict[str, Any]:

@@ -61,3 +61,26 @@ docker compose exec -T control-plane ho recovery status      # health, open inte
 docker compose exec -T control-plane ho recovery run         # reconcile now
 docker compose exec -T control-plane ho task checkpoints T-n
 ```
+
+
+## Missing pinned worker images
+
+`make images` now atomically saves a deduplicated, gzip-compressed local recovery archive at
+`config/image-cache/execution-images.tar` before publishing the image lock. Docker detects the compression automatically. Keep enough host disk
+space for both Docker images and this archive (and a temporary replacement during rebuilding).
+The archive contains built images, never provider credential volumes, and is excluded from Git
+and Docker build contexts. Critical-state backups exclude this regenerable archive. Agent Manager reads it through its existing read-only config mount.
+
+Before spending a launch, Control Plane asks Agent Manager to verify the exact pinned image ID.
+Missing allowed images trigger a serialized background Docker import; pending work
+resumes automatically when its image is restored. No mutable tag, registry fallback, or unapproved
+worker build is substituted for a pin. A failed archive is not repeatedly imported. An image absent from the archive does not prevent other images
+from being recovered again after a later deletion. If the archive
+is missing, corrupt, or does not contain the pinned ID, the waiting reason tells the operator to run
+`make images`. Automatic recovery requires a successfully built local archive first.
+
+If an image disappears between preflight and dispatch, the same execution waits up to 30 minutes
+without spending dispatch retries. Expiry reports an infrastructure failure with the actual reason.
+An orchestrator refused before startup blocks with that cause rather than cycling providers.
+Launches definitively refused while still REQUESTED refund their launch charge and unused reservations.
+Ambiguous Docker communication failures keep their launch charge because a remote start may have succeeded.

@@ -35,7 +35,7 @@ from .agentmgr import AgentManagerError
 from .auth import Principal
 from .context import Context, UnitOfWork
 from .db import Row, jsonb
-from .errors import BadRequest, Conflict, Forbidden, NotFound, UpstreamError
+from .errors import BadRequest, Conflict, Forbidden, NotFound, UpstreamError, WorkerImageRejected
 from .events import record_event
 from .tasks import Tasks
 
@@ -46,9 +46,10 @@ TERMINAL = ("SUCCEEDED", "FAILED", "CANCELLED", "LOST")
 AGENT_ROLES = {Role.ORCHESTRATOR, Role.DEVELOPER, Role.REVIEWER}
 MAX_DISPATCH_ATTEMPTS = 5
 CAPACITY_WAIT = timedelta(minutes=30)  # an execution waits this long for Docker memory before it fails as CAPACITY
+_IMAGE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _WORKSPACE = re.compile(r"^\.hermes/worktrees/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _FAILURE_BY_CODE = {"capacity_exceeded": "CAPACITY", "auth_required": "AUTH", "rejected": "POLICY",
-                    "image_not_allowed": "POLICY", "not_found": "UNKNOWN", "docker_error": "TRANSIENT"}
+                    "image_unavailable": "TRANSIENT", "image_not_allowed": "POLICY", "not_found": "UNKNOWN", "docker_error": "TRANSIENT"}
 
 
 class AttachmentUnavailable(Exception):
@@ -218,6 +219,19 @@ class Executions:
         toolchain = image_suffix((config.get("toolchain") or {}).get("profiles") or ["generic"])
         image = req.image or (f"{provider}-{toolchain}" if provider else f"runner-{toolchain}")
 
+        if not _IMAGE.fullmatch(image):
+            raise BadRequest("image must be a symbolic platform image name")
+        # Preflight before reserving a launch: missing worker images are an infrastructure wait.
+        # Agent Manager restores exact pinned IDs from its operator-built local archive.
+        try:
+            self.agents.ensure_image(image)
+            self.agents.ensure_image("agent-base")
+            if req.capabilities.get("egress", "NONE") != "NONE":
+                self.agents.ensure_image("egress-proxy")
+        except AgentManagerError as exc:
+            if exc.code == "image_not_allowed":
+                raise WorkerImageRejected(exc.message) from exc
+            raise UpstreamError(exc.message) from exc
         self._check_capacity(uow, config, role, replacing=replacing)
         epoch = self._lease_epoch(uow, task, req.lease_epoch)
         reservation, req.timeout_minutes = budgets.reserve(uow, task, agent=bool(req.prompt), retry=bool(req.purpose.get("retry")),
@@ -523,25 +537,31 @@ class Executions:
                 row = self.get(uow, execution_id, lock=True)
                 if row["state"] != "REQUESTED":
                     return
-                if exc.code == "capacity_exceeded":
+                if exc.code in ("capacity_exceeded", "image_unavailable"):
                     # Not enough Docker memory right now (T-3): wait for running work to free it, without spending a
                     # dispatch attempt; sync dispatches it again. Only a wait this long (counted from the first time
                     # it did not fit, not from its creation) means it will not fit.
-                    since = (row["spec"] or {}).get("capacity_wait_since")
+                    wait_key = "image_wait_since" if exc.code == "image_unavailable" else "capacity_wait_since"
+                    since = (row["spec"] or {}).get(wait_key)
                     now = datetime.now(timezone.utc)
                     if since is None or now - datetime.fromisoformat(since) < CAPACITY_WAIT:
                         uow.cur.execute(
                             "UPDATE executions SET dispatch_attempts = greatest(dispatch_attempts - 1, 0), "
-                            "spec = jsonb_set(spec, '{capacity_wait_since}', to_jsonb(coalesce(spec->>'capacity_wait_since', %s))) "
-                            "WHERE id = %s", (now.isoformat(), row["id"]))
-                        log.info("dispatch of %s waits for capacity: %s", execution_id, exc)
+                            "spec = jsonb_set(spec, %s, to_jsonb(coalesce(spec->>%s, %s))) "
+                            "WHERE id = %s", ([wait_key], wait_key, now.isoformat(), row["id"]))
+                        if since is None:
+                            record_event(uow.cur, "LAUNCH_WAITING", actor="control-plane", project_id=row["project_id"],
+                                         task_id=row["task_id"], summary=exc.message[:300], pending=uow.events)
+                        log.info("dispatch of %s waits for infrastructure: %s", execution_id, exc)
                         return
                 self._intent(uow, row["id"], "SENT" if exc.retryable else "FAILED", str(exc))
                 if exc.retryable and attempts < MAX_DISPATCH_ATTEMPTS:
                     log.warning("dispatch of %s will be retried: %s", execution_id, exc)
                     return
                 failure = _FAILURE_BY_CODE.get(exc.code, "UNKNOWN")
-                self._finish(uow, row, "FAILED", failure_class=failure, reason=exc.message)
+                self._finish(uow, row, "FAILED", failure_class=failure, reason=exc.message,
+                             launch_refused=exc.code in ("image_unavailable", "capacity_exceeded", "rejected",
+                                                         "image_not_allowed", "auth_required"))
                 if failure == "AUTH":
                     self._auth_required(uow, row, exc.message)
             return
@@ -902,17 +922,20 @@ class Executions:
         return ids
 
     def _finish(self, uow: UnitOfWork, row: Row, state: str, *, failure_class: str | None, reason: str | None,
-                exit_code: int | None = None, artifacts: list[UUID] | None = None) -> None:
+                exit_code: int | None = None, artifacts: list[UUID] | None = None, launch_refused: bool = False) -> None:
         uow.cur.execute("SELECT * FROM tasks WHERE id = %s", (row["task_id"],))
         task = uow.cur.fetchone()
         reservation = row.get("budget_reservation")
-        if reservation and task is not None:
+        if reservation is not None and task is not None:
             uow.cur.execute("SELECT units FROM usage_records WHERE execution_id = %s", (row["id"],))
             usage = uow.cur.fetchone()
             if usage:
                 budgets.settle(uow, task, reservation, usage_units=budgets.usage_units(usage["units"]), lost=False)
             elif row["state"] == "REQUESTED":
-                budgets.release(uow, task, reservation)  # never started
+                # Communication failures may hide a successful remote start: only confirmed refusals refund a launch.
+                attempts = int(row.get("dispatch_attempts") or 0)
+                refused = attempts == 0 or (launch_refused and attempts <= 1)
+                budgets.release(uow, task, reservation, refund_launch=refused)
             else:
                 budgets.settle(uow, task, reservation, usage_units=None, lost=True)
             uow.cur.execute("UPDATE executions SET budget_reservation = NULL WHERE id = %s", (row["id"],))

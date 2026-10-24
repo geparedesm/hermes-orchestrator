@@ -43,7 +43,7 @@ if [[ "${HO_BACKUP_ARTIFACTS:-1}" == "1" ]]; then
 fi
 
 mkdir -p "$OUT/config"
-cp -R config/. "$OUT/config/"
+python3 scripts/backup_config.py config "$OUT/config"
 if [[ -f "$ENV_FILE" ]]; then
   python3 scripts/backup_settings.py "$ENV_FILE" > "$OUT/env.settings"
 fi

@@ -93,6 +93,7 @@ class DockerOps:
         self.client = client or docker.from_env(timeout=60)
         self.secrets = secrets or SecretStore(None)
         self._lock = threading.Lock()  # serialize capacity checks and creation
+        self.image_recovery = images.ImageRecovery(self.client, config_dir)
 
     # ----------------------------------------------------------------- helpers
 
@@ -171,6 +172,18 @@ class DockerOps:
 
     # ------------------------------------------------------------------ create
 
+    def ensure_image(self, name: str):
+        image_id = images.resolve(self.config_dir, name)
+        try:
+            image = self.client.images.get(image_id)
+        except NotFound as exc:
+            reason = self.image_recovery.request(image_id)
+            raise images.ImageUnavailable(f"pinned image {name} ({image_id[:19]}) is absent; {reason}") from exc
+        if not image.labels.get("org.hermes-orchestrator.role"):
+            raise images.ImageNotAllowed(f"image {name} is not a platform image")
+        self.image_recovery.confirmed(image_id)
+        return image
+
     def create(self, plan: ContainerPlan) -> ExecutionStatus:
         existing = self._find(plan.worker_name)
         if existing is not None:
@@ -178,13 +191,8 @@ class DockerOps:
                 raise Rejected(f"container name {plan.worker_name} belongs to another execution")
             return self.status(plan.execution)  # idempotent retry
 
-        image_id = images.resolve(self.config_dir, plan.image)
-        try:
-            image = self.client.images.get(image_id)
-        except NotFound as exc:
-            raise images.ImageNotAllowed(f"pinned image {plan.image} ({image_id[:19]}) is not present locally") from exc
-        if not image.labels.get("org.hermes-orchestrator.role"):
-            raise images.ImageNotAllowed(f"image {plan.image} is not a platform image")
+        image = self.ensure_image(plan.image)
+        image_id = image.id
         if plan.credential_volume:
             try:
                 volume = self.client.volumes.get(plan.credential_volume)
@@ -358,7 +366,7 @@ class DockerOps:
         return {"removed": removed}
 
     def _helper_image(self) -> str:
-        return images.resolve(self.config_dir, "agent-base")
+        return self.ensure_image("agent-base").id
 
     def _ensure_session_volume(self, plan: ContainerPlan) -> None:
         """Per-task, per-provider session store for resume; removed with the task environment."""
@@ -392,7 +400,7 @@ class DockerOps:
             raise RuntimeError("could not release the execution after delivering secrets")
 
     def _start_proxy(self, plan: ContainerPlan) -> Any:
-        image_id = images.resolve(self.config_dir, "egress-proxy")
+        image_id = self.ensure_image("egress-proxy").id
         proxy = self.client.containers.create(
             image_id,
             name=plan.proxy_name,

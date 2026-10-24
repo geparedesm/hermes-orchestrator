@@ -89,6 +89,8 @@ def test_invalid_requests(api, agents, task):
     assert run(api, task, workspace="../other").status_code == 400
     assert run(api, task, capabilities={"docker": "WRITE"}).status_code == 400
     assert run(api, task, capabilities={"egress": "EVERYTHING"}).status_code == 400
+    assert run(api, task, image="../executions").status_code == 422
+    assert run(api, task, image="repo/image:latest").status_code == 422
 
 
 def test_agent_worker_limit(api, agents, task):
@@ -176,3 +178,78 @@ def test_replace_stops_the_old_worker_and_starts_a_fresh_one(api, services, agen
     services.scheduler.run_once()
     assert api.get(f"/v1/executions/{old}").json()["state"] == "CANCELLED"
     assert "WORKER_REPLACED" in events(api, task)
+
+
+@pytest.mark.parametrize("code", ["image_unavailable", "image_not_allowed"])
+def test_image_preflight_spends_no_launch(api, services, agents, task, code):
+    agents.image_error = AgentManagerError(409, code, "pinned worker image is absent")
+    response = run(api, task)
+    assert response.status_code == (400 if code == "image_not_allowed" else 502)
+    with services.ctx.db.transaction() as cur:
+        cur.execute("SELECT consumed FROM budgets WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", (task,))
+        assert cur.fetchone()["consumed"].get("agent_launches", 0) == 0
+    assert not agents.specs
+    agents.image_error = None
+    assert run(api, task).status_code == 201
+
+
+def test_missing_image_after_preflight_waits_and_resumes_same_execution(api, services, agents, task):
+    agents.fail_with = AgentManagerError(409, "image_unavailable", "restoring pinned image")
+    execution = run(api, task).json()["id"]
+    for _ in range(3):
+        services.executions.dispatch(execution)
+    with services.ctx.db.transaction() as cur:
+        cur.execute("SELECT state, dispatch_attempts, spec FROM executions WHERE id = %s", (execution,))
+        row = cur.fetchone()
+    assert row["state"] == "REQUESTED" and row["dispatch_attempts"] == 0
+    assert row["spec"]["image_wait_since"]
+    assert events(api, task).count("LAUNCH_WAITING") == 1
+    agents.fail_with = None
+    services.executions.dispatch(execution)
+    assert api.get(f"/v1/executions/{execution}").json()["state"] == "RUNNING"
+
+
+def test_refused_launch_refunds_budget_once(api, services, agents, task):
+    agents.fail_with = AgentManagerError(403, "rejected", "worker launch refused")
+    execution = run(api, task).json()["id"]
+    assert api.get(f"/v1/executions/{execution}").json()["state"] == "FAILED"
+    services.executions.dispatch(execution)
+    services.scheduler.run_once()
+    with services.ctx.db.transaction() as cur:
+        cur.execute("SELECT consumed FROM budgets WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", (task,))
+        assert cur.fetchone()["consumed"].get("agent_launches", 0) == 0
+
+
+def test_expired_image_recovery_refunds_but_ambiguous_docker_failure_does_not(api, services, agents, task):
+    agents.fail_with = AgentManagerError(409, "image_unavailable", "pinned worker image absent")
+    execution = run(api, task).json()["id"]
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE executions SET spec = jsonb_set(spec, '{image_wait_since}', to_jsonb((now() - interval '31 minutes')::text)) WHERE id = %s", (execution,))
+    services.executions.dispatch(execution)
+    view = api.get(f"/v1/executions/{execution}").json()
+    assert view["state"] == "FAILED" and view["failure_class"] == "TRANSIENT"
+    with services.ctx.db.transaction() as cur:
+        cur.execute("SELECT consumed FROM budgets WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", (task,))
+        assert cur.fetchone()["consumed"]["agent_launches"] == 0
+
+    # The same wait followed by a Docker server error is ambiguous: a remote worker may have been created.
+    execution = run(api, task).json()["id"]
+    agents.fail_with = AgentManagerError(500, "docker_error", "connection lost while creating worker")
+    for _ in range(5):
+        services.executions.dispatch(execution)
+    assert api.get(f"/v1/executions/{execution}").json()["state"] == "FAILED"
+    with services.ctx.db.transaction() as cur:
+        cur.execute("SELECT consumed FROM budgets WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", (task,))
+        assert cur.fetchone()["consumed"]["agent_launches"] == 1
+
+
+
+def test_policy_refusal_after_ambiguous_request_keeps_launch_charge(api, services, agents, task):
+    agents.fail_with = AgentManagerError(0, "unavailable", "response lost during remote create")
+    execution = run(api, task).json()["id"]
+    agents.fail_with = AgentManagerError(403, "rejected", "grant expired before repeated create")
+    services.executions.dispatch(execution)
+    assert api.get(f"/v1/executions/{execution}").json()["state"] == "FAILED"
+    with services.ctx.db.transaction() as cur:
+        cur.execute("SELECT consumed FROM budgets WHERE task_id = (SELECT id FROM tasks WHERE key = %s)", (task,))
+        assert cur.fetchone()["consumed"]["agent_launches"] == 1

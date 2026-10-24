@@ -47,3 +47,9 @@ class ValidationFailed(ApiError):
 
 class UpstreamError(ApiError):
     status, code = 502, "upstream_error"
+
+
+class WorkerImageRejected(BadRequest):
+    """A permanent image-policy rejection, distinct from recoverable image absence."""
+
+    code = "image_not_allowed"
