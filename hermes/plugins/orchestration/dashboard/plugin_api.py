@@ -284,6 +284,14 @@ def ui_design_file(key: str, design_id: UUID, name: str) -> Response:
         "Content-Disposition": f'{"inline" if name.endswith(".png") else "attachment"}; filename="{name}"'})
 
 
+@router.post("/tasks/{key}/ui-design/{design_id}/delivered/{name}")
+def ui_design_image_delivered(key: str, design_id: UUID, name: str) -> Any:
+    # The authenticated page reports each image only after fetching its validated bytes.
+    if not re.fullmatch(r"T-[0-9]+", key) or name not in ("desktop.png", "mobile.png"):
+        raise HTTPException(status_code=404, detail="unknown design image")
+    return _call(_api().call, "POST", f"/v1/tasks/{key}/ui-design/{design_id}/delivered/{name}", {})
+
+
 @router.post("/tasks/{key}/manifest")
 def generate_manifest(key: str) -> Any:
     return _call(_api().generate_manifest, key)

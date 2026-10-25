@@ -73,3 +73,8 @@ HO_UI_DESIGN_DELIVER_CHAT_ID=<explicitly-authorized-chat-id>
 The plugin never inherits a general home/notification destination and never accepts a destination from a task or model. With missing or false activation, it registers no sender. With activation but a missing platform/chat ID, it also registers no sender. Images are downloaded over the internal authenticated API, checked against the package hash and sent with the adapter's native image method; a failed upload is retried without recording a receipt. This helper cannot approve designs. Disabling the flag stops delivery on the next poll.
 
 The designer enables `NODE_USE_ENV_PROXY=1` so pen.dev and its font downloads use the mandatory worker proxy. Native `Export` creates a directory with `<frame-id>.png`; the designer copies each frame into the exact desktop/mobile package filenames and checks regular files before reporting success.
+
+Dashboard image previews acknowledge each successfully fetched desktop/mobile export through a same-origin
+POST. Viewing the proposal therefore satisfies the delivery prerequisite used by the approval handler,
+just as native chat image delivery does. Receipts do not approve a design, and a stale design cannot
+receive a receipt. Failed downloads do not record delivery.
