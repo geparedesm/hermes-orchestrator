@@ -632,7 +632,7 @@ class Orchestration:
         design = self.ui_designs.current(uow, task)
         if design:
             lines.insert(0, f"UI design v{design['version']}: {design['state']}; "
-                         f"current requirements/plan: {bool(self.ui_designs.matches(design, task))}. "
+                         f"current requirements: {bool(self.ui_designs.matches(design, task))}. "
                          + (f"Feedback: {design['feedback']}" if design.get('feedback') else ''))
         return "\n".join(lines)[:20000]
 

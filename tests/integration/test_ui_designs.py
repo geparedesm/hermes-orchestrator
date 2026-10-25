@@ -171,7 +171,7 @@ def test_modified_export_cannot_be_approved(api, services, agents, task):
     assert not orch.q(services, 'SELECT id FROM workspaces')
 
 
-def test_new_plan_requires_a_new_visual_approval(api, services, agents, task):
+def test_new_plan_keeps_the_approved_design(api, services, agents, task):
     plan(services, agents, task)
     design = finish_design(services, agents, task)
     receipt(api, task, design)
@@ -180,11 +180,11 @@ def test_new_plan_requires_a_new_visual_approval(api, services, agents, task):
     orch.step(services, agents, task,
               {'type': 'SET_PLAN', 'subtasks': [orch.plan_item('page', title='Responsive updated profile', files=['views/profile.xml'])]},
               {'type': 'REQUEST_EXECUTION', 'subtask': 'page'})
-    newer = orch.q(services, 'SELECT * FROM ui_designs ORDER BY version DESC LIMIT 1')[0]
-    assert newer['state'] == 'PREPARING' and newer['version'] == design['version'] + 1
-    [execution] = orch.active(services, task, 'DEVELOPER')
-    assert execution['spec'].get('workspace') is None
-    assert execution['spec']['design_package_id'] == str(design['id'])
+    [current] = orch.q(services, 'SELECT * FROM ui_designs ORDER BY version DESC LIMIT 1')
+    assert current['id'] == design['id'] and current['state'] == 'APPROVED'
+    assert orch.state(api, task) != 'APPROVAL_REQUIRED'
+    [developer] = orch.active(services, task, 'DEVELOPER')
+    assert developer['spec']['ui_design_id'] == str(design['id'])
 
 
 def test_expired_visual_approval_renews_the_same_package(api, services, agents, task):

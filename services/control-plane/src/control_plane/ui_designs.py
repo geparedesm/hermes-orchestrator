@@ -100,8 +100,10 @@ class UIDesigns:
 
     @staticmethod
     def matches(design, task):
+        # The design follows the requirements, not the plan: a re-plan to fix review or Quality Gate findings keeps the
+        # approved images (a new design each time moved the target the gate compares against, and asked again).
         return design and design['requirements_version'] == (task['current_requirements_version'] or 0) \
-            and design['plan_version'] == (task['current_plan_version'] or 0) and design['config_id'] == task['config_id']
+            and design['config_id'] == task['config_id']
 
     def required(self, uow, task, text='', files=()):
         if not task.get('ui_design_required'):
