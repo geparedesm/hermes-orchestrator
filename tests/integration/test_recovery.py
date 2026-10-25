@@ -158,6 +158,21 @@ def test_repeated_agent_manager_failures_degrade_and_hold_dispatch(api, services
     assert types.index("PLATFORM_DEGRADED") < types.index("PLATFORM_RECOVERED")
 
 
+def test_a_nearly_full_disk_degrades_the_platform_and_says_so(api, services, monkeypatch):
+    from control_plane import recovery
+    gb = 2**30
+    monkeypatch.setattr(recovery.shutil, "disk_usage", lambda path: shutil._ntuple_diskusage(100 * gb, 97 * gb, 3 * gb))
+    for _ in range(DEGRADED_AFTER):
+        services.recovery.health.check()
+    disk = api.get("/v1/recovery").json()["health"]["components"]["disk"]
+    assert disk["state"] == "DEGRADED"
+    assert disk["last_error"].startswith("disk 97% full (3 GB free)")
+    assert q(services, "SELECT 1 FROM events WHERE type = 'PLATFORM_DEGRADED' AND summary LIKE %s", "disk %")
+    monkeypatch.setattr(recovery.shutil, "disk_usage", lambda path: shutil._ntuple_diskusage(100 * gb, 40 * gb, 60 * gb))
+    services.recovery.health.check()
+    assert api.get("/v1/recovery").json()["health"]["components"]["disk"]["state"] == "HEALTHY"
+
+
 def test_backoff_schedule():
     assert [backoff_seconds(n) for n in (1, 2, 3, 4)] == [10, 20, 40, 80]
     assert backoff_seconds(20) == 900

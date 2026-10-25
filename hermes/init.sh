@@ -36,5 +36,26 @@ hermes config set dashboard.basic_auth.password "$(secret ho_hermes_dashboard_pa
 # may be derivable from this value.
 hermes config set dashboard.basic_auth.secret "$(secret ho_hermes_dashboard_session_secret)" >/dev/null
 
+# WhatsApp session guard: a full disk once left creds.json empty, and WhatsApp stayed down until it was restored by
+# hand (2026-10-24). Keep the last valid copy, and put it back when the current file is empty or not valid JSON.
+python3 - <<'PY'
+import json, os, shutil, time
+session = "/opt/data/platforms/whatsapp/session/creds.json"
+good = "/opt/data/platforms/whatsapp/creds.json.good"
+def valid(path):
+    try:
+        with open(path) as f:
+            return bool(json.load(f).get("me"))
+    except (OSError, ValueError, AttributeError):
+        return False
+if valid(session):
+    shutil.copy2(session, good + ".tmp")
+    os.replace(good + ".tmp", good)
+elif os.path.exists(session) and valid(good):
+    os.replace(session, f"{os.path.dirname(good)}/creds.json.broken-{time.strftime('%Y%m%dT%H%M%S')}")
+    shutil.copy2(good, session)
+    print("hermes-init: WhatsApp creds.json was empty or invalid; restored the last valid copy")
+PY
+
 chown -R 10000:10000 /opt/data 2>/dev/null || true
 echo "hermes-init: orchestration plugin enabled"
