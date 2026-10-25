@@ -68,6 +68,8 @@ If the request names an existing .pen file that is absent from the tracked proje
 return BLOCKED and ask for that file as an attachment or a tracked project file; never silently replace its design.
 Use `ho-pen` instead of `pen`: it loads the granted PEN_CLI_KEY from the in-memory secret file when needed.
 Create or update the design with execute() tool calls; save() before exit(). Respect the project's visual style.
+Draw with the components of the project's own UI framework (for example Odoo's standard form, list and kanban
+views, buttons and smart buttons), so the implementation can match the images without custom widgets.
 Write ONLY these deliverables under /output/design/:
 - design.pen: the saved pen.dev document, containing both desktop and mobile frames.
 - desktop.png and mobile.png: actual PNG exports of the respective proposed frames, made by pen.dev.

@@ -299,9 +299,15 @@ class Executions:
                 names = [a["name"].lower() for a in attached]
                 if len(set(names)) != len(names):
                     raise Conflict("task attachment names conflict with the reserved ui- design package")
+                # Structure and behavior, not pixels: reviewers cannot render the UI, and demanding an exact match with a
+                # mockup kept T-10 failing the Quality Gate on differences nobody could verify or the framework imposes.
                 req.prompt += ("\n\nFollow the approved pen.dev UI design in ui-desktop.png, ui-mobile.png and ui-design.md "
                                "under /run/ho-input/attachments. Do not read the encrypted ui-design.pen as text. "
-                               "Reviewers must compare the implemented UI to both approved images and request changes for deviations.")
+                               "The design fixes the screens' structure: sections, fields and their order, labels, actions, "
+                               "states and behavior. Build it with the framework's standard views and widgets; their native "
+                               "look (spacing, fonts, icons, built-in buttons) is not a deviation. Reviewers compare that "
+                               "structure with both approved images and ui-design.md, and request changes only for "
+                               "structural or behavioral deviations.")
         if req.prompt:
             assert provider is not None
             caps_granted = grant["capabilities"]
