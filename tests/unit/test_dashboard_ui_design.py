@@ -25,6 +25,10 @@ def dashboard(monkeypatch):
             calls.append(("status", key))
             return {"required": True, "design": {"id": DESIGN, "version": 1, "summary": "- New filters"}}
 
+        def call(self, method, path, body):
+            calls.append((method, path, body))
+            return {"delivered": path.rsplit("/", 1)[-1]}
+
         def ui_design_file(self, key, design_id, name):
             calls.append(("file", key, design_id, name))
             return (b"not a png" if key == "T-99" else PNG if name.endswith(".png") else b"# Notes"), {}
@@ -70,3 +74,58 @@ def test_only_the_two_images_and_the_notes_are_served(dashboard, path):
 def test_a_file_that_is_not_a_png_is_not_served_as_an_image(dashboard):
     client, _ = dashboard
     assert client.get(f"/tasks/T-99/ui-design/{DESIGN}/mobile.png").status_code == 502
+
+
+@pytest.mark.parametrize("name", ["desktop.png", "mobile.png"])
+def test_image_receipt_is_forwarded_without_approving(dashboard, name):
+    client, calls = dashboard
+    response = client.post(f"/tasks/T-10/ui-design/{DESIGN}/delivered/{name}", json={})
+    assert response.status_code == 200
+    assert calls == [("POST", f"/v1/tasks/T-10/ui-design/{DESIGN}/delivered/{name}", {})]
+
+
+@pytest.mark.parametrize("name", ["design.md", "design.pen", "other.png"])
+def test_receipts_are_limited_to_design_images(dashboard, name):
+    client, calls = dashboard
+    assert client.post(f"/tasks/T-10/ui-design/{DESIGN}/delivered/{name}", json={}).status_code == 404
+    assert not calls
+
+
+def test_cross_origin_image_receipt_is_refused(dashboard):
+    client, calls = dashboard
+    response = client.post(f"/tasks/T-10/ui-design/{DESIGN}/delivered/desktop.png",
+                           json={}, headers={"origin": "https://other.example"})
+    assert response.status_code == 403
+    assert not calls
+
+
+def test_browser_records_delivery_only_after_a_successful_image_download():
+    import subprocess
+
+    script = (ROOT / "dashboard" / "dist" / "index.js").read_text()
+    function = script[script.index("  function designFile("):script.index("  function useDesignImages(")]
+    program = r"""
+const assert = require('node:assert/strict');
+let calls = [], ok = true, receiptFails = false;
+const blob = {};
+const SDK = {authedFetch: async () => ({ok, status: 502, blob: async () => {calls.push('bytes'); return blob;}})};
+const post = async (path) => {calls.push(path); if (receiptFails) throw new Error('stale design');};
+FUNCTION
+(async () => {
+ const design = {id: 'version-3', state: 'PENDING'};
+ assert.equal(await designFile('T-10', design, 'desktop.png'), blob);
+ assert.deepEqual(calls, ['bytes', '/tasks/T-10/ui-design/version-3/delivered/desktop.png']);
+ calls = []; ok = false;
+ await assert.rejects(designFile('T-10', design, 'mobile.png'));
+ assert.deepEqual(calls, []);
+ ok = true; receiptFails = true;
+ await assert.rejects(designFile('T-10', design, 'mobile.png'), /stale design/);
+ calls = []; receiptFails = false;
+ await designFile('T-10', {...design, state: 'APPROVED'}, 'desktop.png');
+ assert.deepEqual(calls, ['bytes']);
+ calls = [];
+ await designFile('T-10', design, 'design.md');
+ assert.deepEqual(calls, ['bytes']);
+})().catch(e => {console.error(e); process.exit(1);});
+"""
+    subprocess.run(["node", "-e", program.replace("FUNCTION", function)], check=True, capture_output=True, text=True)

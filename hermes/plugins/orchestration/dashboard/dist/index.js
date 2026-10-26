@@ -291,6 +291,9 @@
     return SDK.authedFetch("/api/plugins/orchestration/tasks/" + task + "/ui-design/" + design.id + "/" + name).then(function (r) {
       if (!r.ok) throw new Error("unavailable (" + r.status + ")");
       return r.blob();
+    }).then(function (blob) {
+      if (design.state !== "PENDING" || !/^(desktop|mobile)\.png$/.test(name)) return blob;
+      return post("/tasks/" + task + "/ui-design/" + design.id + "/delivered/" + name, {}).then(function () { return blob; });
     });
   }
   function useDesignImages(task, design) {
