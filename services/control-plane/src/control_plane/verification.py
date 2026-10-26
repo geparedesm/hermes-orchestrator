@@ -392,6 +392,10 @@ class Reviews:
             "Check correctness, security, tests, and whether the change does what was asked. Run the tests if useful.",
             "Report every problem as a finding with a severity: CRITICAL and HIGH block the merge; MEDIUM and LOW are advice.",
             "Report requirements the change does not meet in unmet_requirements.",
+            "Judge only what you can check here: the code, the tests, and commands you can run. How the UI looks when "
+            "rendered, a pixel comparison with design images, and clicking through it in a browser cannot be checked in "
+            "this environment: they are not unmet requirements or findings. List them in the summary under "
+            "'For the person to check:'; a person tests them in the preview before the merge.",
         ])
         if task.get("delivery_mode") == "FEATURE":
             from .delivery import feature_context
