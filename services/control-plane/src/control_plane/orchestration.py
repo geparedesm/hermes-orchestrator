@@ -1402,12 +1402,15 @@ class Orchestration:
                    "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry,
                                **({"test_environment": services} if services else {})}}
         if task.get("delivery_mode") == "FEATURE":
-            uow.cur.execute("SELECT id FROM executions WHERE task_id = %s AND subtask_id = %s AND role = 'DEVELOPER' "
+            # A session is resumed once (executions_one_resume). When its continuation ended before it had a session of
+            # its own (cancelled before starting, as in T-10), start fresh in the same workspace instead.
+            uow.cur.execute("SELECT id, EXISTS (SELECT 1 FROM executions r WHERE r.resume_of = e.id) AS resumed "
+                            "FROM executions e WHERE task_id = %s AND subtask_id = %s AND role = 'DEVELOPER' "
                             "AND provider = %s AND workspace = %s AND provider_session_id IS NOT NULL "
                             "AND state IN ('SUCCEEDED', 'FAILED', 'CANCELLED', 'LOST') ORDER BY created_at DESC LIMIT 1",
                             (task["id"], subtask["id"], provider, f"{self.git._context(uow, task['key'])[1]['relative_path']}/{workspace['path']}"))
             previous = uow.cur.fetchone()
-            if previous:
+            if previous and not previous["resumed"]:
                 request["resume"] = str(previous["id"])
         if task["state"] == S.QUEUED:
             task = self._move(uow, task, S.RUNNING, reason="subtask work started")
