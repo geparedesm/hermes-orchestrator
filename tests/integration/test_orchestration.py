@@ -1115,3 +1115,29 @@ def test_one_failing_execution_does_not_stop_the_others(api, services, agents, r
     services.scheduler.run_once()  # retried on the next pass
     assert calls == [str(dev["id"])] * 2
     assert not active(services, task, "DEVELOPER")
+
+
+def test_a_dropped_launch_gives_its_subtask_back(api, services, agents, repo, task):
+    # T-10: a fix waiting for budget was dropped when the lease moved on (an update restarted the services). The subtask
+    # stayed IN_PROGRESS with nothing running, every later REQUEST_EXECUTION was refused, and the task blocked.
+    plan_and_start(services, agents, task, plan_item("a", files=["shared.py"]), plan_item("b", files=["shared.py"]))
+    q(services, "UPDATE tasks SET step_requested = true")
+    services.scheduler.run_once()
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "b", "provider": "codex"})
+    assert q(services, "SELECT 1 FROM pending_launches") and subtasks(services, task)["b"]["state"] == "IN_PROGRESS"
+    q(services, "UPDATE task_leases SET epoch = epoch + 1")
+    services.orchestration.process_pending()
+    assert not q(services, "SELECT 1 FROM pending_launches")
+    assert subtasks(services, task)["b"]["state"] == "READY"
+
+
+def test_an_idle_in_progress_subtask_can_be_requested_again(api, services, agents, repo, task):
+    plan_and_start(services, agents, task, plan_item("a"), plan_item("b"))
+    [dev] = active(services, task, "DEVELOPER")
+    develop(services, agents, repo, dev, {"a.py": "a = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    q(services, "UPDATE subtasks SET state = 'IN_PROGRESS', developer_provider = 'codex' WHERE local_key = 'b'")  # stuck
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "b", "provider": "codex"})
+    assert actions(services, task)[-1][:2] == ("REQUEST_EXECUTION", "ACCEPTED")
+    [fix] = active(services, task, "DEVELOPER")
+    assert fix["subtask_id"] == subtasks(services, task)["b"]["id"]
