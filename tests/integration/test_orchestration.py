@@ -1077,3 +1077,41 @@ def test_stale_unstarted_orchestrator_cancellation_does_not_block_new_lead(api, 
     services.executions.dispatch(execution["id"])
     assert state(api, key) == "PLANNING"
     assert api.get(f"/v1/executions/{execution['id']}").json()["state"] == "CANCELLED"
+
+
+def test_a_feature_fix_starts_fresh_when_its_session_was_already_resumed(api, services, agents, repo, task):
+    # T-10: the continuation of the developer's session was cancelled before it started, so it had no session of its
+    # own. The next fix chose the same session again; the second resume broke executions_one_resume and every
+    # scheduler pass failed.
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    q(services, "UPDATE tasks SET delivery_mode = 'FEATURE' WHERE key = %s", task)
+    develop(services, agents, repo, dev, {"a.py": "x = 1\n"})
+    q(services, "INSERT INTO executions SELECT (jsonb_populate_record(NULL::executions, to_jsonb(e) || jsonb_build_object("
+      "'id', gen_random_uuid(), 'resume_of', e.id, 'state', 'CANCELLED', 'provider_session_id', NULL))).* "
+      "FROM executions e WHERE id = %s", dev["id"])
+    [rev] = active(services, task, "REVIEWER")
+    review_verdict(services, agents, rev, CHANGES)
+    [fix] = active(services, task, "DEVELOPER")
+    assert fix["workspace"] == dev["workspace"] and fix["resume_of"] is None
+
+
+def test_one_failing_execution_does_not_stop_the_others(api, services, agents, repo, task, monkeypatch):
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    calls = []
+    real = services.executions._finalize
+
+    def finalize(execution_id, status):
+        calls.append(str(execution_id))
+        if len(calls) == 1:
+            raise RuntimeError("broken result hook")
+        return real(execution_id, status)
+
+    monkeypatch.setattr(services.executions, "_finalize", finalize)
+    commit(repo.parent / dev["workspace"], "subtask work", {"a.py": "x = 1\n"})
+    answer(services, agents, dev["id"], DONE)  # the first pass fails for it, without raising out of the scheduler
+    assert calls == [str(dev["id"])]
+    services.scheduler.run_once()  # retried on the next pass
+    assert calls == [str(dev["id"])] * 2
+    assert not active(services, task, "DEVELOPER")

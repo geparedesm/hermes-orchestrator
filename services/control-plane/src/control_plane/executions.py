@@ -739,6 +739,8 @@ class Executions:
                     stats["timed_out"] += 1
             except AgentManagerError as exc:
                 log.warning("sync of execution %s deferred: %s", row["id"], exc)
+            except Exception:  # noqa: BLE001 - one execution's failure must not stop the others or the scheduler pass
+                log.exception("sync of execution %s failed; retried on the next pass", row["id"])
         stats["released"] = self._release_task_environments()
         return stats
 
