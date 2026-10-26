@@ -342,17 +342,20 @@ class Orchestration:
                     continue
                 task = self._task(uow, row["task_id"])
                 if S(task["state"]) not in (*STEP_STATES, S.TESTING, S.REVIEW, S.QUALITY_GATE):
+                    self._release(uow, row)
                     continue  # the task left active work; its pending launches are dropped
                 epoch = row["request"].get("lease_epoch")
                 lease = self.leases.get(uow, task["id"])
                 if epoch is not None and (lease is None or int(lease["epoch"]) != int(epoch)):
                     self._event(uow, task, "LAUNCH_DROPPED", f"{row['kind'].lower()} decided under an older lease epoch")
+                    self._release(uow, row)
                     continue
                 if row["kind"] in ("DEVELOP", "FIX"):
                     try:
                         self._check_plan_approved(uow, task)
                     except Conflict as exc:
                         self._event(uow, task, "LAUNCH_DROPPED", f"{row['kind'].lower()} dropped: {exc}")
+                        self._release(uow, row)
                         continue
                 subtask = None
                 if row["subtask_id"]:
@@ -365,6 +368,23 @@ class Orchestration:
                                     "(SELECT 1 FROM pending_launches WHERE task_id = %s)", (task["id"], task["id"]))
                     self._after_launch(uow, task, row["kind"], subtask, execution)
         return started
+
+    def _idle(self, uow: UnitOfWork, subtask: Row) -> bool:
+        """No execution runs for the subtask and no launch waits for it."""
+        uow.cur.execute("SELECT 1 FROM executions WHERE subtask_id = %s AND state = ANY(%s) "
+                        "UNION ALL SELECT 1 FROM pending_launches WHERE subtask_id = %s LIMIT 1",
+                        (subtask["id"], list(ACTIVE), subtask["id"]))
+        return uow.cur.fetchone() is None
+
+    def _release(self, uow: UnitOfWork, row: Row) -> None:
+        """A dropped development launch gives its subtask back. _develop marks it IN_PROGRESS when the launch is
+        queued; left that way, every later REQUEST_EXECUTION was refused and T-10 blocked with nothing running."""
+        if row["kind"] not in ("DEVELOP", "FIX") or not row["subtask_id"]:
+            return
+        uow.cur.execute("SELECT * FROM subtasks WHERE id = %s FOR UPDATE", (row["subtask_id"],))
+        subtask = uow.cur.fetchone()
+        if subtask and subtask["state"] == "IN_PROGRESS" and self._idle(uow, subtask):
+            self._set_subtask(uow, subtask, "FIX_REQUIRED" if row["kind"] == "FIX" else "READY", "its launch was dropped")
 
     def _after_launch(self, uow: UnitOfWork, task: Row, kind: str, subtask: Row | None, execution: Row) -> None:
         if subtask is not None and kind in ("DEVELOP", "FIX"):
@@ -1332,6 +1352,11 @@ class Orchestration:
         if action.get("role") not in (None, "DEVELOPER") and not (action.get("role") == "TESTER" and subtask["kind"] == "TEST_AUTHORING"):
             raise Conflict("only DEVELOPER executions are requested by the orchestrator (TEST_AUTHORING subtasks included); "
                            "verification and reviews run automatically")
+        # IN_PROGRESS with nothing running or waiting is work that was lost (a task stuck that way before _release):
+        # it starts again as a fix of its developer's attempt, or as new work when it had none.
+        if subtask["state"] == "IN_PROGRESS" and self._idle(uow, subtask):
+            self._set_subtask(uow, subtask, "FIX_REQUIRED" if subtask["developer_provider"] else "READY", "its work was lost")
+            subtask = self._subtask(uow, task, action.get("subtask"))
         if subtask["state"] not in ("READY", "FIX_REQUIRED"):
             raise Conflict(f"{subtask['key']} is {subtask['state']}")
         self._check_plan_approved(uow, task)
