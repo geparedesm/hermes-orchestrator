@@ -23,6 +23,19 @@ if [[ -z "$APPROVAL" ]]; then
   exit 0
 fi
 
+# Every run leaves its output next to the backups, so a failed update explains itself afterwards.
+LOG_DIR="${HO_BACKUP_DIR:-./backups}"
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/update-$TO-$(date -u +%Y%m%dT%H%M%SZ).log"
+exec > >(tee -a "$LOG") 2>&1
+echo "log: $LOG"
+# The health check after the update is the same one: if the running stack already fails it, the update could only
+# roll back (2026-10-24: three updates built for an hour and rolled back because WhatsApp was down). Fix it first;
+# the approval is not consumed.
+if ! scripts/check.sh; then
+  echo "the running platform fails its health check; fix that first (approval $APPROVAL is still unused)" >&2
+  exit 1
+fi
 FROM="$(grep -E '^HO_VERSION=' "$ENV_FILE" | cut -d= -f2 || true)"
 FROM="${FROM:-dev}"
 # The approval names the version it authorizes: deploy only that one.

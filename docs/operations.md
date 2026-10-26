@@ -9,6 +9,7 @@ Day-to-day operation of a hermes-orchestrator stack: health, backups, updates, r
 ```bash
 make check                 # control plane ready, dependencies healthy, schema at head, Hermes plugin and Dashboard up
 ho recovery status         # component health (DEGRADED after three failed probes), open intents, pending notifications
+                           # the disk component is DEGRADED from HO_DISK_ALERT_PERCENT (default 85%) used space
 ho health                  # control plane readiness
 ```
 
@@ -69,7 +70,7 @@ scripts/update.sh 1.1.0 <approval-id>
 ho update list                             # STARTED, SUCCEEDED, ROLLED_BACK, or FAILED, with the backup used
 ```
 
-`update.sh` consumes the approval (refused if it is not approved, expired, or the running version changed), takes a backup, builds the images with the new tag, starts the stack (migrations run first), and runs `scripts/check.sh`. If the check fails it runs `scripts/rollback.sh`: the previous version's images (still tagged) and the pre-update backup (migrations only move forward). To roll back by hand later: `HO_ROLLBACK_VERSION=<version> scripts/rollback.sh backups/<timestamp>`.
+`update.sh` first runs `scripts/check.sh` on the running stack and stops without consuming the approval if it fails (the same check after the update could only roll back). It writes its output to `backups/update-<version>-<time>.log`. Then it consumes the approval (refused if it is not approved, expired, or the running version changed), takes a backup, builds the images with the new tag, starts the stack (migrations run first), and runs `scripts/check.sh`. If the check fails it runs `scripts/rollback.sh`: the previous version's images (still tagged) and the pre-update backup (migrations only move forward). To roll back by hand later: `HO_ROLLBACK_VERSION=<version> scripts/rollback.sh backups/<timestamp>`.
 
 ## Pinned versions
 

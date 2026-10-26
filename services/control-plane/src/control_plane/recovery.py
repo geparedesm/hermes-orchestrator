@@ -14,6 +14,8 @@ Recovery        reconciliation at startup (before the scheduler's first pass), p
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -34,6 +36,8 @@ from .verification import Verifications
 
 log = logging.getLogger(__name__)
 DEGRADED_AFTER = 3  # consecutive failed checks
+# A full disk truncated Hermes's WhatsApp session (2026-10-24) and failed every later update: warn well before it.
+DISK_LIMIT_PERCENT = int(os.environ.get("HO_DISK_ALERT_PERCENT", "85"))
 INTENT_GRACE = timedelta(minutes=2)
 PERIODIC_EVERY = 12  # scheduler passes between periodic reconciliations
 
@@ -97,7 +101,7 @@ def at_safe_checkpoint(uow: UnitOfWork, task: Row) -> bool:
 
 
 class Health:
-    COMPONENTS = ("agent_manager", "git_service", "redis")
+    COMPONENTS = ("agent_manager", "git_service", "redis", "disk")
 
     def __init__(self, ctx: Context) -> None:
         self.ctx = ctx
@@ -105,7 +109,8 @@ class Health:
     def check(self) -> dict[str, str]:
         probes = {"agent_manager": lambda: self.ctx.agents is None or self.ctx.agents.ping(),
                   "git_service": self.ctx.git.ping,
-                  "redis": lambda: not self.ctx.coordinator.enabled or self.ctx.coordinator.ping()}
+                  "redis": lambda: not self.ctx.coordinator.enabled or self.ctx.coordinator.ping(),
+                  "disk": self._disk}
         states = {}
         for component, probe in probes.items():
             try:
@@ -114,6 +119,15 @@ class Health:
                 ok, error = False, str(exc)[:300]
             states[component] = self.record(component, ok, error)
         return states
+
+    @staticmethod
+    def _disk() -> bool:
+        """The host disk Docker writes to (container root filesystems live on it)."""
+        usage = shutil.disk_usage("/")
+        percent = round(100 * usage.used / usage.total)
+        if percent >= DISK_LIMIT_PERCENT:
+            raise RuntimeError(f"disk {percent}% full ({usage.free // 2**30} GB free); free space before it fills")
+        return True
 
     def record(self, component: str, ok: bool, error: str | None = None) -> str:
         with self.ctx.unit_of_work() as uow:
