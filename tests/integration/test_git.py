@@ -323,6 +323,18 @@ def test_approved_merge_is_verified_before_done(api, services, repo, agents, tas
     assert not (repo / ".hermes" / "worktrees" / f"{task.lower()}-w1").exists()
 
 
+def test_post_merge_verification_of_a_ui_task_runs(api, services, repo, agents, task):
+    # T-10: the UI design check at dispatch also caught the verification runner, refused it in VERIFYING ("task no
+    # longer permits work") and blocked the merged task.
+    approval = ready_for_merge(api, services, repo, agents, task)
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE tasks SET ui_design_required = true WHERE key = %s", (task,))
+    api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})
+    post_merge = finish_verification(services, agents, task)
+    assert post_merge["purpose"] == "POST_MERGE" and post_merge["state"] == "PASSED"
+    assert api.get(f"/v1/tasks/{task}").json()["state"] == "DONE"
+
+
 def test_failed_post_merge_tests_block_the_task(api, services, repo, agents, task):
     approval = ready_for_merge(api, services, repo, agents, task)
     api.post(f"/v1/approvals/{approval['id']}/decision", {"decision": "APPROVE"})

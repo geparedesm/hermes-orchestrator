@@ -192,7 +192,7 @@ class Executions:
             design = uow.cur.fetchone()
             if not design or design["state"] != "PREPARING" or design["execution_id"] or not design_service.matches(design, task):
                 raise Conflict("UI design request is stale or already started")
-        elif design_service and (role == Role.DEVELOPER or req.capabilities.get("workspace") == "WRITE"):
+        elif design_service and (role == Role.DEVELOPER or (req.prompt and req.capabilities.get("workspace") == "WRITE")):
             approved_design = design_service.ensure_approved(uow, task, req.prompt or "")
 
         resume_row = None
@@ -483,8 +483,10 @@ class Executions:
             uow.cur.execute("SELECT * FROM tasks WHERE id = %s FOR UPDATE", (row["task_id"],))
             dispatch_task = uow.cur.fetchone()
             design_service = getattr(self, "ui_designs", None)
+            # Agents that may write the UI. Not the verification runner: it writes only test output, and runs after
+            # the merge too (VERIFYING), where this check cancelled T-10's post-merge tests and blocked the task.
             if design_service and (row["role"] == "DEVELOPER" or
-                                   row["spec"]["grant"]["capabilities"].get("workspace") == "WRITE") \
+                                   (row["agent_run"] and row["spec"]["grant"]["capabilities"].get("workspace") == "WRITE")) \
                     and design_service.required(uow, dispatch_task):
                 design_id = (row["spec"].get("purpose") or {}).get("ui_design")
                 try:
