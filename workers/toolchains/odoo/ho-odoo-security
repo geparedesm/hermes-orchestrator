@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Security checks of an Odoo module in /workspace for the Quality Gate's `security` (docs/design/child-projects.md):
+# bandit (medium or higher severity and confidence, tests excluded) and ho-odoo-access-check (access rules for every
+# model, no `auth="none"` route, no public route without CSRF protection).
+#
+#   ho-odoo-security <module>
+#
+# A justified exception is inline (`# nosec <test id>` with the reason) and visible in the diff.
+set -euo pipefail
+
+module="${1:-}"
+if [[ ! "$module" =~ ^[a-z][a-z0-9_]{1,40}$ ]]; then
+  echo "usage: ho-odoo-security <module> (lowercase letters, digits, underscores)" >&2
+  exit 2
+fi
+workspace="${HO_ODOO_WORKSPACE:-/workspace}"
+if [[ ! -f "$workspace/__manifest__.py" ]]; then
+  echo "ho-odoo-security: $workspace has no __manifest__.py; the module must be at the repository root" >&2
+  exit 2
+fi
+
+status=0
+echo "ho-odoo-security: bandit" >&2
+(cd "$workspace" && bandit -q -r . -x ./tests,./.hermes,./.git -ll -ii \
+  -f custom --msg-template "{relpath}:{line}: {test_id} [{severity}/{confidence}] {msg}") || status=1
+echo "ho-odoo-security: access rules and routes" >&2
+ho-odoo-access-check "$workspace" || status=1
+if [[ $status -ne 0 ]]; then
+  echo "ho-odoo-security: FAILED: fix the findings above or justify one inline" >&2
+  exit 1
+fi
+echo "ho-odoo-security: $module passed" >&2

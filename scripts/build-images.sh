@@ -19,7 +19,8 @@ BUILD_ARGS=(--build-arg "NODE_IMAGE=$NODE_IMAGE" --build-arg "CLAUDE_CODE_VERSIO
             --build-arg "CODEX_VERSION=$CODEX_VERSION" --build-arg "PEN_CLI_VERSION=$PEN_CLI_VERSION" --build-arg "FLUTTER_VERSION=$FLUTTER_VERSION"
             --build-arg "FLUTTER_COMMIT=$FLUTTER_COMMIT" --build-arg "ODOO_SERIES=$ODOO_SERIES"
             --build-arg "ODOO_RELEASE=$ODOO_RELEASE" --build-arg "ODOO_SHA256=$ODOO_SHA256"
-            --build-arg "ODOO_EXTRA_PYTHON=$ODOO_EXTRA_PYTHON")
+            --build-arg "ODOO_EXTRA_PYTHON=$ODOO_EXTRA_PYTHON"
+            --build-arg "ODOO_QUALITY_PYTHON=$ODOO_QUALITY_PYTHON")
 
 # Keep the currently pinned images alive while building (T-3): retagging :dev would otherwise let Docker delete an image
 # the lock still names, and launches in the meantime would fail with "No such image". They stay tagged :pinned-previous

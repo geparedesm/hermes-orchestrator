@@ -1,0 +1,6 @@
+# Default pylint-odoo checks of `ho-odoo-lint`: Odoo's own rules (manifest, ORM, translations, SQL, XML) without
+# the OCA-only conventions. Exceptions are inline (`# pylint: disable=<message>`).
+[MAIN]
+load-plugins=pylint_odoo
+ignore=.hermes
+score=no
