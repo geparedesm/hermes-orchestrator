@@ -1,5 +1,6 @@
 """The odoo toolchain: `ho-odoo-test` installs a module from the real /workspace mount into a throwaway database
-on a PostgreSQL service and runs its tests (docs/design/child-projects.md)."""
+on a PostgreSQL service and runs its tests; `ho-odoo-lint` and `ho-odoo-security` are its Quality Gate checks
+(docs/design/child-projects.md)."""
 
 from __future__ import annotations
 
@@ -103,6 +104,59 @@ def test_standalone_python_can_extract_a_pdf_with_the_pinned_module_dependency()
     command = "from io import BytesIO; from pypdf import PdfReader, PdfWriter; b=BytesIO(); w=PdfWriter(); w.add_blank_page(72,72); w.write(b); b.seek(0); assert len(PdfReader(b).pages)==1"
     container = client.containers.run(_image(), ["/usr/bin/python3", "-c", command], detach=True,
                                       user="10001:10001", network_mode="none", read_only=True)
+    try:
+        assert container.wait(timeout=120)["StatusCode"] == 0, container.logs().decode()
+    finally:
+        container.remove(force=True)
+
+
+def check(workspace: Path, command: list[str]) -> tuple[int, str]:
+    """A Quality Gate step as the TESTER runs it: offline, read-only, unprivileged."""
+    client = docker.from_env()
+    container = client.containers.run(
+        _image(), command, detach=True, user="10001:10001", network_mode="none",
+        volumes={str(workspace): {"bind": "/workspace", "mode": "ro"}}, read_only=True, tmpfs={"/tmp": "size=64m"},
+        cap_drop=["ALL"], security_opt=["no-new-privileges"])
+    try:
+        status = container.wait(timeout=300)["StatusCode"]
+        return status, container.logs().decode(errors="replace")
+    finally:
+        container.remove(force=True)
+
+
+def test_a_clean_module_passes_lint_and_security(tmp_path):
+    workspace = tmp_path / "ho_sample"
+    shutil.copytree(MODULE, workspace)
+    status, logs = check(workspace, ["ho-odoo-lint", "ho_sample"])
+    assert status == 0 and "passed ruff and pylint-odoo" in logs, logs[-3000:]
+    status, logs = check(workspace, ["ho-odoo-security", "ho_sample"])
+    assert status == 0 and "ho_sample passed" in logs, logs[-3000:]
+
+
+def test_lint_fails_on_a_likely_bug_and_on_an_odoo_rule(tmp_path):
+    workspace = tmp_path / "ho_sample"
+    shutil.copytree(MODULE, workspace)
+    (workspace / "models" / "__init__.py").write_text("def total(lines):\n    return sum(line for line in lnes)\n")
+    (workspace / "README.md").unlink()
+    status, logs = check(workspace, ["ho-odoo-lint", "ho_sample"])
+    assert status == 1 and "F821" in logs and "missing-readme" in logs, logs[-3000:]
+
+
+def test_security_fails_on_unsafe_code_and_a_model_without_access_rules(tmp_path):
+    workspace = tmp_path / "ho_sample"
+    shutil.copytree(MODULE, workspace)
+    (workspace / "models" / "__init__.py").write_text(
+        "import subprocess\n\nfrom odoo import models\n\n\nclass Lease(models.Model):\n    _name = \"ho.lease\"\n\n"
+        "    def run(self, cmd):\n        return subprocess.call(cmd, shell=True)\n")
+    status, logs = check(workspace, ["ho-odoo-security", "ho_sample"])
+    assert status == 1 and "B602" in logs and "model ho.lease has no line" in logs, logs[-3000:]
+
+
+def test_login_shells_find_the_quality_tools():
+    client = docker.from_env()
+    container = client.containers.run(
+        _image(), ["bash", "-lc", "for t in ho-odoo-lint ho-odoo-security ruff pylint bandit mypy; do command -v $t; done"
+                   " && mypy --version"], detach=True, user="10001:10001")
     try:
         assert container.wait(timeout=120)["StatusCode"] == 0, container.logs().decode()
     finally:

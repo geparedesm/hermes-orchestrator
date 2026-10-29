@@ -84,6 +84,30 @@ creation appears in Needs you, and the child appears under its parent.
   - no test ran;
   - any test failed or errored.
 
+## Quality Gate checks for Odoo modules
+
+The odoo toolchain also carries the tools for the Quality Gate's `lint`, `security` and `typecheck` steps, pinned
+in `workers/versions.env` (`ODOO_QUALITY_PYTHON`) and installed in their own virtualenv, `/opt/ho/quality`, so they
+never mix with Odoo's dependencies. Like `ho-odoo-test`, they run offline in the TESTER.
+
+- `ho-odoo-lint <module>`: ruff (errors and likely bugs: `E4`, `E7`, `E9`, `F`, `B`) and pylint-odoo (`odoolint`
+  for the image's Odoo series: manifests, the ORM, translations, SQL and XML). OCA-only conventions are off: its
+  required author, redundant field strings, and superfluous manifest keys.
+- `ho-odoo-security <module>`: bandit, with medium or higher severity and confidence, outside `tests/`, followed by
+  `ho-odoo-access-check`. The access check fails when:
+  - a stored model the module defines (`models.Model` or `models.TransientModel` with its own `_name`) has no line
+    in `security/ir.model.access.csv`; without one, only the superuser can use it, and Odoo merely logs a warning;
+  - a route uses `auth="none"`;
+  - a public route sets `csrf=False`.
+- `mypy` is on the PATH for a module's `typecheck` command. Point it at code that does not import Odoo, since mypy
+  cannot follow the ORM.
+
+The rules live in the image (`/opt/ho/share/odoo-quality`), never in the module's repository, so a change cannot
+relax its own gate. A justified exception is written inline, with its reason, and is visible in the diff:
+`# noqa: <code>`, `# pylint: disable=<message>`, or `# nosec <test id>` (on the `@http.route(` line for the access
+check). A module enables the checks in `.hermes/project.yaml`: `commands.lint: "ho-odoo-lint <module>"`,
+`commands.security: "ho-odoo-security <module>"`, and `quality_gate.lint`/`security_checks`.
+
 ## Tests
 
 - Unit: name validation, template rendering limits and placeholders, and `children` schema validation.
@@ -97,7 +121,10 @@ creation appears in Needs you, and the child appears under its parent.
     non-ignored path, or a push onto a different `main`.
 - Docker, with the real `/workspace` mount:
   - the scaffold is installed and its test ran and passed;
-  - a module that is not discovered and a failing test both fail the run.
+  - a module that is not discovered and a failing test both fail the run;
+  - the scaffold passes `ho-odoo-lint` and `ho-odoo-security`, while an undefined name, a missing README, a shell
+    command, and a model without access rules fail them.
+- Unit: `ho-odoo-access-check` on models, wizards, abstract and inherited models, and risky routes.
 - A smoke test covers the full flow with a throwaway identity.
 
 ## Risks

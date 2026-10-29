@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Lint an Odoo module in /workspace for the Quality Gate's `lint` (docs/design/child-projects.md): ruff (errors and
+# likely bugs) and pylint-odoo (Odoo's rules for manifests, the ORM, translations, SQL and XML).
+#
+#   ho-odoo-lint <module>
+#
+# The rules are the image's (/opt/ho/share/odoo-quality), never the repository's, so a change cannot relax its own
+# gate; a justified exception is inline (`# noqa: <code>`, `# pylint: disable=<message>`) and visible in the diff.
+# OCA-only conventions (its author, redundant field strings, superfluous manifest keys) are off. Fails when either
+# tool reports anything.
+set -euo pipefail
+
+module="${1:-}"
+if [[ ! "$module" =~ ^[a-z][a-z0-9_]{1,40}$ ]]; then
+  echo "usage: ho-odoo-lint <module> (lowercase letters, digits, underscores)" >&2
+  exit 2
+fi
+workspace="${HO_ODOO_WORKSPACE:-/workspace}"
+if [[ ! -f "$workspace/__manifest__.py" ]]; then
+  echo "ho-odoo-lint: $workspace has no __manifest__.py; the module must be at the repository root" >&2
+  exit 2
+fi
+share="${HO_ODOO_QUALITY_SHARE:-/opt/ho/share/odoo-quality}"
+series="${HO_ODOO_SERIES:?HO_ODOO_SERIES is not set}"
+
+# pylint-odoo reads the module's name from its directory: lint <module> -> /workspace, as ho-odoo-test installs it.
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+ln -s "$workspace" "$work/$module"
+
+status=0
+echo "ho-odoo-lint: ruff" >&2
+(cd "$workspace" && ruff check --no-cache --config "$share/ruff.toml" --output-format concise .) || status=1
+echo "ho-odoo-lint: pylint-odoo" >&2
+(cd "$work" && pylint --rcfile="$share/pylintrc" --disable=all --enable=odoolint \
+  --disable=manifest-required-author,manifest-superfluous-key,attribute-string-redundant \
+  --valid-odoo-versions="$series" "$module") || status=1
+if [[ $status -ne 0 ]]; then
+  echo "ho-odoo-lint: FAILED: fix the findings above or justify one inline" >&2
+  exit 1
+fi
+echo "ho-odoo-lint: $module passed ruff and pylint-odoo" >&2
