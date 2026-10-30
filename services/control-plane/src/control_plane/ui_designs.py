@@ -205,11 +205,14 @@ class UIDesigns:
         if not self.matches(design, task) or S(task['state']) not in ACTIVE_STATES:
             uow.cur.execute("UPDATE ui_designs SET state = 'SUPERSEDED' WHERE id = %s", (design['id'],))
             return
-        uow.cur.execute('SELECT result FROM executions WHERE id = %s', (execution['id'],))
-        result = uow.cur.fetchone()['result'] or {}
+        uow.cur.execute('SELECT result, failure_reason FROM executions WHERE id = %s', (execution['id'],))
+        row = uow.cur.fetchone()
+        result = row['result'] or {}
         try:
             if state != 'SUCCEEDED' or result.get('status') != 'completed':
-                raise Conflict(result.get('blocked_reason') or failure or 'pen.dev design execution did not complete')
+                # The reason (error_max_turns), not only the class (TASK): it is the feedback the next version reads.
+                raise Conflict(result.get('blocked_reason') or row['failure_reason'] or failure
+                               or 'pen.dev design execution did not complete')
             uow.cur.execute('SELECT id, path, sha256, size_bytes FROM artifacts WHERE task_id = %s AND kind = %s',
                             (task['id'], f"executions/{execution['id']}"))
             artifacts = {a['path'].rsplit('/', 1)[-1][37:]: a for a in uow.cur.fetchall()}

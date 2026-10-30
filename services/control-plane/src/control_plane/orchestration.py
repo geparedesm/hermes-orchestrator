@@ -54,6 +54,7 @@ FAILBACK_HOLD = timedelta(minutes=10)
 MAX_REVIEW_RETRIES = 2
 # Only these events make the orchestrator think again (design change 2).
 RESOLVE_ATTEMPTS = 5  # agent-assisted conflict resolutions per task
+UI_DESIGN_MAX_TURNS = 120  # desktop and mobile frames built, checked and exported: T-12's design ran out at the default 60
 REQUIREMENTS_LIMIT = 50_000  # characters of one requirements version
 PLAN_CHURN_LIMIT = 4  # plan versions within PLAN_CHURN_WINDOW without a developer start stop the task
 PLAN_CHURN_WINDOW = timedelta(minutes=60)
@@ -1209,6 +1210,7 @@ class Orchestration:
                   + plan_context + "\n\n" + feature_context(self.ctx, uow, task, self.reviews._request_text(uow, task)) + previous_feedback)
         self.launch(uow, task, 'UI_DESIGN', {"role": "DEVELOPER", "provider": provider, "prompt": prompt,
                     "capabilities": {"project_read": True, "egress": "STANDARD", "artifacts": "WRITE"},
+                    "max_turns": UI_DESIGN_MAX_TURNS,
                     "secrets": ["PEN_CLI_KEY"], "env": {"NODE_USE_ENV_PROXY": "1"}, "lease_epoch": epoch,
                     "purpose": {"ui_design": str(design['id']), "kind": "UI_DESIGN", "fenced": True}})
         return f"UI design v{design['version']} requested; no frontend implementation before image approval"
