@@ -233,3 +233,20 @@ def test_chat_approval_prompt_waits_for_both_images(api, services, agents, task)
     receipt(api, task, design)
     services.outbox.deliver()
     assert any(p.get('event') == 'APPROVAL_REQUIRED' and 'UI' in p.get('text', '') for p in posted)
+
+
+def test_designer_gets_more_turns_and_a_failure_keeps_its_reason_for_the_next_version(api, services, agents, task):
+    plan(services, agents, task)
+    [execution] = orch.active(services, task, 'DEVELOPER')
+    assert execution['spec']['assignment']['max_turns'] == 120  # a design builds and checks two frames
+    final = {'type': 'result', 'subtype': 'error_max_turns', 'is_error': True, 'result': '', 'session_id': 'design'}
+    agents.finish_agent(str(execution['id']), json.dumps(final).encode(), exit_code=1)
+    services.scheduler.run_once()
+    failed = orch.q(services, 'SELECT * FROM ui_designs ORDER BY version DESC LIMIT 1')[0]
+    assert failed['state'] == 'FAILED' and failed['feedback'] == 'error_max_turns'
+    assert orch.state(api, task) == 'BLOCKED'
+    assert api.post(f'/v1/tasks/{task}/retry').status_code == 200
+    services.scheduler.run_once()
+    orch.step(services, agents, task, {'type': 'REQUEST_UI_DESIGN'})
+    [retry] = orch.active(services, task, 'DEVELOPER')
+    assert 'previous failure: error_max_turns' in retry['spec']['assignment']['prompt']
