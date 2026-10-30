@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import approval_details, budgets, notify_text
+from .artifacts import ArtifactStore
 from .context import UnitOfWork
 from .db import Row
 
@@ -235,6 +236,31 @@ def task_detail(uow: UnitOfWork, task: Row) -> dict[str, Any]:
             "approvals": approvals, "budget": budget, "quality_gate": gate, "reviews": reviews, "tests": tests,
             "executions": executions, "git": git, "timeline": timeline, "checkpoints": checkpoints, "manifests": manifests,
             "attachments": attachments, "clarifications": clarifications}
+
+
+REQUEST_TEXT_LIMIT = 256 * 1024  # characters returned per document; the Request tab says when it was cut
+
+
+def _document(store: ArtifactStore, row: Row) -> dict[str, Any]:
+    try:
+        text = store.read(row["path"]).decode("utf-8", "replace")
+    except FileNotFoundError:  # removed by retention (maintenance); the metadata stays
+        return {"size_bytes": row["size_bytes"], "text": None, "truncated": False}
+    return {"size_bytes": row["size_bytes"], "text": text[:REQUEST_TEXT_LIMIT], "truncated": len(text) > REQUEST_TEXT_LIMIT}
+
+
+def task_request(uow: UnitOfWork, store: ArtifactStore, task: Row) -> dict[str, Any]:
+    """The request as written and every requirements version, newest first (read-only)."""
+    cur = uow.cur
+    cur.execute("SELECT path, size_bytes FROM artifacts WHERE id = %s", (task["original_request_artifact_id"],))
+    original = cur.fetchone()
+    cur.execute("SELECT r.version, r.source, r.change_reason, r.created_at, a.path, a.size_bytes FROM requirement_versions r "
+                "JOIN artifacts a ON a.id = r.artifact_id WHERE r.task_id = %s ORDER BY r.version DESC", (task["id"],))
+    versions = [{"version": r["version"], "source": r["source"], "change_reason": r["change_reason"],
+                 "created_at": r["created_at"], **_document(store, r)} for r in cur.fetchall()]
+    return {"original": {**_document(store, original), "requested_by": task["requested_by"], "created_at": task["created_at"]}
+            if original else None,
+            "current_version": task.get("current_requirements_version"), "requirements": versions}
 
 
 # ---------------------------------------------------------------- metrics

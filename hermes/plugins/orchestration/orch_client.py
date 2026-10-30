@@ -179,6 +179,9 @@ class TaskApi:
     def task_view(self, key: str) -> Any:
         return self.call("GET", f"/v1/dashboard/tasks/{_key(key)}")
 
+    def task_request(self, key: str) -> Any:
+        return self.call("GET", f"/v1/dashboard/tasks/{_key(key)}/request")
+
     def workers(self) -> Any:
         return self.call("GET", "/v1/workers")
 

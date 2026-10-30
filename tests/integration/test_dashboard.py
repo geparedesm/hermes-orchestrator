@@ -59,6 +59,31 @@ def test_task_view_for_a_plain_task(api, services, agents, task):
     assert api.get(f"/v1/tasks/{task}/manifests/01a0f000-0000-7000-8000-000000000009").status_code == 404
 
 
+def test_request_tab_shows_the_request_and_every_requirements_version(api, services, agents, task):
+    [row] = q(services, "SELECT t.id, t.project_id, a.path FROM tasks t JOIN artifacts a ON a.id = t.original_request_artifact_id "
+                        "WHERE t.key = %s", task)
+    before = api.get(f"/v1/dashboard/tasks/{task}/request", token=PLUGIN_TOKEN, principal="dashboard:operator").json()
+    original = services.ctx.artifacts.read(row["path"]).decode()
+    assert before["original"]["text"] == original and before["original"]["truncated"] is False
+    assert before["requirements"] == [] and before["original"]["requested_by"]
+
+    # Stand-in for the orchestrator writing v1 and a human revision v2 (orchestration is off in this suite).
+    with services.ctx.unit_of_work() as uow:
+        for version, source, text in ((1, "ORCHESTRATOR", "v1 text"), (2, "USER", "v2 text")):
+            stored = services.ctx.artifacts.write(uow.cur, project_id=row["project_id"], task_id=row["id"], kind="requirements",
+                                                  name=f"requirements-v{version}.md", content=text.encode(), media_type="text/markdown")
+            uow.cur.execute("INSERT INTO requirement_versions (id, task_id, version, artifact_id, source, change_reason) "
+                            "VALUES (gen_random_uuid(), %s, %s, %s, %s, %s)", (row["id"], version, stored.id, source, source.lower()))
+        uow.cur.execute("UPDATE tasks SET current_requirements_version = 2 WHERE id = %s", (row["id"],))
+    view = api.get(f"/v1/dashboard/tasks/{task}/request").json()
+    assert view["current_version"] == 2
+    assert [(v["version"], v["source"], v["text"]) for v in view["requirements"]] == [(2, "USER", "v2 text"), (1, "ORCHESTRATOR", "v1 text")]
+
+    services.ctx.artifacts.delete(row["path"])  # retention removed the file: the tab still answers
+    assert api.get(f"/v1/dashboard/tasks/{task}/request").json()["original"]["text"] is None
+    assert api.get("/v1/dashboard/tasks/T-999/request").status_code == 404
+
+
 def test_budget_shows_runtime_consumed(api, services, agents, task):
     q(services, "UPDATE tasks SET started_at = now() - interval '30 minutes' WHERE key = %s", task)
     view = api.get(f"/v1/dashboard/tasks/{task}").json()
