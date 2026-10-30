@@ -956,6 +956,11 @@ def create_app(services: Services) -> FastAPI:
                 body["orchestration"] = services.orchestration.inspect(uow, key)
             return jsonable(body)
 
+    @app.get("/v1/dashboard/tasks/{key}/request")
+    def dashboard_task_request(key: str, _: Identity = Depends(identity)) -> dict[str, Any]:
+        with ctx.unit_of_work() as uow:
+            return jsonable(dashboard.task_request(uow, ctx.artifacts, services.tasks.get(uow, key)))
+
     @app.post("/v1/tasks/{key}/preview-feedback")
     def preview_feedback(key: str, body: PreviewFeedback, who: Principal = Depends(principal)) -> dict[str, Any]:
         from .previews import Previews

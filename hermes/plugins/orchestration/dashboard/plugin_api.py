@@ -206,6 +206,11 @@ def task(key: str) -> Any:
     return _call(_api().task_view, key)
 
 
+@router.get("/tasks/{key}/request")
+def task_request(key: str) -> Any:
+    return _call(_api().task_request, key)
+
+
 @router.get("/tasks/{key}/manifests/{manifest_id}")
 def manifest(key: str, manifest_id: str) -> Any:
     return _call(_api().manifest, key, manifest_id)

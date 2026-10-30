@@ -337,6 +337,17 @@
 .orch-files li:first-child { border-top: 0; }
 .orch-files li .orch-ellipsis { flex: 1; }
 .orch-pre { max-height: 22rem; overflow: auto; font-size: 0.78rem; background: var(--o-soft) !important; padding: 0.7rem; border-radius: 0.45rem; }
+.orch-doc { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 0.82rem; line-height: 1.55;
+  background: var(--o-soft); border: 1px solid var(--o-border); padding: 0.75rem 0.85rem; border-radius: 0.45rem; }
+.orch-doc-clip { max-height: 14rem; overflow: hidden; }
+.orch-more { background: none; border: 0; padding: 0; font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; align-self: flex-start; }
+.orch-versions { list-style: none; margin: 0; padding: 0; border: 1px solid var(--o-border); border-radius: 0.45rem; overflow: hidden; }
+.orch-versions li + li { border-top: 1px solid var(--o-border); }
+.orch-version { display: flex; align-items: center; gap: 0.7rem; width: 100%; padding: 0.55rem 0.8rem; background: none; border: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.orch-version:hover { background: var(--o-soft); }
+.orch-version-on { background: color-mix(in srgb, var(--o-primary) 9%, transparent); }
+.orch-version-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
 .orch-toggle { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.84rem; color: var(--o-muted); cursor: pointer; }
 
 /* ---- form ---- */

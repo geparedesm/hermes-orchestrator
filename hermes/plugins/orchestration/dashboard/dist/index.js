@@ -1395,16 +1395,64 @@
     return SDK.authedFetch("/api/plugins/orchestration/tasks/" + task + "/attachments/" + a.id).then(function (r) {
       if (!r.ok) throw new Error("download failed (" + r.status + ")");
       return r.blob();
-    }).then(function (blob) {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = a.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
-    });
+    }).then(function (blob) { save(blob, a.name); });
+  }
+  function save(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+  }
+
+  // ------------------------------------------------------------ request
+  const SOURCES = { USER: "Your revision", ORCHESTRATOR: "Written by the orchestrator", CLARIFICATION: "After your answers" };
+  const CLIPPED_CHARS = 700;
+  function Doc(props) {
+    const [open, setOpen] = useState(false);
+    const doc = props.doc;
+    if (doc.text === null) return h("p", { className: "orch-muted orch-small" }, "The file was removed by retention.");
+    const long = doc.text.length > CLIPPED_CHARS;
+    return h("div", { className: "orch-stack" },
+      h("pre", { className: cx("orch-doc", long && !open && "orch-doc-clip") }, doc.text),
+      doc.truncated ? h("p", { className: "orch-muted orch-small" }, "Showing the first 256 KB.") : null,
+      long ? h("button", { type: "button", className: "orch-link orch-more", onClick: function () { setOpen(!open); } },
+        open ? "Show less" : "Show all") : null);
+  }
+  function RequestView(props) {
+    const view = usePoll("/tasks/" + props.task + "/request");
+    const [chosen, setChosen] = useState(null);
+    const d = view.data;
+    if (!d) return h(Loading, { error: view.error });
+    const o = d.original, versions = d.requirements;
+    const current = versions.find(function (v) { return v.version === d.current_version; }) || versions[0];
+    const shown = versions.find(function (v) { return v.version === chosen; }) || current;
+    return h("div", { className: "orch-stack" },
+      h(Card, { title: "Original request", action: o && o.text !== null ? h(Button, { small: true, icon: "download",
+          onClick: function () { save(new Blob([o.text], { type: "text/markdown" }), props.task + "-request.md"); } }, "Download .md") : null },
+        o ? h("div", { className: "orch-stack" },
+          h("p", { className: "orch-muted orch-small" }, "Written by " + (requester(o.requested_by) || "—") + " · " + when(o.created_at) + " · " + size(o.size_bytes)),
+          h(Doc, { key: "original", doc: o }))
+          : h("p", { className: "orch-muted orch-small" }, "No request text was stored for this task.")),
+      h(Card, { title: "Requirements", count: versions.length || undefined, action: versions.length > 1 ? h("select", {
+          className: "orch-input orch-select", value: shown.version, onChange: function (e) { setChosen(Number(e.target.value)); } },
+          versions.map(function (v) { return h("option", { key: v.version, value: v.version }, "v" + v.version + (v === current ? " · current" : "")); })) : null },
+        !versions.length ? h(Empty, { icon: "clock", title: "No requirements yet", text: "The orchestrator writes them from this request when the task starts." })
+          : h("div", { className: "orch-stack" },
+            h("p", { className: "orch-muted orch-small" }, "The version the agents work from."),
+            h("ol", { className: "orch-versions" }, versions.map(function (v) {
+              return h("li", { key: v.version },
+                h("button", { type: "button", className: cx("orch-version", v === shown && "orch-version-on"), onClick: function () { setChosen(v.version); } },
+                  h("span", { className: "orch-dot orch-tone-" + (v === current ? "info" : "muted") }),
+                  h("strong", { className: "orch-key" }, "v" + v.version),
+                  h("span", { className: "orch-version-body" }, h("span", null, SOURCES[v.source] || capital(String(v.source).toLowerCase())),
+                    v.change_reason && v.source !== "ORCHESTRATOR" ? h("span", { className: "orch-muted orch-small" }, v.change_reason) : null),
+                  h("span", { className: "orch-muted orch-small" }, when(v.created_at))));
+            })),
+            h(Doc, { key: "v" + shown.version, doc: shown }))));
   }
   function HumanTest(props) {
     const d = props.data, t = d.task;
@@ -1496,7 +1544,7 @@
         })), error ? h("div", { className: "orch-alert" }, error) : null) : null);
   }
 
-  const PANEL_TABS = [["summary", "Summary"], ["plan", "Plan"], ["quality", "Quality"], ["activity", "Activity"], ["advanced", "Advanced"]];
+  const PANEL_TABS = [["summary", "Summary"], ["request", "Request"], ["plan", "Plan"], ["quality", "Quality"], ["activity", "Activity"], ["advanced", "Advanced"]];
   function TaskPanel(props) {
     const view = usePoll("/tasks/" + props.task);
     const [tab, setTab] = useState("summary");
@@ -1525,6 +1573,7 @@
               x[1], n ? h("span", { className: "orch-count" }, n) : null);
           })),
           tab === "summary" ? h(Summary, { data: d, reload: view.reload })
+            : tab === "request" ? h(RequestView, { task: props.task })
             : tab === "plan" ? h("div", { className: "orch-stack" }, d.feature_plan ? h(Card, { title: "Implementation plan" },
                 h("pre", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, d.feature_plan)) : null, h(Plan, { dag: d.dag }))
               : tab === "quality" ? h(Quality, { data: d })
