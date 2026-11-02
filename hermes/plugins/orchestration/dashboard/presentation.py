@@ -47,8 +47,9 @@ def guidance(data: dict, context: dict | None, now: datetime | None = None) -> d
     # Never turn an old task reason into a new fact. Only recognize missing-input reports on currently blocked subtasks.
     subtasks = (data.get('dag') or {}).get('subtasks') or []
     missing = any(s.get('state') == 'BLOCKED' and re.search(
-        r'(?:finding|review).*(?:absent|unavailable|not supplied|not provided|cannot.*access)|'
-        r'(?:missing|absent|unavailable).*(?:finding|review)', s.get('state_reason') or '', re.I)
+        r'\b(?:findings?|review (?:reports?|details))\b[^.\n]*(?:absent|missing|unavailable|not supplied|not provided|cannot[^.\n]*access)|'
+        r'(?:missing|absent|unavailable|cannot[^.\n]*access)[^.\n]*\b(?:findings?|review (?:reports?|details))\b',
+        s.get('state_reason') or '', re.I)
         for s in subtasks)
     if not finished and missing:
         add('review_input', 'The agent needs the review details',
@@ -101,7 +102,7 @@ def guidance(data: dict, context: dict | None, now: datetime | None = None) -> d
     return {'title': title, 'explanation': explanation, 'blockers': blockers, 'checked_at': now.isoformat(),
             'context_current': consistent, 'can_retry': consistent and not exhausted and all(b['code'] == 'unknown' for b in blockers) and not running and
             state in {'BLOCKED', 'FAILED', 'CANCELLED'},
-            'can_resume': consistent and not blockers and state in {'PAUSED', 'PAUSED_BUDGET'},
+            'can_resume': consistent and not blockers and not running and state in {'PAUSED', 'PAUSED_BUDGET'},
             'needs_budget': exhausted and not finished, 'preview_ready': preview_ready,
             'pending_decisions': len(actionable), 'expired_decisions': expired, 'latest': latest,
             'waiting_details': pending}

@@ -216,24 +216,29 @@
   // Polls a path while the view is shown; an answer for a path no longer asked for is dropped.
   function usePoll(path) {
     const [state, setState] = useState({ path: null, data: null, error: null });
-    const latestPath = useRef(path), serial = useRef(0), mounted = useRef(false);
+    const latestPath = useRef(path), serial = useRef(0), mounted = useRef(false), flight = useRef(null);
     latestPath.current = path;
-    const load = useCallback(function () {
+    const load = useCallback(function (force) {
       if (!path) return Promise.resolve();
+      if (force !== true && flight.current && flight.current.path === path) return flight.current.promise;
       const request = ++serial.current;
-      return api(path).then(function (d) {
+      const promise = api(path).then(function (d) {
         if (mounted.current && latestPath.current === path && serial.current === request) setState({ path: path, data: d, error: null });
       }).catch(function (e) {
         if (mounted.current && latestPath.current === path && serial.current === request)
           setState(function (s) { return { path: path, data: s.path === path ? s.data : null, error: message(e) }; });
+      }).finally(function () {
+        if (flight.current && flight.current.request === request) flight.current = null;
       });
+      flight.current = { path: path, request: request, promise: promise };
+      return promise;
     }, [path]);
     useEffect(function () {
       mounted.current = true; load(); const timer = setInterval(load, POLL_MS);
-      return function () { mounted.current = false; ++serial.current; clearInterval(timer); };
+      return function () { mounted.current = false; ++serial.current; flight.current = null; clearInterval(timer); };
     }, [load]);
     const current = state.path === path;
-    return { data: current ? state.data : null, error: current ? state.error : null, reload: load };
+    return { data: current ? state.data : null, error: current ? state.error : null, reload: function () { return load(true); } };
   }
 
   // ------------------------------------------------------------ small pieces

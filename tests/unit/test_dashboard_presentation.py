@@ -151,3 +151,27 @@ def test_old_preview_on_finished_task_does_not_ask_for_testing():
     d = sample('DONE')
     d['preview'] = {'state': 'READY', 'expires_at': '2026-11-03T12:00:00+00:00'}
     assert not explain(d)['preview_ready']
+
+
+@pytest.mark.parametrize('run_state', ['REQUESTED', 'STARTING', 'RUNNING', 'STOPPING'])
+def test_paused_task_cannot_resume_until_active_execution_stops(run_state):
+    d = sample('PAUSED')
+    d['executions'] = [{'state': run_state}]
+    assert not explain(d)['can_resume']
+
+
+@pytest.mark.parametrize('reason', ['The review agent cannot access the repository.',
+    'The review worker cannot access the database.', 'The source repository is unavailable for review.'])
+def test_review_access_failure_is_not_a_missing_report(reason):
+    d = sample()
+    d['dag']['subtasks'] = [{'state': 'BLOCKED', 'state_reason': reason}]
+    assert [b['code'] for b in explain(d)['blockers']] == ['unknown']
+
+
+@pytest.mark.parametrize('reason', ['The review report is unavailable.',
+    'Cannot access the review findings.', 'The actual findings are absent from the workspace.',
+    'Missing review details.', 'The findings cannot be accessed.'])
+def test_explicit_missing_review_input_is_recognized(reason):
+    d = sample()
+    d['dag']['subtasks'] = [{'state': 'BLOCKED', 'state_reason': reason}]
+    assert [b['code'] for b in explain(d)['blockers']] == ['review_input']

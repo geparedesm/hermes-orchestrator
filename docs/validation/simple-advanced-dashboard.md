@@ -10,11 +10,11 @@ The deployment changes only the mounted orchestration Dashboard plugin, document
 No control-plane image rebuild, database migration, task retry, budget increase, approval decision or protected-branch merge was performed.
 At initial activation the live checkout contained the deployment changes without a commit or pull request.
 The design and implementation are committed on `codex/simple-advanced-dashboard` and published in
-[PR #96](https://github.com/geparedesm/hermes-orchestrator/pull/96). The PR targets `main`; integration is pending.
+[PR #96](https://github.com/geparedesm/hermes-orchestrator/pull/96). The PR targets `main`; GitHub records the current integration status.
 
 ## Automated checks
 
-- Full unit suite: **445 passed**.
+- Full unit suite before review fixes: **445 passed**; after review fixes: **458 passed**.
 - Final focused Dashboard tests: **46 passed**.
 - Ruff passed on all changed Python sources/tests; `node --check` passed; `git diff --check` passed.
 - Browser Runner exercised the actual plugin JavaScript/CSS with the platform's installed React version and isolated API fixtures.
@@ -44,3 +44,19 @@ This is a read-only explanation of existing evidence. It does not repair a missi
 An unrecognized blockage still requires an operator to read the original evidence in Advanced. Browser preference storage
 is local to the browser, not a per-account server setting. The tests simulate failures and decisions; they are not human
 usability testing with independent nontechnical participants.
+
+## Pre-merge review
+
+The operator authorized the private-code review and merging PR #96, including the workspace color settings.
+The normal CLI review could not inspect files because its shell sandbox failed to initialize. Its placeholder
+verdict was discarded. A subsequent Codex review inspected the supplied source/test patch without shell tools
+and identified three P2 findings. All three were corrected before merging:
+
+- Slow automatic polls no longer supersede every in-flight request. Explicit refreshes still supersede older replies.
+  `test_dashboard_polling.py` covers slow polls, refresh order and late responses after closing a view.
+- Resume requires that no execution is active, including STOPPING.
+- Missing-review-input classification requires findings/report/details wording; repository/database access failures
+  remain unclassified rather than being presented as a missing report.
+
+The added regressions and the full unit suite passed (458 tests). The isolated browser checks and static/schema
+checks were rerun successfully after the fixes. No live task approvals were used by the browser tests.
