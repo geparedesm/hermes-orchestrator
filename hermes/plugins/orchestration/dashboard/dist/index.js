@@ -8,12 +8,122 @@
   if (!SDK || !window.__HERMES_PLUGINS__) return;
   const React = SDK.React;
   const h = React.createElement;
-  const { useState, useEffect, useCallback, useRef, Fragment } = React;
+  const { useState, useEffect, useCallback, useRef, useContext, Fragment } = React;
 
   // Mirrors ho_core.attachments; the server checks everything again.
   const ATTACH = { maxFiles: 10, maxFile: 10 * 1024 * 1024, maxTotal: 25 * 1024 * 1024,
     accept: ".txt,.md,.csv,.tsv,.json,.yaml,.yml,.xml,.py,.js,.ts,.sql,.log,.png,.jpg,.jpeg,.gif,.webp,.pdf" };
   const POLL_MS = 10000;
+
+  const VIEW_KEY = "hermes.orchestration.view.v1";
+  const ViewContext = React.createContext({ mode: "simple", change: function () {}, notify: function () {} });
+  function storedView() {
+    try { return window.localStorage.getItem(VIEW_KEY) === "advanced" ? "advanced" : "simple"; }
+    catch (e) { return "simple"; }
+  }
+  function ViewSwitch() {
+    const view = useContext(ViewContext);
+    return h("div", { className: "orch-view-switch", role: "group", "aria-label": "Information view" },
+      ["simple", "advanced"].map(function (mode) {
+        return h("button", { key: mode, type: "button", "aria-pressed": view.mode === mode,
+          className: cx("orch-view-option", view.mode === mode && "orch-view-selected"),
+          onClick: function () { view.change(mode); } }, capital(mode));
+      }));
+  }
+  const SIMPLE_STATUS = {
+    BACKLOG: "Waiting to start", READY: "Ready to start", QUEUED: "Waiting for an agent", PLANNING: "Preparing your request",
+    RUNNING: "In progress", FIX_REQUIRED: "Corrections needed", TESTING: "Checking the change", REVIEW: "Reviewing the change",
+    QUALITY_GATE: "Final checks", READY_FOR_MERGE: "Ready to apply", MERGING: "Applying the change", VERIFYING: "Checking the result",
+    APPROVAL_REQUIRED: "Decision needed", AUTH_REQUIRED: "An operator needs to reconnect the agent", PAUSED_BUDGET: "Allowance needed",
+    PAUSED: "Paused", BLOCKED: "Work is on hold", DONE: "Complete", CANCELLED: "Stopped", FAILED: "Did not complete"
+  };
+  function plainStatus(task) {
+    if (["RUNNING", "PLANNING", "REVIEW", "TESTING", "QUALITY_GATE"].indexOf(task.state) >= 0 && task.running === 0) return "Waiting for the next step";
+    return SIMPLE_STATUS[task.state] || "Status needs checking";
+  }
+  function StaleNotice(props) {
+    if (!props.error) return null;
+    return h("div", { className: "orch-alert", role: "alert" },
+      h("strong", null, "The current status could not be checked. "),
+      "The information below may be out of date. Refresh before acting.",
+      h(Button, { small: true, onClick: props.reload }, "Refresh status"));
+  }
+  function Guidance(props) {
+    const d = props.data, g = d.guidance;
+    const view = useContext(ViewContext);
+    if (!g) return h("div", { className: "orch-alert", role: "status" }, "The task explanation is unavailable. Refresh or open Advanced.");
+    return h("section", { className: "orch-guidance", "aria-label": "Current situation" },
+      h("h3", null, g.title), h("p", null, g.explanation),
+      g.blockers.length ? h("ol", { className: "orch-next-steps" }, g.blockers.map(function (b) {
+        return h("li", { key: b.code }, h("strong", null, b.title),
+          view.mode === "advanced" ? h("p", null, b.detail) : null, h("p", null, b.next_step), h("span", { className: "orch-muted orch-small" }, "Who acts: " + b.owner));
+      })) : h("p", { className: "orch-muted" }, g.pending_decisions ? "Review the decision below." :
+        FINISHED.indexOf(d.task.state) >= 0 ? "Review the result and original request below." :
+          g.can_resume ? "You can resume this task from Task controls below." : "No action is needed from you at this step."),
+      view.mode === "simple" && g.blockers.length ? h(Button, { onClick: function () { view.change("advanced"); } }, "View technical details") : null,
+      view.mode === "advanced" && g.waiting_details.length ? h("details", null, h("summary", null, "Queue evidence"),
+        g.waiting_details.map(function (q, i) { return h("p", { key: i, className: "orch-muted" }, q.reason); })) : null,
+      !g.can_retry && d.task.state === "BLOCKED" ? h("p", { className: "orch-muted orch-small" }, "Check the blockers before retrying. Extra runs alone may not resolve the problem.") : null);
+  }
+  function SimpleTask(props) {
+    const d = props.data, g = d.guidance || {}, t = d.task;
+    const [requestOpen, setRequestOpen] = useState(false);
+    const latest = g.latest;
+    const decisions = d.approvals.filter(function (a) { return a.state === "PENDING" && (!a.expires_at || Date.parse(a.expires_at) > Date.now()); });
+    const questions = (d.clarifications || []).filter(function (c) { return c.state === "PENDING"; });
+    return h("div", { className: "orch-stack orch-simple-task" },
+      h(Guidance, { data: d }),
+      g.preview_ready ? h(HumanTest, { data: d, reload: props.reload, simple: true }) : null,
+      questions.map(function (c) { return h(QuestionCard, { key: c.id, round: Object.assign({ task: t.key }, c), done: props.reload }); }),
+      decisions.map(function (a) { return h(ApprovalCard, { key: a.id, approval: Object.assign({ task_title: t.title }, a),
+        hidePreviewOpen: !!g.preview_ready, done: props.reload }); }),
+      g.expired_decisions && !decisions.length && FINISHED.indexOf(t.state) < 0 ? h("section", { className: "orch-simple-section" },
+        h("h3", null, "A previous decision expired"), h("p", { className: "orch-muted" }, "Open Advanced and review the Decisions list to request a current approval. An expired decision cannot authorize work.")) : null,
+      latest ? h("section", { className: "orch-simple-section" }, h("h3", null, "Latest progress"),
+        h("p", null, latest.label), h("span", { className: "orch-muted orch-small" }, when(latest.at))) : null,
+      h("section", { className: "orch-simple-section" }, h("h3", null, "Your request"),
+        h("p", { className: "orch-muted" }, t.title),
+        h(Button, { small: true, onClick: function () { setRequestOpen(!requestOpen); }, "aria-expanded": requestOpen }, requestOpen ? "Hide request" : "Read request and requirements"),
+        requestOpen ? h(RequestView, { task: t.key }) : null),
+      t.state === "DONE" && d.git && d.git.pr_url ? h("a", { className: "orch-link", href: d.git.pr_url, target: "_blank", rel: "noopener noreferrer" }, "View delivered change →") : null,
+      h("details", { className: "orch-simple-section" }, h("summary", null, "Task controls"),
+        h("p", { className: "orch-muted" }, "Pause or stop the work. This does not approve a design, a budget increase or applying a change."),
+        h(Actions, { task: t, done: props.reload, guidance: g, simple: true })),
+      h("div", { className: "orch-muted orch-small" }, "Status checked " + (g.checked_at ? when(g.checked_at) : "at the last refresh"),
+        " · ", h("button", { type: "button", className: "orch-link", onClick: props.reload }, "Refresh")));
+  }
+  function SimpleList(props) {
+    const items = props.tasks || [];
+    return h("div", { className: "orch-simple-list" }, items.length ? items.map(function (t) {
+      return h("button", { key: t.key, type: "button", className: "orch-simple-taskrow", onClick: function () { props.open(t.key); } },
+        h("span", { className: "orch-key" }, t.key), h("strong", null, t.title),
+        h("span", { className: "orch-simple-row-status" }, plainStatus(t)),
+        h("span", { className: "orch-muted orch-small" }, t.project + " · Updated " + ago(t.updated_at)));
+    }) : h("p", { className: "orch-muted" }, "No tasks here."));
+  }
+  function SimpleHome(props) {
+    const summary = usePoll("/summary"), board = usePoll("/board");
+    if (!summary.data || !board.data) return h(Loading, { error: summary.error || board.error });
+    const actions = summary.data.required_actions;
+    const attention = board.data.tasks.filter(function (t) { return ["BLOCKED", "AUTH_REQUIRED", "PAUSED_BUDGET", "FAILED", "PAUSED"].indexOf(t.state) >= 0; });
+    const active = board.data.tasks.filter(function (t) { return FINISHED.indexOf(t.state) < 0 && attention.indexOf(t) < 0 && t.state !== "APPROVAL_REQUIRED"; });
+    const refresh = function () { summary.reload(); board.reload(); };
+    return h("div", { className: "orch-simple-home orch-stack" },
+      h(StaleNotice, { error: summary.error || board.error, reload: refresh }),
+      h("fieldset", { disabled: !!(summary.error || board.error), className: "orch-fresh-actions" },
+        h("section", { className: "orch-simple-section" }, h("h2", null, "Needs a decision"),
+          h("p", { className: "orch-muted" }, "Review a design, answer a question or approve a change."),
+          actions.approvals.length || (actions.clarifications || []).length ? h("div", { className: "orch-stack" },
+            actions.approvals.map(function (a) { return h(ApprovalCard, { key: a.id, approval: a, done: refresh, open: props.open }); }),
+            (actions.clarifications || []).map(function (c) { return h(QuestionCard, { key: c.id, round: c, done: refresh, open: props.open }); }))
+            : h("p", null, "No decisions are waiting for you."))),
+      h("section", { className: "orch-simple-section" }, h("h2", null, "Needs attention"),
+        h("p", { className: "orch-muted" }, "Open a task to see who needs to act and what must happen next."),
+        h(SimpleList, { tasks: attention, open: props.open })),
+      h("section", { className: "orch-simple-section" }, h("h2", null, "Tasks in progress"), h(SimpleList, { tasks: active, open: props.open })),
+      h("section", { className: "orch-simple-section" }, h("h2", null, "Recently finished"),
+        h(SimpleList, { tasks: board.data.tasks.filter(function (t) { return FINISHED.indexOf(t.state) >= 0; }).slice(0, 5), open: props.open })));
+  }
 
   // ------------------------------------------------------------ vocabulary
 
@@ -106,14 +216,29 @@
   // Polls a path while the view is shown; an answer for a path no longer asked for is dropped.
   function usePoll(path) {
     const [state, setState] = useState({ path: null, data: null, error: null });
-    const load = useCallback(function () {
+    const latestPath = useRef(path), serial = useRef(0), mounted = useRef(false), flight = useRef(null);
+    latestPath.current = path;
+    const load = useCallback(function (force) {
       if (!path) return Promise.resolve();
-      return api(path).then(function (d) { setState({ path: path, data: d, error: null }); })
-        .catch(function (e) { setState(function (s) { return { path: path, data: s.path === path ? s.data : null, error: message(e) }; }); });
+      if (force !== true && flight.current && flight.current.path === path) return flight.current.promise;
+      const request = ++serial.current;
+      const promise = api(path).then(function (d) {
+        if (mounted.current && latestPath.current === path && serial.current === request) setState({ path: path, data: d, error: null });
+      }).catch(function (e) {
+        if (mounted.current && latestPath.current === path && serial.current === request)
+          setState(function (s) { return { path: path, data: s.path === path ? s.data : null, error: message(e) }; });
+      }).finally(function () {
+        if (flight.current && flight.current.request === request) flight.current = null;
+      });
+      flight.current = { path: path, request: request, promise: promise };
+      return promise;
     }, [path]);
-    useEffect(function () { load(); const t = setInterval(load, POLL_MS); return function () { clearInterval(t); }; }, [load]);
+    useEffect(function () {
+      mounted.current = true; load(); const timer = setInterval(load, POLL_MS);
+      return function () { mounted.current = false; ++serial.current; flight.current = null; clearInterval(timer); };
+    }, [load]);
     const current = state.path === path;
-    return { data: current ? state.data : null, error: current ? state.error : null, reload: load };
+    return { data: current ? state.data : null, error: current ? state.error : null, reload: function () { return load(true); } };
   }
 
   // ------------------------------------------------------------ small pieces
@@ -146,7 +271,7 @@
   }
   function Button(props) {
     return h("button", { type: props.type || "button", className: cx("orch-btn", "orch-btn-" + (props.kind || "ghost"), props.small && "orch-btn-sm"),
-      disabled: props.disabled, onClick: props.onClick, title: props.title, "aria-label": props.label },
+      disabled: props.disabled, onClick: props.onClick, title: props.title, "aria-label": props.label, "aria-expanded": props["aria-expanded"] },
     props.icon ? h(Icon, { name: props.icon, size: props.small ? 14 : 16 }) : null, props.children);
   }
   function Empty(props) {
@@ -301,6 +426,7 @@
     const id = design && design.id;
     useEffect(function () {
       if (!id) return undefined;
+      setImages({});
       const urls = [];
       let live = true;
       DESIGN_VIEWS.forEach(function (v) {
@@ -374,6 +500,10 @@
     }, [props.task, props.approval]);
     const design = state.data && state.data.design;
     const images = useDesignImages(props.task, design);
+    useEffect(function () {
+      if (props.ready) props.ready(!!design && design.approval_id === props.approval && design.current && design.state === "PENDING" &&
+        DESIGN_VIEWS.every(function (v) { return !!(images[v[0]] && images[v[0]].url); }));
+    }, [design, images, props.approval, props.ready]);
     const closeViewer = useCallback(function () { setViewer(null); }, []);
     if (state.error) return h("div", { className: "orch-alert" }, h(Icon, { name: "alert" }), "The design could not be loaded: " + state.error);
     if (!design) return h(Loading, null);
@@ -411,6 +541,9 @@
   // One decision, explained the way the chat explains it, with the two outcomes as the buttons.
   function ApprovalCard(props) {
     const a = props.approval;
+    const view = useContext(ViewContext);
+    const [designReady, setDesignReady] = useState(false);
+    useEffect(function () { setDesignReady(false); }, [a.id]);
     const plain = a.plain || { question: a.summary, yes: "approve", no: "reject", reasons: [] };
     const d = a.details;
     const [busy, setBusy] = useState(null);
@@ -424,7 +557,10 @@
       setError(null);
       const body = { decision: decision };
       if (decision === "REJECT" && note.trim()) body.note = note.trim();
-      post("/approvals/" + a.id, body).then(props.done)
+      post("/approvals/" + a.id, body).then(function () {
+        view.notify(decision === "APPROVE" ? "Your approval was recorded." : "Your request for changes was recorded.");
+        return props.done && props.done();
+      })
         .catch(function (e) { setError(message(e)); }).finally(function () { setBusy(null); });
     }
     const expires = left(a.expires_at);
@@ -451,7 +587,7 @@
         a.task_title ? h("span", null, a.task_title) : null, a.project ? h(Pill, null, a.project) : null)
         : a.project ? h("div", { className: "orch-approval-task" }, h(Pill, null, a.project)) : null,
       h("p", { className: "orch-approval-question" }, design ? "Review the proposed screens before any code is written." : (d && d.headline) || plain.question),
-      design ? h(DesignReview, { task: a.task, approval: a.id }) : null,
+      design ? h(DesignReview, { task: a.task, approval: a.id, ready: setDesignReady }) : null,
       d && !design && (d.highlights || []).length ? h("ul", { className: "orch-highlights" },
         d.highlights.map(function (x, i) { return h("li", { key: i }, x); })) : null,
       d ? h(Advice, { recommendation: d.recommendation, yes: plain.yes, no: plain.no }) : null,
@@ -465,7 +601,7 @@
             placeholder: "For example: show the contracts as a list inside the tenant page",
             onChange: function (e) { setNote(e.target.value); } })),
         h("div", { className: "orch-approval-actions" },
-          h(Button, { kind: "good", icon: "check", disabled: !!busy, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : "Approve design"),
+          h(Button, { kind: "good", icon: "check", disabled: !!busy || !designReady, onClick: function () { decide("APPROVE"); } }, busy === "APPROVE" ? "Saving…" : "Approve design"),
           h(Button, { kind: "bad-outline", icon: "x", disabled: !!busy || !note.trim(), title: note.trim() ? null : "Write what should change first",
             onClick: function () { decide("REJECT"); } }, busy === "REJECT" ? "Saving…" : "Send back with changes"),
           props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Open task") : null))
@@ -482,9 +618,9 @@
           h(Button, { kind: "bad-outline", icon: "x", disabled: !!busy, onClick: function () { setRejecting(true); } }, capital(plain.no) + "…"),
           a.task && props.open ? h(Button, { kind: "ghost", small: true, onClick: function () { props.open(a.task); } }, "Open task") : null),
       error ? h("div", { className: "orch-alert" }, error) : null,
-      d ? h("button", { type: "button", className: "orch-disclosure", "aria-expanded": technical, onClick: toggleTechnical },
+      d && view.mode === "advanced" ? h("button", { type: "button", className: "orch-disclosure", "aria-expanded": technical, onClick: toggleTechnical },
         technical ? "▾ Hide technical details" : "▸ Show technical details") : null,
-      d && technical ? h("div", { className: "orch-technical" },
+      d && technical && view.mode === "advanced" ? h("div", { className: "orch-technical" },
         d.headline && d.headline !== plain.question ? h("p", { className: "orch-muted orch-small" }, plain.question) : null,
         h(ApprovalDetails, { details: d }),
         who || d.requested_at ? h("div", { className: "orch-muted orch-small" },
@@ -577,6 +713,10 @@
   function Actions(props) {
     const t = props.task;
     const can = available(t.state);
+    if (props.guidance) {
+      can.retry = can.retry && props.guidance.can_retry && !props.simple;
+      can.resume = can.resume && props.guidance.can_resume;
+    }
     const [busy, setBusy] = useState(null);
     const [confirming, setConfirming] = useState(false);
     const [error, setError] = useState(null);
@@ -883,7 +1023,8 @@
     const active = tasks.filter(function (t) { return FINISHED.indexOf(t.state) < 0 && WAITING.indexOf(t.state) < 0; });
     const needs = rounds.length + approvals.length + waiting.length;
     function reload() { summary.reload(); board.reload(); }
-    return h("div", { className: "orch-grid" },
+    return h(Fragment, null, h(StaleNotice, { error: summary.error || board.error, reload: reload }),
+      h("div", { className: "orch-grid" },
       h("div", { className: "orch-main" },
         h("div", { className: "orch-section-head" },
           h("div", null, h("h2", null, "Needs you"), h("p", { className: "orch-muted" }, needs
@@ -891,7 +1032,7 @@
             : "Nothing is waiting for you. Everything runs on its own.")),
           approvals.length ? h("button", { type: "button", className: "orch-link", onClick: function () { props.go("approvals"); } }, "All approvals →") : null),
         needs === 0 ? h(Empty, { icon: "check", title: "All clear", text: "When an agent needs you, it appears here and in your chat." })
-          : h("div", { className: "orch-stack" },
+          : h("fieldset", { className: "orch-fresh-actions orch-stack", disabled: !!(summary.error || board.error) },
             approvals.map(function (a) { return h(ApprovalCard, { key: a.id, approval: a, done: reload, open: props.open }); }),
             rounds.map(function (c) { return h(QuestionCard, { key: c.id, round: c, done: reload, open: props.open }); }),
             waiting.map(function (t) { return h(WaitingCard, { key: t.key, task: t, open: props.open, done: reload }); }))),
@@ -902,7 +1043,7 @@
           active.length === 0 ? h("p", { className: "orch-muted" }, "No task in progress. Create one with New task.")
             : h("div", { className: "orch-list" }, active.map(function (t) { return h(TaskRow, { key: t.key, task: t, open: props.open }); }))),
         h("section", { className: "orch-side-section" }, h("div", { className: "orch-section-head" }, h("h3", null, "Recent activity")),
-          h(Activity, { items: s.recent_activity, open: props.open, limit: 6 }))));
+          h(Activity, { items: s.recent_activity, open: props.open, limit: 6 })))));
   }
 
   // ------------------------------------------------------------ board
@@ -940,7 +1081,7 @@
           return h("button", { key: p || "all", type: "button", className: cx("orch-chip", project === p && "orch-chip-on"), onClick: function () { setProject(p); } }, p || "All projects");
         })),
         h(SearchBox, { query: props.query, setQuery: props.setQuery, search: props.search, focus: props.focusSearch })),
-      h("div", { className: "orch-board" }, COLUMNS.map(function (c) {
+      props.simple ? h(SimpleList, { tasks: tasks, open: props.open }) : h("div", { className: "orch-board" }, COLUMNS.map(function (c) {
         const items = tasks.filter(function (t) { return c.states.indexOf(t.state) >= 0; });
         return h("div", { key: c.id, className: cx("orch-column", c.id === "you" && items.length && "orch-column-attention") },
           h("div", { className: "orch-column-head" }, h("strong", null, c.title), h("span", { className: "orch-count" }, items.length),
@@ -978,7 +1119,7 @@
     if (tab === "PENDING") {
       body = !summary.data ? h(Loading, { error: summary.error })
         : waiting === 0 ? h(Empty, { icon: "check", title: "No decisions waiting", text: "When an agent needs you, it appears here and in your chat." })
-          : h("div", { className: "orch-stack" },
+          : h("fieldset", { className: "orch-fresh-actions orch-stack", disabled: !!summary.error },
             summary.data.required_actions.approvals.map(function (a) {
               return h(ApprovalCard, { key: a.id, approval: a, done: summary.reload, open: props.open });
             }),
@@ -990,7 +1131,9 @@
         ["Expired", function (a) { return ago(a.expires_at); }],
         ["", function (a) { return h(Renew, { id: a.id, done: expired.reload }); }]] }));
     }
-    return h("div", { className: "orch-grid" }, h("div", { className: "orch-main" }, tabs, body),
+    return h("div", { className: "orch-grid" }, h("div", { className: "orch-main" }, tabs,
+      h(StaleNotice, { error: summary.error || expired.error, reload: function () { summary.reload(); expired.reload(); } }),
+      h("fieldset", { className: "orch-fresh-actions", disabled: !!(summary.error || expired.error) }, body)),
       h(Decided, { items: summary.data ? summary.data.decided_recently : [], open: props.open }));
   }
 
@@ -1461,6 +1604,7 @@
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
     if (!t.human_test_required && !preview) return null;
+    if (props.simple && (!preview || ["READY", "TESTING"].indexOf(preview.state) < 0 || Date.parse(preview.expires_at) <= Date.now())) return null;
     const available = preview && ["READY", "TESTING"].indexOf(preview.state) >= 0 && Date.parse(preview.expires_at) > Date.now();
     const section = (d.feature_plan || "").match(/^## Human test[ \t]*\r?\n([\s\S]*)/m);
     const instructions = section ? section[1].split(/\r?\n## /)[0].trim() : "";
@@ -1521,7 +1665,7 @@
           });
         }))) : null,
       WAITING.indexOf(t.state) >= 0 && nextStep(t) ? h("div", { className: "orch-callout orch-tone-border-" + tone(t.state) }, nextStep(t)) : null,
-      t.state === "PAUSED_BUDGET" ? h(Card, null, h(RaiseBudget, { task: t.key, done: props.reload, cancel: props.reload })) : null,
+      (t.state === "PAUSED_BUDGET" || (d.guidance && d.guidance.needs_budget)) ? h(Card, null, h(RaiseBudget, { task: t.key, done: props.reload, cancel: props.reload })) : null,
       h(Card, { title: "About" }, h("ul", { className: "orch-facts" },
         h("li", null, h("span", null, "Project"), h("strong", null, t.project)),
         h("li", null, h("span", null, "Priority"), h("span", null, String(t.priority).toLowerCase())),
@@ -1547,26 +1691,46 @@
   const PANEL_TABS = [["summary", "Summary"], ["request", "Request"], ["plan", "Plan"], ["quality", "Quality"], ["activity", "Activity"], ["advanced", "Advanced"]];
   function TaskPanel(props) {
     const view = usePoll("/tasks/" + props.task);
+    const viewMode = useContext(ViewContext);
+    const simple = viewMode.mode === "simple";
     const [tab, setTab] = useState("summary");
     useEffect(function () { setTab("summary"); }, [props.task]);
+    const panel = useRef(null);
     useEffect(function () {
-      function onKey(e) { if (e.key === "Escape") props.close(); }
+      const previous = document.activeElement;
+      if (panel.current) panel.current.focus();
+      function onKey(e) {
+        if (document.querySelector(".orch-viewer")) return;
+        if (e.key === "Escape") { e.stopPropagation(); props.close(); }
+        if (e.key !== "Tab" || !panel.current) return;
+        const controls = Array.from(panel.current.querySelectorAll("button, a[href], input, select, textarea, summary, [tabindex='0']"))
+          .filter(function (el) { return !el.matches(":disabled") && el.getClientRects().length; });
+        const first = controls[0], last = controls[controls.length - 1];
+        if (!first) { e.preventDefault(); panel.current.focus(); }
+        else if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (document.activeElement === last || document.activeElement === panel.current)) { e.preventDefault(); first.focus(); }
+      }
       window.addEventListener("keydown", onKey);
-      return function () { window.removeEventListener("keydown", onKey); };
+      return function () { window.removeEventListener("keydown", onKey); if (previous && previous.isConnected) previous.focus(); };
     }, [props.close]);
     const d = view.data;
     const t = d && d.task;
     return h("div", { className: "orch-overlay", onClick: props.close },
-      h("aside", { className: "orch-panel", role: "dialog", "aria-label": props.task, onClick: function (e) { e.stopPropagation(); } },
+      h("aside", { className: "orch-panel", role: "dialog", "aria-modal": true, tabIndex: -1, ref: panel, "aria-label": props.task, onClick: function (e) { e.stopPropagation(); } },
         h("header", { className: "orch-panel-head" },
           h("div", { className: "orch-panel-title" },
-            h("div", { className: "orch-row" }, h("span", { className: "orch-key" }, props.task), t ? h(StatusPill, { state: t.state }) : null, t ? h(Pill, null, t.project) : null),
+            h("div", { className: "orch-row" }, h("span", { className: "orch-key" }, props.task), t ? (simple ? h(Pill, { tone: tone(t.state) }, (d.guidance || {}).title || plainStatus(t)) : h(StatusPill, { state: t.state })) : null, t ? h(Pill, null, t.project) : null),
             h("h2", null, t ? t.title : "Loading…")),
           h(Button, { kind: "ghost", icon: "x", label: "Close", onClick: props.close })),
         !d ? h(Loading, { error: view.error }) : h("div", { className: "orch-panel-body" },
-          h(Stepper, { state: t.state, resume: t.resume_state }),
-          t.state_reason ? h("p", { className: "orch-reason" }, t.state_reason) : null,
-          h(Actions, { task: t, done: view.reload }),
+          !simple ? h(Stepper, { state: t.state, resume: t.resume_state }) : null,
+          !simple && t.state_reason ? h("p", { className: "orch-reason" }, t.state_reason) : null,
+          h(StaleNotice, { error: view.error, reload: view.reload }),
+          h(ViewSwitch),
+          viewMode.notice ? h("div", { className: "orch-callout", role: "status" }, viewMode.notice) : null,
+          simple ? h("fieldset", { className: "orch-fresh-actions", disabled: !!view.error }, h(SimpleTask, { data: d, reload: view.reload })) : h("fieldset", { className: "orch-fresh-actions", disabled: !!view.error },
+          h(Guidance, { data: d }),
+          h(Actions, { task: t, done: view.reload, guidance: d.guidance }),
           h("nav", { className: "orch-tabs" }, PANEL_TABS.map(function (x) {
             const n = x[0] === "plan" ? d.dag.subtasks.length : x[0] === "summary" ? d.approvals.filter(function (a) { return a.state === "PENDING"; }).length : null;
             return h("button", { key: x[0], type: "button", className: cx("orch-tab", tab === x[0] && "orch-tab-on"), onClick: function () { setTab(x[0]); } },
@@ -1578,7 +1742,7 @@
                 h("pre", { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, d.feature_plan)) : null, h(Plan, { dag: d.dag }))
               : tab === "quality" ? h(Quality, { data: d })
                 : tab === "activity" ? h(Timeline, { events: d.timeline })
-                  : h(Advanced, { data: d, reload: view.reload }))));
+                  : h(Advanced, { data: d, reload: view.reload })))));
   }
 
   // ------------------------------------------------------------ new task
@@ -1734,6 +1898,13 @@
   const VIEWS = [["home", "Home", "home"], ["board", "Board", "kanban"], ["approvals", "Approvals", "approve"], ["projects", "Projects", "folder"],
     ["system", "System", "activity"]];
   function OrchestrationPage() {
+    const [mode, setMode] = useState(storedView);
+    const [notice, setNotice] = useState(null);
+    const changeMode = function (next) {
+      setMode(next);
+      try { window.localStorage.setItem(VIEW_KEY, next); } catch (e) { /* Safe in private mode. */ }
+      if (next === "simple" && view === "system") setView("home");
+    };
     const [view, setView] = useState("home");
     const [task, setTask] = useState(null);
     const [creating, setCreating] = useState(null); // null, or the project to preselect ("" for none)
@@ -1759,29 +1930,31 @@
     const waiting = counts.data ? counts.data.required_actions.waiting_tasks.filter(function (t) { return t.state !== "APPROVAL_REQUIRED" && t.state !== "FIX_REQUIRED"; }).length : 0;
     const go = function (v) { setView(v); };
     // The search lives on the board and filters only it: other views never hide what needs the person.
-    const props = { open: open, query: "", go: go };
+    const props = { open: open, query: "", go: go, simple: mode === "simple" };
     let body;
-    if (view === "home") body = h(Home, props);
+    if (view === "home") body = h(mode === "simple" ? SimpleHome : Home, props);
     else if (view === "board") body = h(Board, Object.assign({}, props, { query: query, setQuery: setQuery, search: search, focusSearch: focusSearch }));
     else if (view === "approvals") body = h(Approvals, props);
     else if (view === "projects") body = h(Projects, Object.assign({}, props, { create: function (p) { setCreating(p); },
       filter: function (p) { setQuery(p); setView("board"); } }));
     else body = h(System, props);
-    return h("div", { className: "orch-page" },
+    return h(ViewContext.Provider, { value: { mode: mode, change: changeMode, notify: function (text) { setNotice(text); counts.reload(); }, notice: notice } }, h("div", { className: cx("orch-page", mode === "simple" && "orch-simple") },
       h("header", { className: "orch-top" },
         h("div", { className: "orch-hello" }, h("h1", null, "Orchestration"),
           h("p", { className: "orch-muted" }, "Your agents build, review and test. You decide what ships.")),
-        h(Button, { kind: "primary", icon: "plus", onClick: function () { setCreating(""); } }, "New task")),
+        h("div", { className: "orch-top-tools" }, h(ViewSwitch), h(Button, { kind: "primary", icon: "plus", onClick: function () { setCreating(""); } }, "New task"))),
       h("nav", { className: "orch-nav" },
-        VIEWS.map(function (v) {
+        VIEWS.filter(function (v) { return mode === "advanced" || v[0] !== "system"; }).map(function (v) {
           const badge = v[0] === "approvals" ? pending : v[0] === "home" ? waiting : 0;
           return h("button", { key: v[0], type: "button", className: cx("orch-nav-item", view === v[0] && "orch-nav-on"), onClick: function () { setFocusSearch(false); setView(v[0]); } },
-            h(Icon, { name: v[2], size: 15 }), v[1], badge ? h("span", { className: "orch-badge" }, badge) : null);
+            h(Icon, { name: v[2], size: 15 }), mode === "simple" && v[0] === "board" ? "Tasks" : mode === "simple" && v[0] === "approvals" ? "Decisions" : v[1], badge ? h("span", { className: "orch-badge" }, badge) : null);
         }),
-        h(AgentLine, { go: go })),
+        mode === "advanced" ? h(AgentLine, { go: go }) : null),
+      notice && !task ? h("div", { className: "orch-callout orch-row", role: "status" }, h("span", null, notice),
+        h(Button, { small: true, label: "Dismiss confirmation", onClick: function () { setNotice(null); } }, "Dismiss")) : null,
       body,
       task ? h(TaskPanel, { task: task, close: close }) : null,
-      creating !== null ? h(NewTask, { project: creating, created: function (key) { setCreating(null); setView("board"); setTask(key); }, cancel: function () { setCreating(null); } }) : null);
+      creating !== null ? h(NewTask, { project: creating, created: function (key) { setCreating(null); setView("board"); setTask(key); }, cancel: function () { setCreating(null); } }) : null));
   }
 
   window.__HERMES_PLUGINS__.register("orchestration", OrchestrationPage);

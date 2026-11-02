@@ -26,6 +26,11 @@ _spec = importlib.util.spec_from_file_location("orchestration_dashboard_client",
 _client = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(_client)  # type: ignore[union-attr]
 
+_presentation_spec = importlib.util.spec_from_file_location(
+    "orchestration_dashboard_presentation", Path(__file__).resolve().parent / "presentation.py")
+_presentation = importlib.util.module_from_spec(_presentation_spec)
+_presentation_spec.loader.exec_module(_presentation)
+
 PRINCIPAL = "dashboard:operator"
 TASK_ACTIONS = ("pause", "resume", "cancel", "retry")
 def same_origin_mutation(request: Request) -> None:
@@ -203,7 +208,10 @@ def approvals(state: Literal["PENDING", "EXPIRED"] = "PENDING") -> Any:
 
 @router.get("/tasks/{key}")
 def task(key: str) -> Any:
-    return _call(_api().task_view, key)
+    result = _call(_api().task_view, key)
+    # The dashboard response already contains a transactional orchestration snapshot.
+    result['guidance'] = _presentation.guidance(result, result.get('orchestration'))
+    return result
 
 
 @router.get("/tasks/{key}/request")

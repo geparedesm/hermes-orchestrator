@@ -74,3 +74,10 @@ In the chat: `/orch tasks`, then `/orch status T-n`. A pending approval arrives 
 - The chat identity comes from Hermes's gateway after it authorized the sender (`TELEGRAM_ALLOWED_USERS`), bound to the message being handled; a model turn has no identity and cannot perform human actions.
 - Notifications carry summaries and identifiers only — never secrets, diffs, or model output.
 - The Dashboard's session-signing secret (`ho_hermes_dashboard_session_secret`) is independent of every other secret: Hermes's `config.yaml` holds it, so nothing else may be derivable from it.
+
+## Simple and Advanced views
+
+The Dashboard starts in **Simple**, with English explanations, current impediments, who needs to act and the next step.
+Home separates decisions from operational attention, and Tasks uses a plain list. Select **Advanced** in the header or task panel
+for the original technical tabs, agent usage, detailed budget, Git records and System tools. This preference is stored only in the
+browser and grants no additional permissions. See [the design and evidence rules](design/simple-advanced-dashboard.md).

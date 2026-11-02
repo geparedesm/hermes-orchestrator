@@ -16202,6 +16202,3951 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "Nm4jN",
+      "x": 920,
+      "y": 1900,
+      "name": "UX plan — Simple and Advanced views",
+      "clip": true,
+      "width": 780,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "rT3fs",
+          "name": "Plan eyebrow",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "HERMES / UX PLAN / FOR REVIEW",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "l2IU8",
+          "name": "Plan title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Clarity before detail",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 36,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "sbJNi",
+          "name": "Audience",
+          "fill": "$text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "English interface. Simple view is the default for people without technical knowledge. Advanced view serves operators and technical support.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 17
+        },
+        {
+          "type": "frame",
+          "id": "PqEM6",
+          "name": "01  Understand",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "P5aan",
+              "name": "01  Understand",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "01  Understand",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "Zblkt",
+              "name": "01  Understand explanation",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Audit Home, task list, task details and approvals. Identify repeated messages, stale reasons, unavailable actions and missing data.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "P1dNbM",
+          "name": "02  Structure",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "zKJ8h",
+              "name": "02  Structure",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "02  Structure",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "sWTWK",
+              "name": "02  Structure explanation",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Every task answers: what was requested, what is happening, who needs to act and what comes next. Keep evidence in Advanced.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "tYyH2",
+          "name": "03  Design in Pencil",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "bRUtY",
+              "name": "03  Design in Pencil",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "03  Design in Pencil",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "f1bvOg",
+              "name": "03  Design in Pencil explanation",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Review desktop and mobile concepts, reusable components, permission states, action feedback and every task scenario before implementation.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "TbnLG",
+          "name": "04  Validate the meaning",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "V4oXhE",
+              "name": "04  Validate the meaning",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "04  Validate the meaning",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "Akppw",
+              "name": "04  Validate the meaning explanation",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Combine current budget, reviews, active runs and approvals. Keep multiple blockers visible. Never invent a cause, ETA or percentage.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "X2JCV",
+          "name": "05  Approve the design",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "DUn4c",
+              "name": "05  Approve the design",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "05  Approve the design",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "XLRNw",
+              "name": "05  Approve the design explanation",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Review real task examples and complete flows. Agree on labels, actions, information placement and backend dependencies.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "V4Lnp",
+          "name": "06  Implement and verify later",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "F86pi",
+              "name": "06  Implement and verify later",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "06  Implement and verify later",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "bQVmj",
+              "name": "06  Implement and verify later explanation",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Task details first; then Home, lists and approvals. Test state changes, permissions, accessibility and visual fidelity before deployment.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "m0aMkd",
+      "x": 1820,
+      "y": 1900,
+      "name": "Concept — Task details · Simple · Blocked",
+      "clip": true,
+      "width": 900,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 28,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "wG6sB",
+          "name": "Concept label",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "DESIGN CONCEPT · T-13 SNAPSHOT · NOT LIVE STATUS",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "HLZyW",
+          "name": "Navigation and view selector",
+          "width": "fill_container",
+          "gap": 20,
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "LEAi4",
+              "name": "Back to tasks",
+              "fill": "$ux-muted",
+              "content": "←  Tasks",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "U4mP8P",
+              "name": "View selector component",
+              "reusable": true,
+              "fill": "$surface-2",
+              "cornerRadius": 10,
+              "gap": 4,
+              "padding": 4,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "o81X3r",
+                  "name": "Simple tab",
+                  "fill": "$text",
+                  "cornerRadius": 7,
+                  "padding": [
+                    10,
+                    18
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "iQsZA",
+                      "name": "Simple label",
+                      "fill": "$bg",
+                      "content": "Simple",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hCNWL",
+                  "name": "Advanced tab",
+                  "fill": "$surface-2",
+                  "cornerRadius": 7,
+                  "padding": [
+                    10,
+                    18
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "GF2UI",
+                      "name": "Advanced label",
+                      "fill": "$ux-muted",
+                      "content": "Advanced",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "K7ROgz",
+          "name": "Task identity",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "abLwz",
+              "name": "Task reference",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "T-13 · Commercial properties",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13
+            },
+            {
+              "type": "text",
+              "id": "S1e4q",
+              "name": "Task title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "WhatsApp payment reminders",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 30,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "nJLRO",
+              "name": "Request summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Send payment reminders and confirmation messages to tenants, with an option to stop receiving them.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 16
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "iC3nD",
+          "name": "Primary issue component",
+          "reusable": true,
+          "width": "fill_container",
+          "fill": "$ux-warning-bg",
+          "cornerRadius": 12,
+          "layout": "vertical",
+          "gap": 14,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "BBamU",
+              "name": "Status",
+              "fill": "$ux-warning-text",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Ⅱ  Work is on hold",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 23,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "fdp4f",
+              "name": "Issue summary",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The agent is missing the review details needed to make the fix. The task has also used all its approved runs.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 17
+            },
+            {
+              "type": "text",
+              "id": "MFfAl",
+              "name": "Responsibility",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Needs an operator · Your existing work is saved",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "500"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "brqAN",
+          "name": "Next steps in dependency order",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "zfe4O",
+              "name": "Next steps heading",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "What needs to happen next",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "CiSXg",
+              "name": "1   Give the agent the missing review details",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "DO48N",
+                  "name": "1   Give the agent the missing review details",
+                  "fill": "$ux-heading",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "1   Give the agent the missing review details",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "xm4rH",
+                  "name": "1   Give the agent the missing review details help",
+                  "fill": "$ux-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "An operator must recover the review report and attach it to the fix request.",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 15
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "DWYNP",
+              "name": "2   Authorize more runs, then continue",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "bMxy0",
+                  "name": "2   Authorize more runs, then continue",
+                  "fill": "$ux-heading",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "2   Authorize more runs, then continue",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "drNx2",
+                  "name": "2   Authorize more runs, then continue help",
+                  "fill": "$ux-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Resolve the missing report first. Extra runs alone will not fix this problem.",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 15
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "rPIBz",
+              "name": "Available secondary action",
+              "gap": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "FolPt",
+                  "name": "Open advanced details action",
+                  "fill": "$surface-2",
+                  "cornerRadius": 8,
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "padding": [
+                    12,
+                    18
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "v0sKL",
+                      "name": "Action label",
+                      "fill": "$text",
+                      "content": "View technical details",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "e3QNmY",
+              "name": "Why retry is unavailable",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Retry becomes available when the missing details and run allowance are resolved.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "y2vSr",
+          "name": "Divider",
+          "width": "fill_container",
+          "height": 1,
+          "fill": "$border"
+        },
+        {
+          "type": "frame",
+          "id": "V3C97Z",
+          "name": "Meaningful progress",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "children": [
+            {
+              "type": "text",
+              "id": "lw1V1",
+              "name": "Progress title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Latest progress",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "koHwN",
+              "name": "Progress summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The implementation reached review. One issue still needs a fix before you can test the result.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            },
+            {
+              "type": "text",
+              "id": "Qx3UJ",
+              "name": "Freshness",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Status checked just now · Refresh",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 12
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "zbudC",
+      "x": 2840,
+      "y": 1900,
+      "name": "Concept — Task details · Advanced · Blocked",
+      "clip": true,
+      "width": 1000,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "uBNvl",
+          "name": "Concept annotation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "DESIGN CONCEPT · SAME TASK AND SNAPSHOT AS SIMPLE VIEW",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "Mhuvo",
+          "name": "Advanced navigation",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "YSNUJ",
+              "name": "Task breadcrumb",
+              "fill": "$ux-muted",
+              "content": "Tasks / T-13",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "id": "UySeo",
+              "type": "ref",
+              "ref": "U4mP8P",
+              "name": "Advanced selected view",
+              "descendants": {
+                "o81X3r": {
+                  "fill": "$surface-2"
+                },
+                "iQsZA": {
+                  "fill": "$ux-muted"
+                },
+                "hCNWL": {
+                  "fill": "$text"
+                },
+                "GF2UI": {
+                  "fill": "$bg"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "n73yAq",
+          "name": "Advanced title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "WhatsApp payment reminders",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "TNrI2",
+          "name": "Technical task state",
+          "fill": "$ux-warning-text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "BLOCKED · Resume: RUNNING · payment-reminders",
+          "lineHeight": 1.5,
+          "fontFamily": "IBM Plex Mono",
+          "fontSize": 13,
+          "fontWeight": "500"
+        },
+        {
+          "type": "frame",
+          "id": "f09HPp",
+          "name": "Advanced sections",
+          "width": "fill_container",
+          "stroke": "$border",
+          "strokeWidth": {
+            "bottom": 1
+          },
+          "gap": 24,
+          "padding": [
+            12,
+            0
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "jQ7Gv",
+              "name": "Diagnosis tab",
+              "fill": "$text",
+              "content": "Diagnosis",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "s1Jxdk",
+              "name": "Runs tab",
+              "fill": "$ux-muted",
+              "content": "Runs",
+              "fontFamily": "Inter",
+              "fontSize": 14
+            },
+            {
+              "type": "text",
+              "id": "mvt8C",
+              "name": "Quality tab",
+              "fill": "$ux-muted",
+              "content": "Quality",
+              "fontFamily": "Inter",
+              "fontSize": 14
+            },
+            {
+              "type": "text",
+              "id": "KKaKE",
+              "name": "Budget tab",
+              "fill": "$ux-muted",
+              "content": "Budget",
+              "fontFamily": "Inter",
+              "fontSize": 14
+            },
+            {
+              "type": "text",
+              "id": "XmmaE",
+              "name": "History tab",
+              "fill": "$ux-muted",
+              "content": "History",
+              "fontFamily": "Inter",
+              "fontSize": 14
+            },
+            {
+              "type": "text",
+              "id": "LR5Kj",
+              "name": "Git tab",
+              "fill": "$ux-muted",
+              "content": "Git",
+              "fontFamily": "Inter",
+              "fontSize": 14
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "XUlml",
+          "name": "Diagnosis",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "h8dC8",
+              "name": "Active blockers heading",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Active blockers",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "XvLrT",
+              "name": "Blocker evidence table",
+              "width": "fill_container",
+              "layout": "vertical",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "XrYtI",
+                  "name": "Evidence table header",
+                  "width": "fill_container",
+                  "stroke": "$border",
+                  "strokeWidth": {
+                    "bottom": 1
+                  },
+                  "gap": 20,
+                  "padding": [
+                    14,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "onIyG",
+                      "name": "Evidence cell 0 0",
+                      "width": 215,
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "I9vR0",
+                          "name": "Evidence text 0 0",
+                          "fill": "$ux-muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Cause",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "aHg4P",
+                      "name": "Evidence cell 0 1",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "R8unO",
+                          "name": "Evidence text 0 1",
+                          "fill": "$ux-muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Evidence",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "do9WR",
+                      "name": "Evidence cell 0 2",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "r34kd",
+                          "name": "Evidence text 0 2",
+                          "fill": "$ux-muted",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Resolution",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "iPQVj",
+                  "name": "Evidence row 1",
+                  "width": "fill_container",
+                  "stroke": "$border",
+                  "strokeWidth": {
+                    "bottom": 1
+                  },
+                  "gap": 20,
+                  "padding": [
+                    14,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "zRYYl",
+                      "name": "Evidence cell 1 0",
+                      "width": 215,
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "egBvZ",
+                          "name": "Evidence text 1 0",
+                          "fill": "$text",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Missing review report",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "HIzyD",
+                      "name": "Evidence cell 1 1",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "e0jZM6",
+                          "name": "Evidence text 1 1",
+                          "fill": "$text",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "One blocking finding; description absent from the assignment",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "gZy1r",
+                      "name": "Evidence cell 1 2",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "iFPpe",
+                          "name": "Evidence text 1 2",
+                          "fill": "$text",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Attach the exact report and reviewed commit",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "tMYEq",
+                  "name": "Evidence row 2",
+                  "width": "fill_container",
+                  "stroke": "$border",
+                  "strokeWidth": {
+                    "bottom": 1
+                  },
+                  "gap": 20,
+                  "padding": [
+                    14,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Sgv3f",
+                      "name": "Evidence cell 2 0",
+                      "width": 215,
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "SlBPL",
+                          "name": "Evidence text 2 0",
+                          "fill": "$text",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Run allowance exhausted",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "n0bgXG",
+                      "name": "Evidence cell 2 1",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "MqW9s",
+                          "name": "Evidence text 2 1",
+                          "fill": "$text",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "40 / 40 agent runs consumed",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "N01Myd",
+                      "name": "Evidence cell 2 2",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "RdT8F",
+                          "name": "Evidence text 2 2",
+                          "fill": "$text",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Approve extra runs after the report is available",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "bhr60",
+          "name": "Review context",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "e8jcXH",
+              "name": "Review context heading",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Review context",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "XuGf4",
+              "name": "Review context body",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "PR #18 · payment-reminders · One blocking finding\nFinding description: not supplied to the corrective assignment.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 14
+            },
+            {
+              "type": "frame",
+              "id": "BWf4K",
+              "name": "Original diagnosis disclosure",
+              "width": "fill_container",
+              "fill": "$surface",
+              "cornerRadius": 8,
+              "layout": "vertical",
+              "gap": 8,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "giJYo",
+                  "name": "Original reason heading",
+                  "fill": "$ux-heading",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Original technical reason",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "W7hvfj",
+                  "name": "Original reason body",
+                  "fill": "$ux-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Only severity counts were provided. The actual findings are absent from the workspace and PR #18's description, comments, reviews, threads, statuses and workflow runs.",
+                  "lineHeight": 1.5,
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 13
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "lNkKJ",
+          "name": "Control prerequisites",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "children": [
+            {
+              "type": "text",
+              "id": "y78dY",
+              "name": "Controls title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Available actions",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "DIQa3",
+              "name": "Controls explanation",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The operator needs the review report before retrying. Increasing the run allowance is a separate authorized action. Opening Advanced does not grant additional permissions.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 14
+            },
+            {
+              "type": "frame",
+              "id": "vaIpO",
+              "name": "Budget action row",
+              "gap": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "d2WRQl",
+                  "name": "Request additional runs",
+                  "fill": "$text",
+                  "cornerRadius": 8,
+                  "padding": [
+                    12,
+                    16
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ul5lX",
+                      "name": "Request additional runs label",
+                      "fill": "$bg",
+                      "content": "Request more runs",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "z0FHu",
+              "name": "No blind retries",
+              "fill": "$ux-warning-text",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Retry unavailable: the review details are still missing.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Svm9K",
+      "x": 3960,
+      "y": 1900,
+      "name": "Concept — Task details · Simple · Mobile",
+      "clip": true,
+      "width": 390,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 28,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "IroLe",
+          "name": "Concept label",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "DESIGN CONCEPT · MOBILE",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "cwrah",
+          "name": "Navigation and view selector",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "justifyContent": "space_between",
+          "children": [
+            {
+              "type": "text",
+              "id": "hhrD7",
+              "name": "Back to tasks",
+              "fill": "$ux-muted",
+              "content": "←  Tasks",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "id": "vDuVk",
+              "type": "ref",
+              "ref": "U4mP8P"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "xOFgB",
+          "name": "Task identity",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "s7LCw",
+              "name": "Task reference",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "T-13 · Commercial properties",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13
+            },
+            {
+              "type": "text",
+              "id": "y7PGe",
+              "name": "Task title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "WhatsApp payment reminders",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 25,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "X4jaQB",
+              "name": "Request summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Send payment reminders and confirmation messages to tenants, with an option to stop receiving them.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 16
+            }
+          ]
+        },
+        {
+          "id": "yL7me",
+          "type": "ref",
+          "ref": "iC3nD"
+        },
+        {
+          "type": "frame",
+          "id": "A44E3H",
+          "name": "Next steps in dependency order",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "c3x7z8",
+              "name": "Next steps heading",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "What needs to happen next",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "F26Fn",
+              "name": "1   Give the agent the missing review details",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "kXkFX",
+                  "name": "1   Give the agent the missing review details",
+                  "fill": "$ux-heading",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "1   Give the agent the missing review details",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "W6Mjqc",
+                  "name": "1   Give the agent the missing review details help",
+                  "fill": "$ux-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "An operator must recover the review report and attach it to the fix request.",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 15
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "QHIOw",
+              "name": "2   Authorize more runs, then continue",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "O5isf",
+                  "name": "2   Authorize more runs, then continue",
+                  "fill": "$ux-heading",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "2   Authorize more runs, then continue",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 16,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "q4m0hK",
+                  "name": "2   Authorize more runs, then continue help",
+                  "fill": "$ux-muted",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Resolve the missing report first. Extra runs alone will not fix this problem.",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Inter",
+                  "fontSize": 15
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "rdcxO",
+              "name": "Available secondary action",
+              "gap": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "HwNyp",
+                  "name": "Open advanced details action",
+                  "fill": "$surface-2",
+                  "cornerRadius": 8,
+                  "stroke": "$border",
+                  "strokeWidth": 1,
+                  "padding": [
+                    12,
+                    18
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "nwNkB",
+                      "name": "Action label",
+                      "fill": "$text",
+                      "content": "View technical details",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "xZdQi",
+              "name": "Why retry is unavailable",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Retry becomes available when the missing details and run allowance are resolved.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "TBRiy",
+          "name": "Divider",
+          "width": "fill_container",
+          "height": 1,
+          "fill": "$border"
+        },
+        {
+          "type": "frame",
+          "id": "H2Sk77",
+          "name": "Meaningful progress",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "children": [
+            {
+              "type": "text",
+              "id": "wHZL5",
+              "name": "Progress title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Latest progress",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "P7CyfN",
+              "name": "Progress summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The implementation reached review. One issue still needs a fix before you can test the result.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            },
+            {
+              "type": "text",
+              "id": "ugBtF",
+              "name": "Freshness",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Status checked just now · Refresh",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 12
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "l41gMo",
+      "x": 920,
+      "y": 3500,
+      "name": "UX specification — States, actions and acceptance",
+      "clip": true,
+      "width": 1640,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "XvpkY",
+          "name": "State matrix title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "State and action contract",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 30,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "Xawcz",
+          "name": "State matrix note",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Design specification. Labels are examples; displayed facts and available actions must come from current evidence and existing permissions.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 15
+        },
+        {
+          "type": "frame",
+          "id": "pmz0F",
+          "name": "State action matrix",
+          "width": "fill_container",
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "frame",
+              "id": "z0VEHl",
+              "name": "State matrix headers",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "gnipS",
+                  "name": "State cell 0 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "nbP7Y",
+                      "name": "State text 0 0",
+                      "fill": "$ux-muted",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Situation",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "JfhSJ",
+                  "name": "State cell 0 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "f2xrIh",
+                      "name": "State text 0 1",
+                      "fill": "$ux-muted",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Simple explanation",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "BP02u",
+                  "name": "State cell 0 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ElQQK",
+                      "name": "State text 0 2",
+                      "fill": "$ux-muted",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Who acts / next step",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "f4kPwR",
+                  "name": "State cell 0 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "q7rSTd",
+                      "name": "State text 0 3",
+                      "fill": "$ux-muted",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Required safeguard",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "a9Nwo",
+              "name": "State scenario 1",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "D3O9s",
+                  "name": "State cell 1 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "rkMsw",
+                      "name": "State text 1 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Planning or working",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "mKbTc",
+                  "name": "State cell 1 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "P0YgnY",
+                      "name": "State text 1 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Hermes is preparing / building your request.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "f6ABkT",
+                  "name": "State cell 1 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SvCUk",
+                      "name": "State text 1 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Hermes · No action needed",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "qNUnG",
+                  "name": "State cell 1 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "KsjzD",
+                      "name": "State text 1 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Show the last meaningful event; do not invent a completion percentage.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "wBikj",
+              "name": "State scenario 2",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "RfQd9",
+                  "name": "State cell 2 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FjU0d",
+                      "name": "State text 2 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Provider credit unavailable",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "yvRY2",
+                  "name": "State cell 2 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "cyBcC",
+                      "name": "State text 2 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Waiting for the agent to become available.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "C9wNs",
+                  "name": "State cell 2 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "f3Tb6D",
+                      "name": "State text 2 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Hermes · Automatic retry, if scheduled",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PRRR7",
+                  "name": "State cell 2 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "u3UwU",
+                      "name": "State text 2 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Show a real retry time in the viewer's timezone; flag an overdue retry.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "lQ3UE",
+              "name": "State scenario 3",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "H3lXM",
+                  "name": "State cell 3 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "mAv3Z",
+                      "name": "State text 3 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Budget exhausted",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "nOj4z",
+                  "name": "State cell 3 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "j9XHXm",
+                      "name": "State text 3 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "More runs need authorization.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "wOnoN",
+                  "name": "State cell 3 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "sl5eZ",
+                      "name": "State text 3 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Approver · Review the request",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "y1KHw",
+                  "name": "State cell 3 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "EoKcr",
+                      "name": "State text 3 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Explain the allowance and effect; never imply an exact cash cost.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "EkJAQ",
+              "name": "State scenario 4",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "yXJJb",
+                  "name": "State cell 4 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "jiX2s",
+                      "name": "State text 4 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Missing review details",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "D4UjU",
+                  "name": "State cell 4 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "lem4s",
+                      "name": "State text 4 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "The agent needs the review report to continue.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "OLRJD",
+                  "name": "State cell 4 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ee8Ye",
+                      "name": "State text 4 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Operator · Supply the exact report",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "M14ca",
+                  "name": "State cell 4 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "IZYcN",
+                      "name": "State text 4 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Increasing budget alone must not appear as a complete solution.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "p7Zr8",
+              "name": "State scenario 5",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "i3ABy0",
+                  "name": "State cell 5 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PLKKb",
+                      "name": "State text 5 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "UI design decision",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "dEtT0",
+                  "name": "State cell 5 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Fmnlk",
+                      "name": "State text 5 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Review the desktop and mobile designs.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "CQDoz",
+                  "name": "State cell 5 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "kBsWU",
+                      "name": "State text 5 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Approver · Approve or request changes",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "x9KptK",
+                  "name": "State cell 5 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "NkzoH",
+                      "name": "State text 5 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Both images must load; record receipts and confirm the decision was saved.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "kU5jm",
+              "name": "State scenario 6",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Ip33E",
+                  "name": "State cell 6 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "G9TVB3",
+                      "name": "State text 6 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Version ready for testing",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "FVfrZ",
+                  "name": "State cell 6 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "tFu2v",
+                      "name": "State text 6 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "A test version is ready for you.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "k9Jke1",
+                  "name": "State cell 6 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "r7WcCT",
+                      "name": "State text 6 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Tester · Open test version",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "DDjHg",
+                  "name": "State cell 6 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "EuTDl",
+                      "name": "State text 6 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Require a verified candidate; record results against that version.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Txmbb",
+              "name": "State scenario 7",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "SnfTP",
+                  "name": "State cell 7 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "P1YHA",
+                      "name": "State text 7 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Ready to integrate",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kIARo",
+                  "name": "State cell 7 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "iAxgG",
+                      "name": "State text 7 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Your tested change is ready to apply.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ijL2Q",
+                  "name": "State cell 7 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "gvUET",
+                      "name": "State text 7 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Approver · Review and approve",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "h4t4C",
+                  "name": "State cell 7 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "i7Z8Hf",
+                      "name": "State text 7 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Explain the target and consequence; retain exact-version approval binding.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Yv9mF",
+              "name": "State scenario 8",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "fDDxJ",
+                  "name": "State cell 8 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "RQZSj",
+                      "name": "State text 8 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Multiple blockers",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "n84Pb",
+                  "name": "State cell 8 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xKLET",
+                      "name": "State text 8 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Two things need attention.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uMZpO",
+                  "name": "State cell 8 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PeNeH",
+                      "name": "State text 8 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Responsible person · Resolve in order",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "F5pPh",
+                  "name": "State cell 8 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "RSwzh",
+                      "name": "State text 8 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Keep every active blocker visible; distinguish human and automatic steps.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "NGYW2",
+              "name": "State scenario 9",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "r1QDrT",
+                  "name": "State cell 9 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pS8yy",
+                      "name": "State text 9 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "No permission",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "d36Uly",
+                  "name": "State cell 9 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "O8n5vC",
+                      "name": "State text 9 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "An authorized person needs to make this decision.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "iT4qQ",
+                  "name": "State cell 9 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ux7Jq",
+                      "name": "State text 9 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Authorized person · No impersonation",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uD1CA",
+                  "name": "State cell 9 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Z7E4d",
+                      "name": "State text 9 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "View preference never changes permissions or exposes secrets.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "YScwi",
+              "name": "State scenario 10",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "La1WA",
+                  "name": "State cell 10 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Q6KoZk",
+                      "name": "State text 10 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Unavailable or stale data",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "j5QJD",
+                  "name": "State cell 10 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "fXhVF",
+                      "name": "State text 10 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "The current status could not be checked.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "XE7WF",
+                  "name": "State cell 10 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "b4yBo",
+                      "name": "State text 10 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Refresh / contact operator",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "X9dJNu",
+                  "name": "State cell 10 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "H79BE7",
+                      "name": "State text 10 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Show the last successful check. Never treat stale data as current.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "AzbAJ",
+              "name": "State scenario 11",
+              "width": "fill_container",
+              "stroke": "$border",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 24,
+              "padding": [
+                16,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "aSloA",
+                  "name": "State cell 11 0",
+                  "width": 230,
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "l3YBzv",
+                      "name": "State text 11 0",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Completed / cancelled",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "zK1zB",
+                  "name": "State cell 11 1",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Ve93G",
+                      "name": "State text 11 1",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "The change is available / work was stopped.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uP2sG",
+                  "name": "State cell 11 2",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "YjICu",
+                      "name": "State text 11 2",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Open result / view saved work",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "aR5L5",
+                  "name": "State cell 11 3",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "lnHpR",
+                      "name": "State text 11 3",
+                      "fill": "$text",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Completion needs verification evidence; cancellation is a separate action.",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "Vu8Zw",
+          "name": "Acceptance heading",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Acceptance before implementation and release",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 21,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "c5037I",
+          "name": "Acceptance checklist",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "DESIGN REVIEW  ·  Desktop + 390 px mobile · Keyboard and focus · No color-only statuses · Loading, empty, error and permission states\nDATA REVIEW  ·  Current evidence wins over old reasons · All blockers preserved · Unknown causes stay unknown · No automatic LLM explanation required\nUSABILITY  ·  A nontechnical person can identify the situation, who must act and the next step without opening Advanced\nIMPLEMENTATION LATER  ·  Backend contract tests · State/action tests · Approval persistence · Visual comparison · Regression checks · Preview before deployment",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 15
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "dC6tU",
+      "x": 2840,
+      "y": 3500,
+      "name": "Approved direction — Simple Home and task list",
+      "clip": true,
+      "width": 1100,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "sta7r",
+          "name": "Home identity",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Orchestration",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 30,
+          "fontWeight": "600"
+        },
+        {
+          "id": "r0m6aN",
+          "type": "ref",
+          "ref": "U4mP8P",
+          "name": "Global view selector"
+        },
+        {
+          "type": "text",
+          "id": "u9pmJ",
+          "name": "Navigation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Home     Tasks     Decisions     Projects",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 14
+        },
+        {
+          "type": "text",
+          "id": "lEGxn",
+          "name": "Home section",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Needs a decision",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 23,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "j2A4A",
+          "name": "Decision text",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Review a design, answer a question or approve a change. Operational problems are listed separately below.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 15
+        },
+        {
+          "type": "frame",
+          "id": "AsBYV",
+          "name": "Simple decision row",
+          "width": "fill_container",
+          "fill": "$surface",
+          "cornerRadius": 10,
+          "layout": "vertical",
+          "gap": 8,
+          "padding": 20,
+          "children": [
+            {
+              "type": "text",
+              "id": "e0c8iZ",
+              "name": "Decision identity",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "T-12 · WhatsApp enquiries and receipts",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 17,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "Y4ACxX",
+              "name": "Decision explanation",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "A test version is ready. Try it before deciding whether to apply the change.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            },
+            {
+              "type": "text",
+              "id": "Oz75y",
+              "name": "Decision action",
+              "fill": "$text",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Open test version   →",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "kzwhU",
+          "name": "Attention title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Needs attention",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 23,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "McdA8",
+          "name": "Attention task",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "T-13 · WhatsApp payment reminders",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "T1EfU",
+          "name": "Attention cause",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Work is on hold. Open the task to see what needs to happen next.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 15
+        },
+        {
+          "type": "text",
+          "id": "kjJXl",
+          "name": "Progress section",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Tasks in progress",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 23,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "x0yaB",
+          "name": "Preparing your request row",
+          "width": "fill_container",
+          "stroke": "$border",
+          "strokeWidth": {
+            "bottom": 1
+          },
+          "gap": 24,
+          "padding": [
+            16,
+            0
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "ce4dW",
+              "name": "Preparing your request",
+              "fill": "$text",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Preparing your request",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "Z0gPVE",
+              "name": "Hermes is checking what needs to be built.",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Hermes is checking what needs to be built.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "XAcl4",
+          "name": "Working on a change row",
+          "width": "fill_container",
+          "stroke": "$border",
+          "strokeWidth": {
+            "bottom": 1
+          },
+          "gap": 24,
+          "padding": [
+            16,
+            0
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "jooxx",
+              "name": "Working on a change",
+              "fill": "$text",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Working on a change",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "HRnbK",
+              "name": "Open the task for the latest progress.",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Open the task for the latest progress.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "vIg9L",
+          "name": "Sample notice",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Illustrative task states · Advanced reveals agent usage, technical history and operational tools.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "cSWzp",
+      "x": 4520,
+      "y": 1900,
+      "name": "Task flow — Design decision",
+      "clip": true,
+      "width": 660,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "ueJfV",
+          "name": "Flow annotation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "UX STATE · DESIGN DECISION",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "id": "fPOGm",
+          "type": "ref",
+          "ref": "U4mP8P",
+          "name": "Task view selector"
+        },
+        {
+          "type": "text",
+          "id": "sLSMm",
+          "name": "Situation title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Review the proposed screens",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "C3KvW",
+          "name": "Situation explanation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Check the desktop and mobile images before work continues.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "text",
+          "id": "N062rR",
+          "name": "Next step title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "What happens next",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "y532JE",
+          "name": "Next step explanation",
+          "fill": "$text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Review both images, then approve this design or request changes.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "frame",
+          "id": "sFzMw",
+          "name": "Review design action",
+          "fill": "$text",
+          "cornerRadius": 8,
+          "padding": [
+            12,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "DcydW",
+              "name": "Action label",
+              "fill": "$bg",
+              "content": "Review design",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "Z7xhV7",
+          "name": "Behavior specification",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Approving applies only to this design version. A failed image load keeps approval unavailable.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "MsXLa",
+      "x": 5240,
+      "y": 1900,
+      "name": "Task flow — Test and apply",
+      "clip": true,
+      "width": 660,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "H8cPBh",
+          "name": "Flow annotation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "UX STATE · TEST AND APPLY",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "id": "sscqq",
+          "type": "ref",
+          "ref": "U4mP8P",
+          "name": "Task view selector"
+        },
+        {
+          "type": "text",
+          "id": "A7RDDI",
+          "name": "Situation title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Try the change before applying it",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "ee5t3",
+          "name": "Situation explanation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "A verified test version is available.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "text",
+          "id": "JUWss",
+          "name": "Next step title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "What happens next",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "yEem0",
+          "name": "Next step explanation",
+          "fill": "$text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Open the test version. If it works, review the approval below to apply this exact change.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "frame",
+          "id": "J6dhyZ",
+          "name": "Open test version action",
+          "fill": "$text",
+          "cornerRadius": 8,
+          "padding": [
+            12,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "zVwOy",
+              "name": "Action label",
+              "fill": "$bg",
+              "content": "Open test version",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "Ho4jU",
+          "name": "Behavior specification",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Approving applies the tested change to the target project. A failed or expired preview cannot satisfy testing.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "K2TKt",
+      "x": 5960,
+      "y": 1900,
+      "name": "Task flow — Waiting for an agent",
+      "clip": true,
+      "width": 660,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "VF1U4",
+          "name": "Flow annotation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "UX STATE · WAITING FOR AN AGENT",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "id": "yvjLz",
+          "type": "ref",
+          "ref": "U4mP8P",
+          "name": "Task view selector"
+        },
+        {
+          "type": "text",
+          "id": "NccDZ",
+          "name": "Situation title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Waiting for an available agent",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "T7tzH",
+          "name": "Situation explanation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "The task is queued. No action is needed from you.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "text",
+          "id": "hO9Pj",
+          "name": "Next step title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "What happens next",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "z2npU2",
+          "name": "Next step explanation",
+          "fill": "$text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Hermes will check availability again. A retry time is shown only when the platform provides one.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "frame",
+          "id": "L1VNb",
+          "name": "View task action",
+          "fill": "$text",
+          "cornerRadius": 8,
+          "padding": [
+            12,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "rUBHL",
+              "name": "Action label",
+              "fill": "$bg",
+              "content": "View task",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "Utyht",
+          "name": "Behavior specification",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "An overdue retry is an operator issue, not another user approval.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "xfuXl",
+      "x": 4520,
+      "y": 2660,
+      "name": "Task flow — Working",
+      "clip": true,
+      "width": 660,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "X73pGr",
+          "name": "Flow annotation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "UX STATE · WORKING",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "id": "XQWeP",
+          "type": "ref",
+          "ref": "U4mP8P",
+          "name": "Task view selector"
+        },
+        {
+          "type": "text",
+          "id": "m4G6Z",
+          "name": "Situation title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Hermes is working on your request",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "Aq5BK",
+          "name": "Situation explanation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "The current work and latest meaningful progress appear here.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "text",
+          "id": "A9OTKX",
+          "name": "Next step title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "What happens next",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "TAWGb",
+          "name": "Next step explanation",
+          "fill": "$text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "No action needed. You can pause the task from Task controls.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "frame",
+          "id": "qzJCx",
+          "name": "View request action",
+          "fill": "$text",
+          "cornerRadius": 8,
+          "padding": [
+            12,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "S100v",
+              "name": "Action label",
+              "fill": "$bg",
+              "content": "View request",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "yJiG0",
+          "name": "Behavior specification",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "No estimated completion time or percentage is invented.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "feOep",
+      "x": 5240,
+      "y": 2660,
+      "name": "Task flow — Data unavailable",
+      "clip": true,
+      "width": 660,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "TTcje",
+          "name": "Flow annotation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "UX STATE · DATA UNAVAILABLE",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "id": "gfvOB",
+          "type": "ref",
+          "ref": "U4mP8P",
+          "name": "Task view selector"
+        },
+        {
+          "type": "text",
+          "id": "VOfz8",
+          "name": "Situation title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "The current status could not be checked",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "j9pHc",
+          "name": "Situation explanation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "The last known status is shown with the time it was checked.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "text",
+          "id": "cDLSe",
+          "name": "Next step title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "What happens next",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "ad5lL",
+          "name": "Next step explanation",
+          "fill": "$text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Refresh before acting. Technical actions are disabled while the status is out of date.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "frame",
+          "id": "KA7NU",
+          "name": "Refresh status action",
+          "fill": "$text",
+          "cornerRadius": 8,
+          "padding": [
+            12,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "js8n9",
+              "name": "Action label",
+              "fill": "$bg",
+              "content": "Refresh status",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "S9XDlk",
+          "name": "Behavior specification",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "A failed response never clears the last good information or implies an action succeeded.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "QrPiG",
+      "x": 5960,
+      "y": 2660,
+      "name": "Task flow — Restricted action",
+      "clip": true,
+      "width": 660,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "irAWb",
+          "name": "Flow annotation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "UX STATE · RESTRICTED ACTION",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "id": "nQIMr",
+          "type": "ref",
+          "ref": "U4mP8P",
+          "name": "Task view selector"
+        },
+        {
+          "type": "text",
+          "id": "Rko1z",
+          "name": "Situation title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "An authorized person needs to decide",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "j6okSh",
+          "name": "Situation explanation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "You can follow the task, but the platform refused this action.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "text",
+          "id": "yOnQ6",
+          "name": "Next step title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "What happens next",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "y30X4",
+          "name": "Next step explanation",
+          "fill": "$text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Contact an approver or operator. Changing to Advanced does not change permissions.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "frame",
+          "id": "EBiY6",
+          "name": "View task action",
+          "fill": "$text",
+          "cornerRadius": 8,
+          "padding": [
+            12,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "pVftf",
+              "name": "Action label",
+              "fill": "$bg",
+              "content": "View task",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "ny0aR",
+          "name": "Behavior specification",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Never suggest that switching modes grants access.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "uvbTQ",
+      "x": 4520,
+      "y": 3420,
+      "name": "Task flow — Finished",
+      "clip": true,
+      "width": 660,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "R4Lqt",
+          "name": "Flow annotation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "UX STATE · FINISHED",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600"
+        },
+        {
+          "id": "ZFe5a",
+          "type": "ref",
+          "ref": "U4mP8P",
+          "name": "Task view selector"
+        },
+        {
+          "type": "text",
+          "id": "OGtkg",
+          "name": "Situation title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "The change is complete",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 28,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "ZhA8C",
+          "name": "Situation explanation",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "The result passed the required completion checks.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "text",
+          "id": "lGEeu",
+          "name": "Next step title",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "What happens next",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "p0POT",
+          "name": "Next step explanation",
+          "fill": "$text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Open the delivered result or review the original request.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 16
+        },
+        {
+          "type": "frame",
+          "id": "JfG6h",
+          "name": "View result action",
+          "fill": "$text",
+          "cornerRadius": 8,
+          "padding": [
+            12,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "TJj3F",
+              "name": "Action label",
+              "fill": "$bg",
+              "content": "View result",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "E14M29",
+          "name": "Behavior specification",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "A cancelled or failed task is not presented as a completed change.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13
+        }
+      ]
     }
   ],
   "variables": {
@@ -16256,6 +20201,26 @@
     "codex": {
       "type": "color",
       "value": "#5BB8E8"
+    },
+    "ux-muted": {
+      "type": "color",
+      "value": "#B6B2CF"
+    },
+    "ux-heading": {
+      "type": "color",
+      "value": "#F2EFFF"
+    },
+    "ux-warning-bg": {
+      "type": "color",
+      "value": "#262035"
+    },
+    "ux-warning-text": {
+      "type": "color",
+      "value": "#FFD38A"
+    },
+    "ux-on-accent": {
+      "type": "color",
+      "value": "#100D24"
     }
   },
   "fileToken": "56e7d858-b941-437c-99ae-fee39af6b8bc"
