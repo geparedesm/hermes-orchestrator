@@ -9,7 +9,8 @@ Implementation was developed in the isolated `codex/simple-advanced-dashboard` w
 The deployment changes only the mounted orchestration Dashboard plugin, documentation, tests and Pencil design.
 No control-plane image rebuild, database migration, task retry, budget increase, approval decision or protected-branch merge was performed.
 At initial activation the live checkout contained the deployment changes without a commit or pull request.
-The changes are now being committed on the feature branch for review and integration.
+The design and implementation are committed on `codex/simple-advanced-dashboard` and published in
+[PR #96](https://github.com/geparedesm/hermes-orchestrator/pull/96). The PR targets `main`; integration is pending.
 
 ## Automated checks
 
