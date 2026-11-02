@@ -159,6 +159,28 @@
 .orch-change-mark { flex: none; width: 1.15rem; height: 1.15rem; border-radius: 0.3rem; display: inline-flex; align-items: center;
   justify-content: center; font-weight: 700; font-size: 0.8rem; }
 .orch-approval-why { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.88rem; }
+/* A quality gate exception (ui/hermes-dashboard.pen, "Approval card #138 · v1 · After"). */
+.orch-gate { display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
+.orch-gate-passed { display: flex; gap: 0.45rem; align-items: flex-start; font-size: 0.85rem; color: var(--o-muted); }
+.orch-gate-passed svg { flex: none; margin-top: 0.1rem; color: var(--o-good); }
+.orch-gate-reasons { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.8rem; }
+.orch-gate-reasons > li { display: flex; gap: 0.7rem; align-items: flex-start; }
+.orch-gate-number { flex: none; width: 1.4rem; height: 1.4rem; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; font-size: 0.75rem; font-weight: 650; background: var(--o-soft); }
+.orch-gate-reason { gap: 0.25rem; min-width: 0; font-size: 0.88rem; line-height: 1.45; }
+.orch-gate-reason strong { font-size: 0.92rem; }
+.orch-gate-reason ul { margin: 0.15rem 0 0; padding-left: 1rem; color: var(--o-muted); }
+.orch-gate-reason code { display: block; width: fit-content; max-width: 100%; margin-top: 0.3rem; padding: 0.3rem 0.55rem;
+  border-radius: 0.35rem; background: var(--o-soft); color: var(--o-fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.orch-gate-blockers { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.85rem 1rem; border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--o-warn) 12%, transparent); }
+.orch-gate-blockers > strong { color: var(--o-warn); font-size: 0.92rem; }
+.orch-gate-blockers ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+.orch-gate-blockers li { display: flex; gap: 0.7rem; align-items: flex-start; font-size: 0.88rem; line-height: 1.45; }
+.orch-gate-blockers li .orch-pill { flex: none; }
+.orch-gate-note { display: flex; gap: 0.55rem; align-items: flex-start; padding: 0.6rem 0.75rem; border-radius: 0.5rem;
+  background: var(--o-soft); font-size: 0.88rem; line-height: 1.45; }
+.orch-gate-note svg { flex: none; margin-top: 0.15rem; color: var(--o-info); }
 .orch-outcomes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
 .orch-outcome { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.85rem; padding: 0.5rem 0.65rem; border-radius: 0.45rem; }
 .orch-outcome-yes { background: color-mix(in srgb, var(--o-good) 9%, transparent); }
@@ -553,7 +575,7 @@
 .orch-simple .orch-panel { width: min(56.25rem, 100%); }
 .orch-simple .orch-panel-body { padding: 1.5rem 2rem 2rem; gap: 1.5rem; }
 .orch-simple .orch-panel-title h2 { font-size: 1.65rem; line-height: 1.4; }
-.orch-simple .orch-approval .orch-advice { display: none; }
+.orch-simple .orch-approval .orch-advice:not(.orch-advice-keep) { display: none; }
 @media (max-width: 600px) {
   .orch-simple .orch-panel-body { padding: 1rem; }
   .orch-simple .orch-panel-title h2 { font-size: 1.3rem; }

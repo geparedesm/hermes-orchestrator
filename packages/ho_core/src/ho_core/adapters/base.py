@@ -265,6 +265,7 @@ def command_event(event_type: str, command: str, **extra: Any) -> AdapterEvent:
         "command": command[:500],
         "class": classification.command_class.value,
         "rule": classification.rule_id,
+        **({"match": classification.match[:160]} if classification.command_class == CommandClass.HIGH_RISK else {}),
         # Decided on the whole command, before it is cut short (T-55, Codex review).
         "blocked": classification.command_class == CommandClass.HIGH_RISK and provably_blocked(command),
         **extra,

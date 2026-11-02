@@ -859,7 +859,8 @@ class Executions:
             unproven = sum(1 for d in flagged if d.get("blocked") is not True)  # decided on the whole command
             unproven += max(0, result.high_risk_commands - len(flagged))  # observed but not kept as events: unknown
             commands = [{"command": redact(str(d.get("command") or ""))[0][:200], "rule": d.get("rule"),
-                         "blocked": d.get("blocked") is True} for d in flagged[:10]]
+                         "blocked": d.get("blocked") is True,
+                         **({"match": redact(str(d["match"]))[0][:160]} if d.get("match") else {})} for d in flagged[:10]]
             record_event(uow.cur, "COMMAND_HIGH_RISK", actor="agent-manager", project_id=row["project_id"], task_id=row["task_id"],
                          summary=f"{result.high_risk_commands} high-risk command(s) observed in execution {str(row['id'])[:8]} (advisory)",
                          data={"execution_id": str(row["id"]), "role": row["role"], "provider": row["provider"],

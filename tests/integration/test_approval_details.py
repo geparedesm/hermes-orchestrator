@@ -107,8 +107,13 @@ def test_a_gate_exception_lists_the_risky_commands(api, services, projects_root)
     [approval] = pending(api, "HIGH_RISK_OPERATION")
     assert texts(approval) == ["2 high-risk command(s) observed in execution 01a1 (advisory)"]
     assert approval["details"]["risk"] == "critical" and ["Commit", "a" * 12] in approval["details"]["facts"]
-    assert "Check what they did" in approval["details"]["headline"] and approval["details"]["recommendation"]["action"] == "look"
-    assert approval["details"]["if_no"] == "The task goes back to the agents to fix it."
+    d = approval["details"]
+    assert d["headline"] == "Before this change can go into main, the safety rules need your OK on 1 point."
+    assert d["reasons"] == [{"kind": "commands", "title": "An agent ran 2 command(s) the safety check flags",
+                             "detail": "They look like an attempt to run a risky command. The check only warns, so they may "
+                                       "have run: look at what it matched.", "items": []}]
+    assert d["recommendation"]["action"] == "look" and d["blockers"] == [] and d["passed"] == []
+    assert d["if_no"] == "The task goes back to the agents to fix it."
 
 
 def test_a_merge_lists_what_is_included_and_links_the_pull_request(api, services, projects_root):
@@ -172,9 +177,87 @@ def test_a_gate_exception_says_in_plain_words_what_the_agents_tried(api, service
                               "meaning": "use administrator permissions or change permissions" if blocked
                               else "read passwords or keys"}]
     assert "01a1" not in d["headline"] and texts(approval) == []  # the commands are listed once, not repeated as lines
+    assert d["headline"] == "Before this change can go into main, the safety rules need your OK on 1 point."
+    assert d["reasons"][0]["items"] == ["Reviewer claude: sudo -u postgres psql -c '\\l'"]
     if blocked:
-        assert d["headline"] == ("The agents tried 1 action(s) they are not allowed to do (for example, use administrator "
-                                 "permissions or change permissions). They were blocked and changed nothing.")
+        assert d["reasons"][0]["detail"] == ("They look like an attempt to use administrator permissions or change permissions. "
+                                             "They were blocked and changed nothing.")
         assert d["risk"] == "low" and d["recommendation"]["action"] == "look"  # no passing tests or review recorded here
     else:
-        assert "Check what they did" in d["headline"] and d["risk"] == "critical" and d["recommendation"]["action"] == "look"
+        assert d["risk"] == "critical" and d["recommendation"]["action"] == "look"
+        assert d["reasons"][0]["detail"].startswith("They look like an attempt to read passwords or keys. The check only warns")
+
+
+def test_a_gate_exception_explains_each_reason_what_passed_and_what_still_blocks(api, services, projects_root):
+    """T-13 (#138): "a sensitive change has too few tests" while every test passed. The card says which sensitive area
+    changed and which check is missing, what passed, the text the command check matched, and that the reviewer's
+    open problems block the change whatever the person decides."""
+    from ho_core.enums import ApprovalAction, Risk
+
+    key, row = _task(api, services, projects_root)
+    commit = "c" * 40
+    plan = {"risk": {"risk": "HIGH", "areas": {"payments": ["models/payment.py", "models/payment_notice.py"]},
+                     "reasons": ["payments: models/payment.py", "project sensitive paths: security/ir.model.access.csv"]},
+            "gaps": [{"kind": "no_typecheck_command", "detail": "typecheck required (risk) but the project has no command for it"}]}
+    requirements = [{"name": "tests", "status": "PASS"}, {"name": "build", "status": "PASS"}, {"name": "lint", "status": "PASS"},
+                    {"name": "security", "status": "PASS"}, {"name": "typecheck", "status": "UNAVAILABLE"},
+                    {"name": "cross_review", "status": "PASS"}, {"name": "requirements", "status": "PASS"},
+                    {"name": "no_blocking_findings", "status": "FAIL", "detail": "1 open finding(s) of severity CRITICAL, HIGH, MEDIUM"},
+                    {"name": "no_conflicts", "status": "PASS"}, {"name": "no_policy_violations", "status": "APPROVAL_REQUIRED"}]
+    command = {"command": "/bin/bash -lc \"cat > models/payment_notice.py <<'PY'", "rule": "CMD-H09", "blocked": False,
+               "match": "…body = 'Recordatorio: su pago vence mañana'…"}
+    data = {"role": "DEVELOPER", "provider": "codex", "count": 1, "rules": ["CMD-H09"], "unproven": 1, "commands": [command]}
+    with services.ctx.db.transaction() as cur:
+        cur.execute("INSERT INTO events (task_id, project_id, type, actor, summary, data, audit) VALUES (%s, %s, 'COMMAND_HIGH_RISK', "
+                    "'agent-manager', '1 high-risk command(s) observed in execution 01a1 (advisory)', %s, false)",
+                    (row["id"], row["project_id"], json.dumps(data)))
+        cur.execute("INSERT INTO verifications (id, task_id, project_id, purpose, commit_sha, plan, state) "
+                    "VALUES (gen_random_uuid(), %s, %s, 'INTEGRATION', %s, %s, 'PASSED')",
+                    (row["id"], row["project_id"], commit, json.dumps(plan)))
+        cur.execute("INSERT INTO quality_gate_evaluations (id, task_id, commit_sha, config_hash, policy_version, risk, requirements, "
+                    "residual_risk, outcome) VALUES (gen_random_uuid(), %s, %s, 'h', 'p', 'HIGH', %s, 'r', 'FAIL')",
+                    (row["id"], commit, json.dumps(requirements)))
+        for provider in ("claude", "codex"):
+            cur.execute("INSERT INTO executions (id, task_id, project_id, role, provider, image, command, resource_profile, state, "
+                        "spec, requested_by) VALUES (gen_random_uuid(), %s, %s, 'REVIEWER', %s, 'i', '[]', 'LIGHT', 'SUCCEEDED', "
+                        "'{}', 'test') RETURNING id", (row["id"], row["project_id"], provider))
+            cur.execute("INSERT INTO reviews (id, task_id, execution_id, commit_sha, reviewer_provider, outcome, requirements_met, "
+                        "summary) VALUES (gen_random_uuid(), %s, %s, %s, %s, 'APPROVED', true, 's') RETURNING id",
+                        (row["id"], cur.fetchone()["id"], commit, provider))
+            review = cur.fetchone()["id"]
+            if provider == "claude":
+                cur.execute("INSERT INTO review_findings (id, review_id, severity, category, path, description) VALUES "
+                            "(gen_random_uuid(), %s, 'MEDIUM', 'security', 'models/whatsapp_bot.py', %s), "
+                            "(gen_random_uuid(), %s, 'LOW', 'ux', 'data/whatsapp_data.xml', 'Misleading wording.')",
+                            (review, "Replying BAJA again and again makes the bot send unlimited messages. It bypasses the "
+                                     "hourly limit.", review))
+    with services.ctx.unit_of_work() as uow:
+        services.approvals.request(uow, action=ApprovalAction.HIGH_RISK_OPERATION, project_id=row["project_id"], task_id=row["id"],
+                                   subject={"kind": "quality_gate_exception", "commit": commit,
+                                            "reasons": ["policy violations were observed (section 58)",
+                                                        "sensitive change with inadequate tests (section 56)"]},
+                                   config_hash="0" * 64, summary=f"{key}: Quality Gate exception needed", requested_by="quality-gate",
+                                   risk=Risk.CRITICAL)
+    [approval] = pending(api, "HIGH_RISK_OPERATION")
+    d = approval["details"]
+    assert d["headline"] == ("Before this change can go into main, the safety rules need your OK on 2 points. "
+                             "The reviewer also found 1 problem that must be fixed first.")
+    assert d["passed"] == ["tests", "build", "code style (lint)", "security scan", "does what was asked",
+                           "up to date with main", "approved by Claude and Codex"]
+    commands, sensitive = d["reasons"]
+    assert commands["items"] == ["Developer codex: the check matched \"…body = 'Recordatorio: su pago vence mañana'…\""]
+    assert sensitive == {"kind": "rule", "title": "A sensitive change is missing some required checks",
+                         "detail": "It changes payments (2 files) and files the project marks as sensitive "
+                                   "(security/ir.model.access.csv), so the rules ask for extra checks. Every check that "
+                                   "could run passed.",
+                         "items": ["This project has no type check (a tool that catches code using data the wrong way), "
+                                   "so that check was skipped."]}
+    assert d["blockers"] == [{"severity": "Medium", "category": "security", "path": "models/whatsapp_bot.py",
+                              "text": "Replying BAJA again and again makes the bot send unlimited messages."}]
+    assert d["minor_findings"] == 1
+    assert d["recommendation"] == {"action": "reject", "text": "The reviewer's 1 problem(s) block this change whatever you "
+                                                               "decide, so approving now would not add it."}
+    assert d["if_yes"] == ("You accept these points for this exact version only (commit ccccccc). "
+                           "It still cannot go in until the reviewer's problems are fixed.")
+    # The task is not waiting for this decision (it is being worked on again): the card says so.
+    assert d["note"] is not None and "asked again only if something still needs your OK" in d["note"]

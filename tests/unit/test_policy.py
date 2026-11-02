@@ -240,3 +240,12 @@ def test_ui_designer_read_exception_refuses_other_projects_and_writes(platform, 
     role = values.pop("role", Role.DEVELOPER)
     grant, _ = evaluate_grant(request(role, **values), config(platform), platform, now=NOW)
     assert grant["capabilities"]["project_read"] == []
+
+
+def test_a_high_risk_classification_keeps_the_text_it_matched():
+    """T-13 (#138): a stored command is cut short, so the person deciding needs the matched text itself to tell a real
+    `su` from the Spanish word in a message the agent wrote."""
+    script = "cat > models/notice.py <<'PY'\n" + "x = 1\n" * 60 + "body = 'Recordatorio: su pago vence mañana'\nPY"
+    result = classify(script)
+    assert result.rule_id == "CMD-H09"
+    assert "Recordatorio: su pago vence" in result.match and len(result.match) <= 100

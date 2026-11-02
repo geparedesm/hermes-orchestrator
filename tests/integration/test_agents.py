@@ -144,7 +144,9 @@ def test_high_risk_commands_raise_an_advisory_event(api, services, agents, task)
         cur.execute("SELECT data FROM events WHERE type = 'COMMAND_HIGH_RISK'")
         data = cur.fetchone()["data"]
     assert data["count"] == 1 and data["rules"] == ["CMD-H11"] and data["unproven"] == 1 and data["role"] == "DEVELOPER"
-    assert data["commands"] == [{"command": "cat /run/ho-credentials/claude/oauth_token", "rule": "CMD-H11", "blocked": False}]
+    # The matched text too (T-13): a stored command is cut short and may not contain what the rule matched.
+    assert data["commands"] == [{"command": "cat /run/ho-credentials/claude/oauth_token", "rule": "CMD-H11", "blocked": False,
+                                 "match": "cat /run/ho-credentials/claude/oauth_token"}]
 
 
 def test_resume_continues_the_provider_session(api, services, agents, task):

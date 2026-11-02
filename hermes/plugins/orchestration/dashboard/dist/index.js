@@ -245,7 +245,7 @@
 
   const ICONS = {
     plus: "M12 5v14M5 12h14", search: "M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16zM21 21l-4.3-4.3", x: "M18 6 6 18M6 6l12 12",
-    check: "M20 6 9 17l-5-5", alert: "M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
+    check: "M20 6 9 17l-5-5", info: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01", alert: "M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
     clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2", play: "M6 4l14 8-14 8z", pause: "M6 4h4v16H6zM14 4h4v16h-4z",
     retry: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5", file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6",
     link: "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7",
@@ -376,7 +376,7 @@
             h("code", null, c.command));
         }))) : null,
       d.why ? h("div", { className: "orch-approval-why" }, h("span", { className: "orch-approval-label" }, "Why you"), h("span", null, d.why)) : null,
-      d.if_yes || d.if_no ? h("div", { className: "orch-outcomes" },
+      (d.if_yes || d.if_no) && !d.reasons ? h("div", { className: "orch-outcomes" },  // a gate exception shows them on the card
         d.if_yes ? h("div", { className: "orch-outcome orch-outcome-yes" }, h("strong", null, "If yes"), h("span", null, d.if_yes)) : null,
         d.if_no ? h("div", { className: "orch-outcome orch-outcome-no" }, h("strong", null, "If no"), h("span", null, d.if_no)) : null) : null,
       (d.facts || []).length || (d.links || []).length ? h("div", { className: "orch-approval-facts" },
@@ -400,9 +400,48 @@
     if (!r || !ADVICE[r.action]) return null;
     const style = ADVICE[r.action];
     const lead = r.action === "look" ? "Look at the details before deciding" : style[2] + capital(r.action === "approve" ? props.yes : props.no);
-    return h("div", { className: "orch-advice orch-advice-" + style[0] },
+    return h("div", { className: cx("orch-advice orch-advice-" + style[0], props.keep && "orch-advice-keep") },
       h(Icon, { name: style[1], size: 15 }),
       h("div", null, h("strong", null, lead), r.text ? h("span", null, " — " + r.text) : null));
+  }
+
+  // A quality gate exception (ui/hermes-dashboard.pen, "Approval card #138 · v1 · After"): what already passed, each
+  // reason the person is asked in plain words, the reviewer's problems that block the change whatever they decide, and
+  // what yes and no do. Shown in both views: this is the decision itself, not a technical detail.
+  function GateException(props) {
+    const d = props.details;
+    const blockers = d.blockers || [];
+    // "yes, continue" → "If you continue": the answer without its yes/no.
+    function outcome(answer) { return "If you " + String(answer).replace(/^(yes|no),\s*/i, ""); }
+    return h("div", { className: "orch-gate" },
+      (d.passed || []).length ? h("div", { className: "orch-gate-passed" }, h(Icon, { name: "check", size: 15 }),
+        h("span", null, "Already passed: " + d.passed.join(", "))) : null,
+      h("div", { className: "orch-stack" },
+        h("div", { className: "orch-approval-label" }, "Why your OK is needed"),
+        h("ol", { className: "orch-gate-reasons" }, (d.reasons || []).map(function (r, i) {
+          return h("li", { key: i },
+            h("span", { className: "orch-gate-number" }, i + 1),
+            h("div", { className: "orch-stack orch-gate-reason" },
+              h("strong", null, r.title),
+              r.detail ? h("span", { className: "orch-muted" }, r.detail) : null,
+              (r.items || []).length ? h("ul", null, r.items.map(function (item, j) {
+                const match = /^(.*?): the check matched "(.*)"$/.exec(item);
+                return h("li", { key: j }, match ? [match[1] + ": the check matched", h("code", { key: "c" }, match[2])] : item);
+              })) : null));
+        }))),
+      blockers.length ? h("div", { className: "orch-gate-blockers" },
+        h("strong", null, "Must be fixed first — found by the reviewer"),
+        h("ul", null, blockers.map(function (b, i) {
+          return h("li", { key: i }, h(Pill, { tone: "warn" }, b.severity + (b.category ? " · " + b.category : "")),
+            h("div", null, h("div", null, b.text), b.path ? h("div", { className: "orch-muted orch-small" }, b.path) : null));
+        })),
+        d.minor_findings ? h("span", { className: "orch-muted orch-small" }, "+ " + d.minor_findings + " minor suggestion"
+          + (d.minor_findings === 1 ? "" : "s") + " that do not block it (in the technical details)") : null) : null,
+      d.note ? h("div", { className: "orch-gate-note" }, h(Icon, { name: "info", size: 15 }), h("span", null, d.note)) : null,
+      h(Advice, { recommendation: d.recommendation, yes: props.yes, no: props.no, keep: true }),
+      d.if_yes || d.if_no ? h("div", { className: "orch-outcomes" },
+        d.if_yes ? h("div", { className: "orch-outcome orch-outcome-yes" }, h("strong", null, outcome(props.yes)), h("span", null, d.if_yes)) : null,
+        d.if_no ? h("div", { className: "orch-outcome orch-outcome-no" }, h("strong", null, outcome(props.no)), h("span", null, d.if_no)) : null) : null);
   }
 
   // ------------------------------------------------------------ UI design proposals (ui/hermes-dashboard.pen,
@@ -590,7 +629,8 @@
       design ? h(DesignReview, { task: a.task, approval: a.id, ready: setDesignReady }) : null,
       d && !design && (d.highlights || []).length ? h("ul", { className: "orch-highlights" },
         d.highlights.map(function (x, i) { return h("li", { key: i }, x); })) : null,
-      d ? h(Advice, { recommendation: d.recommendation, yes: plain.yes, no: plain.no }) : null,
+      d && d.reasons ? h(GateException, { details: d, yes: plain.yes, no: plain.no })
+        : d ? h(Advice, { recommendation: d.recommendation, yes: plain.yes, no: plain.no }) : null,
       preview && !props.hidePreviewOpen ? h("div", { className: "orch-stack" },
         h("p", { className: "orch-muted orch-small" }, "Test version " + preview.version + " before authorizing this merge. Opening it does not approve anything."),
         h(Button, { disabled: !!busy || !(human && human.available), onClick: openPreview }, "Open test environment"),
