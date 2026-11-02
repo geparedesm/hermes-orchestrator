@@ -69,6 +69,28 @@ def test_missing_pen_credentials_blocks_before_any_workspace(api, services, agen
     assert not orch.active(services, task, 'DEVELOPER')
 
 
+def test_design_waiting_for_a_worker_is_queued_then_started(api, services, agents, task):
+    # The orchestrator's own execution still holds a slot while its step is applied, so on a full machine the designer
+    # is queued (pending_launches had no UI_DESIGN kind: the step failed and its sync was retried forever).
+    busy = []
+    while True:  # fill every free slot; the orchestrator's execution holds the last one
+        response = api.post(f"/v1/tasks/{task}/executions", {"role": "REVIEWER", "provider": "codex",
+                                                             "command": ["bash", "-c", "true"], "capabilities": {"egress": "STANDARD"}})
+        if response.status_code == 409:
+            break
+        assert response.status_code == 201, response.text
+        busy.append(response.json()['id'])
+    assert busy
+    design = plan(services, agents, task)
+    assert design['state'] == 'PREPARING'
+    assert orch.actions(services, task)[-1][1] == 'ACCEPTED'
+    events = [e['summary'] for e in api.get(f"/v1/events?task={task}").json()['events'] if e['type'] == 'LAUNCH_WAITING']
+    assert any(summary.startswith('ui_design waits: agent worker limit reached') for summary in events)
+    # Finishing the step freed the orchestrator's slot and the queued designer started on the same pass.
+    assert not orch.q(services, 'SELECT kind FROM pending_launches')
+    assert finish_design(services, agents, task)['state'] == 'PENDING'
+
+
 def test_design_images_required_then_explicit_human_approval_releases_developer(api, services, agents, task):
     design = plan(services, agents, task)
     assert design['state'] == 'PREPARING'
