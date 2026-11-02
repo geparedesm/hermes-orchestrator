@@ -41,7 +41,7 @@ from .events import record_event
 from .executions import ACTIVE, ExecutionRequest, Executions
 from .gitops import CONTROL_PLANE, GitChanges
 from .tasks import Tasks
-from .verification import QualityGate, Reviews, Verifications, required_reviewer_set
+from .verification import BLOCKING_ALWAYS, QualityGate, Reviews, Verifications, required_reviewer_set
 
 log = logging.getLogger(__name__)
 S = TaskState
@@ -613,10 +613,11 @@ class Orchestration:
                           "for a new attempt (a supervised plan asks the person first);",
                           "- REJECT_SUBTASK with `text` = the guidance that resolves it: it goes to FIX_REQUIRED, then REQUEST_EXECUTION;",
                           "- REPORT_BLOCKED when only the person can resolve it.", ""]
-        if task["state"] in (S.FIX_REQUIRED, S.RUNNING):
+        if task["state"] in (S.FIX_REQUIRED, S.RUNNING, S.PLANNING):
             # The gate's reasons stay in view until the fixes pass a new evaluation: the event that announced them is
             # read once, and a step that could not act on it (an assumption made the task wait) would lose them (T-6).
-            uow.cur.execute("SELECT requirements, outcome FROM quality_gate_evaluations WHERE task_id = %s "
+            # PLANNING too: a task blocked after a failed gate and retried by the person resumes there (T-13).
+            uow.cur.execute("SELECT * FROM quality_gate_evaluations WHERE task_id = %s "
                             "ORDER BY evaluated_at DESC LIMIT 1", (task["id"],))
             evaluation = uow.cur.fetchone()
             if evaluation is not None and evaluation["outcome"] == "FAIL":
@@ -624,6 +625,10 @@ class Orchestration:
                 failing = [f"- {r['name']}: {r['detail']}" for r in evaluation["requirements"]
                            if r.get("status") in ("FAIL", "APPROVAL_REQUIRED")]
                 lines += ["## What the last Quality Gate evaluation requires", "", *[f[:1500] for f in failing], ""]
+                findings = self._gate_findings(uow, task, evaluation)
+                if findings:  # the gate counts them; the fix needs their text (T-13)
+                    lines += ["Its open blocking findings (a fix run of a FIX_REQUIRED subtask receives this list too):", "",
+                              *findings, ""]
                 if subtasks and all(x["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in subtasks):
                     lines += ["Every subtask is accepted, so starting them again does nothing: add new subtasks (new keys) with "
                               "SET_PLAN that fix these points, then REQUEST_EXECUTION; or REJECT_SUBTASK one whose work must "
@@ -1384,6 +1389,25 @@ class Orchestration:
 
     # ------------------------------------------------------------ pipeline
 
+    def _gate_findings(self, uow: UnitOfWork, task: Row, evaluation: Row | None = None) -> list[str]:
+        """The open findings that failed the task's last Quality Gate evaluation, as lines: the gate's own selection
+        (the latest integration review per reviewer of the evaluated commit, blocking severities)."""
+        if evaluation is None:
+            uow.cur.execute("SELECT * FROM quality_gate_evaluations WHERE task_id = %s ORDER BY evaluated_at DESC LIMIT 1",
+                            (task["id"],))
+            evaluation = uow.cur.fetchone()
+        if evaluation is None or evaluation["outcome"] != "FAIL" or not any(
+                r["name"] == "no_blocking_findings" and r.get("status") == "FAIL" for r in evaluation["requirements"]):
+            return []
+        blocking = sorted(BLOCKING_ALWAYS | set((self._config(uow, task).get("quality_gate") or {}).get("block_on_findings", [])))
+        uow.cur.execute("SELECT r.reviewer_provider, f.severity, f.path, f.line, f.description FROM review_findings f "
+                        "JOIN (SELECT DISTINCT ON (reviewer_provider) * FROM reviews WHERE task_id = %s AND commit_sha = %s "
+                        "AND subtask_id IS NULL ORDER BY reviewer_provider, created_at DESC) r ON r.id = f.review_id "
+                        "WHERE f.status = 'OPEN' AND f.severity = ANY(%s) ORDER BY r.reviewer_provider, f.path, f.line",
+                        (task["id"], evaluation["commit_sha"], blocking))
+        return [f"- [{f['severity']}] {f['path'] or ''}{':' + str(f['line']) if f['line'] else ''} {f['description'][:1500]} "
+                f"(review by {f['reviewer_provider']})" for f in uow.cur.fetchall()[:20]]
+
     def _develop(self, uow: UnitOfWork, task: Row, subtask: Row, provider: str, *, extra: str, epoch: int | None,
                  kind: str, fresh: bool = False, retry: bool = False) -> Row | None:
         """Launch a developer execution for a subtask in its workspace (a fresh one for a new attempt)."""
@@ -1410,6 +1434,11 @@ class Orchestration:
                          "`git commit --no-edit`. Then do the assignment below.\n\n" + extra)
             uow.cur.execute("UPDATE subtasks SET workspace_id = %s, attempts = %s WHERE id = %s",
                             (workspace["id"], attempt, subtask["id"]))
+        if kind == "FIX":
+            findings = self._gate_findings(uow, task)
+            if findings:  # the orchestrator's guidance is short; the fix needs the gate's findings in full (T-13)
+                extra = "\n".join([extra.strip(), "", "## Open findings from the last Quality Gate evaluation (fix these; "
+                                   "some may already be fixed in your workspace)", *findings]).strip()
         knowledge = self._knowledge_for(uow, task, list((subtask["estimated_scope"] or {}).get("files") or []))
         prompt = "\n".join([f"Subtask {subtask['key']}: {subtask['title']}", "", subtask["description"].strip(),
                             *(["", extra.strip()] if extra.strip() else []),

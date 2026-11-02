@@ -899,6 +899,40 @@ def test_quality_gate_reasons_stay_in_view_until_fixed(api, services, agents, re
     assert "Every subtask is accepted" in prompt
 
 
+def test_a_failed_gate_s_finding_texts_reach_the_orchestrator_and_the_fix(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    develop(services, agents, repo, active(services, task, "DEVELOPER")[0], {"a.py": "a = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    for execution in active(services, task, "TESTER") + active(services, task, "REVIEWER"):
+        agents.finish_agent(str(execution["id"]), b"", exit_code=1)
+    q(services, "UPDATE verifications SET state = 'ERROR' WHERE state IN ('PREPARING', 'RUNNING')")
+    # Stand-in for an integration review of commit abc with findings, and the gate that counted them (T-13).
+    q(services, "CREATE TEMP TABLE x AS SELECT * FROM executions WHERE role = 'REVIEWER' LIMIT 1; "
+      "UPDATE x SET id = gen_random_uuid(); INSERT INTO executions SELECT * FROM x; "
+      "INSERT INTO reviews (id, task_id, execution_id, commit_sha, reviewer_provider, outcome, requirements_met, summary) "
+      "SELECT gen_random_uuid(), task_id, id, 'abc', 'claude', 'APPROVED', true, 's' FROM x; "
+      "INSERT INTO review_findings (id, review_id, severity, category, path, line, description) "
+      "SELECT gen_random_uuid(), r.id, v.sev, 'bug', 'models/tenant.py', 57, v.text FROM reviews r, "
+      "(VALUES ('HIGH', 'copy() raises AccessError'), ('LOW', 'naming nit')) v(sev, text) WHERE r.commit_sha = 'abc'")
+    q(services, "INSERT INTO quality_gate_evaluations (id, task_id, commit_sha, config_hash, policy_version, risk, requirements, "
+      "residual_risk, outcome) SELECT gen_random_uuid(), id, 'abc', 'h', 'p', 'MEDIUM', %s::jsonb, 'r', 'FAIL' FROM tasks "
+      "WHERE key = %s", json.dumps([{"name": "no_blocking_findings", "status": "FAIL",
+                                     "detail": "1 open finding(s) of severity CRITICAL, HIGH"}]), task)
+    q(services, "UPDATE tasks SET state = 'PLANNING', step_requested = true WHERE key = %s", task)  # retried after a block
+    q(services, "UPDATE subtasks SET state = 'BLOCKED' WHERE local_key = 'a'")
+    services.scheduler.run_once()
+    [execution] = active(services, task, "ORCHESTRATOR")
+    prompt = agents.specs[str(execution["id"])]["inputs"]["prompt.md"]
+    assert "- [HIGH] models/tenant.py:57 copy() raises AccessError (review by claude)" in prompt
+    assert "naming nit" not in prompt  # LOW does not block here
+    step(services, agents, task, {"type": "REJECT_SUBTASK", "subtask": "a", "text": "fix the gate's finding"},
+         {"type": "REQUEST_EXECUTION", "subtask": "a"})
+    [dev] = active(services, task, "DEVELOPER")
+    developer = agents.specs[str(dev["id"])]["inputs"]["prompt.md"]
+    assert "## Open findings from the last Quality Gate evaluation" in developer
+    assert "copy() raises AccessError" in developer
+
+
 def test_an_invalid_plan_key_is_named_in_the_rejection(api, services, agents, task):
     step(services, agents, task, {"type": "SET_PLAN", "subtasks": [plan_item("portfolio-final-tests"), plan_item("a"), plan_item("a")]})
     [(kind, outcome, reason)] = actions(services, task)
