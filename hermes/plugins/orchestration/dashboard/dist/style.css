@@ -519,3 +519,51 @@
   .orch-design-frame { height: 16rem; }
   .orch-viewer { padding: 0.75rem; }
 }
+
+/* Simple/Advanced view direction: ui/hermes-dashboard.pen, task concepts and state contract. */
+.orch-view-switch { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.25rem; border: 1px solid var(--o-border);
+  border-radius: 0.65rem; background: var(--o-soft); width: fit-content; flex-shrink: 0; }
+.orch-view-option { font: inherit; font-size: 0.85rem; font-weight: 600; padding: 0.55rem 0.9rem; border: 0; border-radius: 0.45rem;
+  background: transparent; color: var(--o-muted); cursor: pointer; min-height: 44px; }
+.orch-view-option.orch-view-selected { background: var(--o-fg); color: var(--color-background, #15151c); }
+.orch-page button:focus-visible, .orch-page a:focus-visible, .orch-panel button:focus-visible, .orch-panel a:focus-visible,
+.orch-panel summary:focus-visible { outline: 2px solid var(--o-primary); outline-offset: 3px; }
+.orch-fresh-actions { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 1.25rem; }
+.orch-fresh-actions:disabled { opacity: 0.65; }
+.orch-guidance { background: var(--o-soft); border: 1px solid var(--o-border); border-radius: 0.75rem; padding: 1.5rem; }
+.orch-guidance h3 { margin: 0 0 0.65rem; font-size: 1.35rem; font-weight: 650; line-height: 1.35; }
+.orch-guidance p { margin: 0.5rem 0; line-height: 1.6; overflow-wrap: anywhere; }
+.orch-next-steps { display: flex; flex-direction: column; gap: 1.25rem; padding-left: 1.25rem; margin: 1.25rem 0; }
+.orch-next-steps li { padding-left: 0.4rem; }
+.orch-next-steps p { color: var(--o-muted); font-size: 0.9rem; }
+.orch-simple-section { padding: 1.25rem 0; border-top: 1px solid var(--o-border); min-width: 0; }
+.orch-simple-section h2, .orch-simple-section h3 { margin: 0 0 0.6rem; font-weight: 650; }
+.orch-simple-section p { line-height: 1.6; }
+.orch-simple-list { display: flex; flex-direction: column; }
+.orch-simple-taskrow { display: grid; grid-template-columns: 4rem minmax(0, 1fr) auto; align-items: start; gap: 0.5rem 1rem;
+  border: 0; border-bottom: 1px solid var(--o-border); padding: 1.15rem 0; background: transparent; color: var(--o-fg);
+  text-align: left; font: inherit; cursor: pointer; width: 100%; }
+.orch-simple-taskrow strong { overflow-wrap: anywhere; font-weight: 600; }
+.orch-simple-taskrow > .orch-muted { grid-column: 2 / -1; }
+.orch-simple-row-status { max-width: 16rem; font-size: 0.85rem; color: var(--o-muted); }
+.orch-simple-home { max-width: 66rem; }
+.orch-simple-task { gap: 1.5rem; }
+.orch-simple-task summary { cursor: pointer; min-height: 44px; padding-top: 0.5rem; }
+.orch-simple-task pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.orch-simple .orch-panel { width: min(56.25rem, 100%); }
+.orch-simple .orch-panel-body { padding: 1.5rem 2rem 2rem; gap: 1.5rem; }
+.orch-simple .orch-panel-title h2 { font-size: 1.65rem; line-height: 1.4; }
+.orch-simple .orch-approval .orch-advice { display: none; }
+@media (max-width: 600px) {
+  .orch-simple .orch-panel-body { padding: 1rem; }
+  .orch-simple .orch-panel-title h2 { font-size: 1.3rem; }
+  .orch-guidance { padding: 1.1rem; }
+  .orch-simple-taskrow { grid-template-columns: 3.5rem minmax(0, 1fr); }
+  .orch-simple-row-status { grid-column: 2; }
+  .orch-top-tools { width: 100%; justify-content: space-between; }
+  .orch-view-option { padding: 0.5rem 0.7rem; }
+  .orch-nav { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orch-overlay, .orch-panel { animation: none; }
+}
