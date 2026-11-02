@@ -1023,14 +1023,14 @@ def create_app(services: Services) -> FastAPI:
     def ui_design_delivered(key: str, design_id: UUID, name: str, caller: Identity = Depends(identity)) -> dict[str, Any]:
         if caller.name != 'hermes-plugin':
             raise Forbidden('only Hermes records image delivery')
-        from .ui_designs import IMAGES
-        if name not in IMAGES:
-            raise NotFound('unknown design image')
+        from .ui_designs import shown
         with ctx.unit_of_work() as uow:
             task = services.tasks.get(uow, key, lock=True)
             design = services.executions.ui_designs.current(uow, task)
             if not design or design['id'] != design_id or design['state'] != 'PENDING':
                 raise Conflict('this UI design is no longer pending')
+            if name not in shown(design):
+                raise NotFound('unknown design image')
             uow.cur.execute("UPDATE ui_designs SET delivered_images = array_append(delivered_images, %s) "
                             "WHERE id = %s AND NOT (%s = ANY(delivered_images))", (name, design_id, name))
             return {'delivered': name}
@@ -1040,17 +1040,17 @@ def create_app(services: Services) -> FastAPI:
         # Operator fallback after opening the authenticated image downloads (for hosts without a chat channel).
         if who.value not in ctx.platform['platform']['approvers']:
             raise Forbidden('only an approver can attest that the design images were reviewed')
-        from .ui_designs import IMAGES
+        from .ui_designs import shown
         with ctx.unit_of_work() as uow:
             task = services.tasks.get(uow, key, lock=True)
             design = services.executions.ui_designs.current(uow, task)
             if not services.executions.ui_designs.matches(design, task) or design['id'] != design_id or design['state'] != 'PENDING':
                 raise Conflict('this UI design is no longer pending')
             services.executions.ui_designs.package(uow, design)
-            uow.cur.execute('UPDATE ui_designs SET delivered_images = %s WHERE id = %s', (list(IMAGES), design_id))
+            uow.cur.execute('UPDATE ui_designs SET delivered_images = %s WHERE id = %s', (list(shown(design)), design_id))
             from .events import record_event
             record_event(uow.cur, 'UI_DESIGN_REVIEWED', actor=who.value, project_id=task['project_id'], task_id=task['id'],
-                         summary='Human attested review of desktop and mobile UI design images',
+                         summary='Human attested review of the UI design images',
                          data={'design_id': str(design_id)}, pending=uow.events)
             return {'reviewed': str(design_id)}
 

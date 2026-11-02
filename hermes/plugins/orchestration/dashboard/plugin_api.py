@@ -280,12 +280,13 @@ def ui_design(key: str) -> Any:
     return result
 
 
-UI_DESIGN_FILES = {"desktop.png": "image/png", "mobile.png": "image/png", "design.md": "text/markdown; charset=utf-8"}
+UI_DESIGN_FILES = {"changes.png": "image/png", "desktop.png": "image/png", "mobile.png": "image/png",
+                   "design.md": "text/markdown; charset=utf-8"}
 
 
 @router.get("/tasks/{key}/ui-design/{design_id}/{name}")
 def ui_design_file(key: str, design_id: UUID, name: str) -> Response:
-    # Only the two exported images and the design notes; the encrypted design.pen stays with the platform. The
+    # Only the exported images (the marked-up changes, desktop and mobile) and the design notes; the encrypted design.pen stays with the platform. The
     # control plane checked each file's type and hash; the page reads them as blobs, never as navigable documents.
     if not re.match(r"^T-[0-9]+$", key) or name not in UI_DESIGN_FILES:
         raise HTTPException(status_code=404, detail="unknown design file")
@@ -300,7 +301,7 @@ def ui_design_file(key: str, design_id: UUID, name: str) -> Response:
 @router.post("/tasks/{key}/ui-design/{design_id}/delivered/{name}")
 def ui_design_image_delivered(key: str, design_id: UUID, name: str) -> Any:
     # The authenticated page reports each image only after fetching its validated bytes.
-    if not re.fullmatch(r"T-[0-9]+", key) or name not in ("desktop.png", "mobile.png"):
+    if not re.fullmatch(r"T-[0-9]+", key) or name not in ("changes.png", "desktop.png", "mobile.png"):
         raise HTTPException(status_code=404, detail="unknown design image")
     return _call(_api().call, "POST", f"/v1/tasks/{key}/ui-design/{design_id}/delivered/{name}", {})
 

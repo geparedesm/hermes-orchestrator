@@ -409,6 +409,12 @@
   // "Orchestration — Approvals · UI design" and "UI design · Full size")
 
   const DESIGN_VIEWS = [["desktop.png", "Desktop", "1440 px"], ["mobile.png", "Mobile", "390 px"]];
+  // The designer's marked-up changes (ui/hermes-dashboard.pen, "UI design review · v1 · After"): shown first, for the
+  // person only. Designs made before it have none.
+  const CHANGES_VIEW = ["changes.png", "Changes", "numbered, for you only (not built)"];
+  function designViews(design) {
+    return (design && design.manifest && design.manifest["changes.png"] ? [CHANGES_VIEW] : []).concat(DESIGN_VIEWS);
+  }
   const CHANNELS = { whatsapp: "WhatsApp", telegram: "Telegram", slack: "Slack", discord: "Discord", signal: "Signal" };
 
   function designFile(task, design, name) {
@@ -417,7 +423,7 @@
       if (!r.ok) throw new Error("unavailable (" + r.status + ")");
       return r.blob();
     }).then(function (blob) {
-      if (design.state !== "PENDING" || !/^(desktop|mobile)\.png$/.test(name)) return blob;
+      if (design.state !== "PENDING" || !/^(changes|desktop|mobile)\.png$/.test(name)) return blob;
       return post("/tasks/" + task + "/ui-design/" + design.id + "/delivered/" + name, {}).then(function () { return blob; });
     });
   }
@@ -429,7 +435,7 @@
       setImages({});
       const urls = [];
       let live = true;
-      DESIGN_VIEWS.forEach(function (v) {
+      designViews(design).forEach(function (v) {
         designFile(task, design, v[0]).then(function (blob) {
           const url = URL.createObjectURL(blob);
           urls.push(url);
@@ -469,12 +475,13 @@
       window.addEventListener("keydown", onKey);
       return function () { window.removeEventListener("keydown", onKey); };
     }, [close]);
-    const current = DESIGN_VIEWS.find(function (v) { return v[0] === view; });
+    const views = props.views || DESIGN_VIEWS;
+    const current = views.find(function (v) { return v[0] === view; }) || views[0];
     const image = props.images[view] || {};
     return h("div", { className: "orch-viewer", role: "dialog", "aria-modal": "true", "aria-label": props.title },
       h("div", { className: "orch-viewer-bar" },
         h("div", { className: "orch-viewer-title" }, h("strong", null, props.title),
-          h("div", { className: "orch-segments", role: "tablist" }, DESIGN_VIEWS.map(function (v) {
+          h("div", { className: "orch-segments", role: "tablist" }, views.map(function (v) {
             return h("button", { key: v[0], type: "button", role: "tab", "aria-selected": v[0] === view,
               className: cx("orch-segment", v[0] === view && "orch-segment-on"), onClick: function () { setView(v[0]); } }, v[1]);
           }))),
@@ -502,30 +509,39 @@
     const images = useDesignImages(props.task, design);
     useEffect(function () {
       if (props.ready) props.ready(!!design && design.approval_id === props.approval && design.current && design.state === "PENDING" &&
-        DESIGN_VIEWS.every(function (v) { return !!(images[v[0]] && images[v[0]].url); }));
+        designViews(design).every(function (v) { return !!(images[v[0]] && images[v[0]].url); }));
     }, [design, images, props.approval, props.ready]);
     const closeViewer = useCallback(function () { setViewer(null); }, []);
     if (state.error) return h("div", { className: "orch-alert" }, h(Icon, { name: "alert" }), "The design could not be loaded: " + state.error);
     if (!design) return h(Loading, null);
     const lines = summaryLines(design.summary);
-    const delivered = DESIGN_VIEWS.every(function (v) { return (design.delivered_images || []).indexOf(v[0]) >= 0; });
+    const views = designViews(design);
+    const marked = views[0] === CHANGES_VIEW;
+    const delivered = views.every(function (v) { return (design.delivered_images || []).indexOf(v[0]) >= 0; });
+    function shot(v) {
+      const image = images[v[0]] || {};
+      // "orch-design-changes" is the summary list: the changes image has its own class.
+      return h("figure", { key: v[0], className: "orch-design-shot " + (v === CHANGES_VIEW ? "orch-design-marked-shot" : "orch-design-" + v[1].toLowerCase()) },
+        h("button", { type: "button", className: "orch-design-frame", disabled: !image.url,
+          "aria-label": "Open the " + v[1].toLowerCase() + " design at full size", onClick: function () { setViewer(v[0]); } },
+        image.url ? h("img", { src: image.url, alt: v[1] + " design" })
+          : h("span", { className: "orch-muted orch-small" }, image.error ? "Image " + image.error : "Loading…")),
+        h("figcaption", null, h("span", null, v[1] + " · " + v[2]),
+          h("button", { type: "button", className: "orch-link", disabled: !image.url, onClick: function () { setViewer(v[0]); } },
+            h(Icon, { name: "maximize", size: 13 }), "Full size")));
+    }
     const channel = CHANNELS[state.data.delivery_platform] || capital(state.data.delivery_platform) || "chat";
     return h("div", { className: "orch-design" },
       h("div", { className: "orch-stack orch-design-summary" },
-        h("div", { className: "orch-approval-label" }, "What changes"),
-        lines.length ? h("ul", { className: "orch-design-changes" }, lines.map(function (line, i) { return h("li", { key: i }, line); }))
-          : h("p", { className: "orch-muted orch-small" }, "This design has no summary of changes; review both images.")),
-      h("div", { className: "orch-design-shots" }, DESIGN_VIEWS.map(function (v) {
-        const image = images[v[0]] || {};
-        return h("figure", { key: v[0], className: "orch-design-shot orch-design-" + v[1].toLowerCase() },
-          h("button", { type: "button", className: "orch-design-frame", disabled: !image.url,
-            "aria-label": "Open the " + v[1].toLowerCase() + " design at full size", onClick: function () { setViewer(v[0]); } },
-          image.url ? h("img", { src: image.url, alt: v[1] + " design" })
-            : h("span", { className: "orch-muted orch-small" }, image.error ? "Image " + image.error : "Loading…")),
-          h("figcaption", null, h("span", null, v[1] + " · " + v[2]),
-            h("button", { type: "button", className: "orch-link", disabled: !image.url, onClick: function () { setViewer(v[0]); } },
-              h(Icon, { name: "maximize", size: 13 }), "Full size")));
-      })),
+        h("div", { className: "orch-approval-label" }, marked ? "What changes — each number is marked in the first image" : "What changes"),
+        lines.length ? h(marked ? "ol" : "ul", { className: cx("orch-design-changes", marked && "orch-design-numbered") },
+          lines.map(function (line, i) { return h("li", { key: i }, line); }))
+          : h("p", { className: "orch-muted orch-small" }, "This design has no summary of changes; review the images.")),
+      marked ? h("div", { className: "orch-stack orch-design-marked" },
+        h("div", { className: "orch-approval-label" }, "What changed, marked"), shot(CHANGES_VIEW)) : null,
+      h("div", { className: "orch-stack" },
+        marked ? h("div", { className: "orch-approval-label" }, "Clean design — what gets built") : null,
+        h("div", { className: "orch-design-shots" }, DESIGN_VIEWS.map(shot))),
       h("div", { className: "orch-design-facts" },
         h("span", null, h(Icon, { name: "message", size: 13 }), delivered ? "Sent to " + channel : "Not sent to " + channel + " yet"),
         design.designer_model ? h("span", null, h(Icon, { name: "cpu", size: 13 }), "Designed by " + design.designer_model) : null,
@@ -535,7 +551,7 @@
         } }, h(Icon, { name: "file", size: 13 }), "design.md"),
         notesError ? h("span", { className: "orch-bad" }, "design.md " + notesError) : null),
       viewer ? h(DesignViewer, { title: props.task + " · UI design v" + design.version, name: props.task + "-ui-v" + design.version,
-        images: images, start: viewer, close: closeViewer }) : null);
+        images: images, views: views, start: viewer, close: closeViewer }) : null);
   }
 
   // One decision, explained the way the chat explains it, with the two outcomes as the buttons.

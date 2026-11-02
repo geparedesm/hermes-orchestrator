@@ -20,19 +20,30 @@ _tasks: dict[str, asyncio.Task] = {}
 _resend: set[str] = set()  # task keys whose current proposal a person asked to see again
 _summarized: set[str] = set()  # designs whose changes message went out, so a retried image does not repeat it
 IMAGES = ('desktop.png', 'mobile.png')
+CHANGES = 'changes.png'
+
+
+def shown(design: dict) -> tuple[str, ...]:
+    """The marked-up changes first, then the clean images (designs made before changes.png have none)."""
+    return ((CHANGES,) if CHANGES in (design.get('manifest') or {}) else ()) + IMAGES
+
 
 _TEXT = {
     'es': {'title': '🎨 {key} · Diseño de UI v{version}: cambios propuestos',
            'none': 'El diseño no trae un resumen de cambios; revisa las dos imágenes.',
            'next': 'A continuación, las imágenes de escritorio y móvil.',
+           'next_changes': 'A continuación, los cambios marcados con números (cada número es el punto con ese número) '
+                           'y las imágenes de escritorio y móvil.',
            'decide': 'Responde *si {number}* para aprobarlo o *no {number} <qué cambiar>* para pedir otra versión.',
-           'caption': '{key} · UI v{version} · {label}', 'desktop': 'Escritorio', 'mobile': 'Móvil',
+           'caption': '{key} · UI v{version} · {label}', 'changes': 'Cambios', 'desktop': 'Escritorio', 'mobile': 'Móvil',
            'missing': 'No hay un diseño de UI pendiente de aprobación en {key}.'},
     'en': {'title': '🎨 {key} · UI design v{version}: proposed changes',
            'none': 'The design has no summary of changes; review both images.',
            'next': 'The desktop and mobile images follow.',
+           'next_changes': 'The changes marked with numbers follow (each number is the item with that number), '
+                           'then the desktop and mobile images.',
            'decide': 'Reply *yes {number}* to approve it or *no {number} <what to change>* to ask for another version.',
-           'caption': '{key} · UI v{version} · {label}', 'desktop': 'Desktop', 'mobile': 'Mobile',
+           'caption': '{key} · UI v{version} · {label}', 'changes': 'Changes', 'desktop': 'Desktop', 'mobile': 'Mobile',
            'missing': 'There is no UI design waiting for approval in {key}.'},
 }
 
@@ -62,7 +73,7 @@ def changes_message(design: dict, lang: str = 'en') -> str:
     number = design.get('number') or '?'
     parts = [text['title'].format(key=design['key'], version=design['version']),
              (design.get('summary') or '').strip() or text['none'],
-             text['next'] + '\n' + text['decide'].format(number=number)]
+             text['next_changes' if CHANGES in shown(design) else 'next'] + '\n' + text['decide'].format(number=number)]
     return '\n\n'.join(parts)
 
 
@@ -103,7 +114,7 @@ async def deliver_once(api, adapter, chat_id: str, lang: str = 'en') -> None:
     _native_images(adapter)
     pending = await asyncio.to_thread(api.call, 'GET', '/v1/ui-designs/deliveries')
     for design in pending.get('designs', []):
-        missing = [name for name in IMAGES if name not in design.get('delivered_images', [])]
+        missing = [name for name in shown(design) if name not in design.get('delivered_images', [])]
         if not missing:
             continue
         if str(design['id']) not in _summarized:
@@ -127,7 +138,7 @@ async def resend_once(api, adapter, chat_id: str, lang: str = 'en') -> None:
             continue
         design = {**design, 'key': key}
         await _send_changes(adapter, chat_id, design, lang)
-        for name in IMAGES:
+        for name in shown(design):
             await _send_image(api, adapter, chat_id, design, name, lang)
 
 

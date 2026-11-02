@@ -290,7 +290,7 @@ class Executions:
                 attached += design_service.package(uow, reference_design)
                 req.prompt += ("\n\nThe previous proposal is attached as ui-design.pen, ui-desktop.png, ui-mobile.png, "
                                "ui-design.md. Open the .pen only through ho-pen interactive --in; revise that proposal "
-                               "using human feedback, preserve unaffected parts, and export all four deliverables again.")
+                               "using human feedback, preserve unaffected parts, keep the earlier version's frames, mark only what changed since it, and export all five deliverables again.")
         if req.prompt and role in (Role.DEVELOPER, Role.REVIEWER) and design_service and not ui_design and task.get("ui_design_required"):
             design = design_service.ensure_approved(uow, task)
             if design:

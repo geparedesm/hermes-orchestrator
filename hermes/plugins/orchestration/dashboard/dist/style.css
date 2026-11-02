@@ -493,6 +493,12 @@
 .orch-design-summary { gap: 0.4rem; }
 .orch-design-changes { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.3rem; line-height: 1.45; }
 .orch-design-changes li::marker { color: var(--o-primary); }
+/* The marked-up changes image comes first and wide; its numbers match the numbered summary (#E5007E: markers only). */
+.orch-design-numbered { list-style: none; padding-left: 0; counter-reset: change; }
+.orch-design-numbered li { counter-increment: change; display: flex; gap: 0.55rem; align-items: flex-start; }
+.orch-design-numbered li::before { content: counter(change); flex: none; width: 1.35rem; height: 1.35rem; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; background: #E5007E; color: #fff; font-size: 0.72rem; font-weight: 700; }
+.orch-design-marked .orch-design-frame { border: 2px solid #E5007E; }
 .orch-design-shots { display: grid; grid-template-columns: minmax(0, 1fr) minmax(9rem, 15rem); gap: 1rem; }
 .orch-design-shot { margin: 0; display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
 .orch-design-frame { height: 21rem; padding: 0; border: 1px solid var(--o-border); border-radius: 0.5rem; overflow: hidden;

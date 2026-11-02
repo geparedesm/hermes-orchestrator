@@ -169,11 +169,11 @@ class Outbox:
             note = context_of(row)
             payload = row["payload"]
             if note.approval and note.approval.get('action') == 'UI_DESIGN' and note.approval.get('state') == 'PENDING':
-                from .ui_designs import IMAGES
+                from .ui_designs import shown
                 with self.ctx.unit_of_work() as uow:
-                    uow.cur.execute('SELECT delivered_images FROM ui_designs WHERE approval_id = %s', (note.approval['id'],))
+                    uow.cur.execute('SELECT delivered_images, manifest FROM ui_designs WHERE approval_id = %s', (note.approval['id'],))
                     design = uow.cur.fetchone()
-                if not design or not set(IMAGES) <= set(design['delivered_images']):
+                if not design or not set(shown(design)) <= set(design['delivered_images']):
                     continue  # images first; do not hold other tasks while the plugin records this proposal's receipts
             error, sent = self._send([row], f"{row['id']}:{int(row['attempts']) + 1}", lambda _, p=payload, c=note, i=row["id"]: {
                 "text": notify_text.render(p, c, lang), "event": p.get("type"), "task": c.task, "project": c.project,
