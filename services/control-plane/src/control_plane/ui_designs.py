@@ -15,7 +15,17 @@ from .errors import Conflict, NotFound
 from .events import record_event
 
 IMAGES = ('desktop.png', 'mobile.png')
+# The implementation package: clean images (the specification), notes and source. Agents receive only these.
 PACKAGE = (*IMAGES, 'design.md', 'design.pen')
+# The person's view of what changed: the proposal with numbered markers. Never part of the implementation package, so a
+# marker is never mistaken for part of the design; covered by the manifest hash the approval binds.
+CHANGES = 'changes.png'
+COLLECTED = (CHANGES, *PACKAGE)
+
+
+def shown(design) -> tuple[str, ...]:
+    """The images a person sees before deciding, changes first (designs made before changes.png have none)."""
+    return ((CHANGES,) if CHANGES in ((design or {}).get('manifest') or {}) else ()) + IMAGES
 # design.md sections a person reads before deciding, in order of preference (older designs have only before/after).
 SUMMARY_HEADINGS = ('summary for the reviewer', 'before / after', 'before/after')
 SUMMARY_LIMIT = 1500
@@ -70,19 +80,32 @@ Use `ho-pen` instead of `pen`: it loads the granted PEN_CLI_KEY from the in-memo
 Create or update the design with execute() tool calls; save() before exit(). Respect the project's visual style.
 Draw with the components of the project's own UI framework (for example Odoo's standard form, list and kanban
 views, buttons and smart buttons), so the implementation can match the images without custom widgets.
+Make every change easy to find (the person must see at a glance what changed):
+- Name this version's frames `vN · Before` (the current interface, when one exists), `vN · After` (desktop) and
+  `vN · After mobile`, plus `vN · Changes`, side by side. Never overwrite an earlier version's frames: add the new
+  version to their right.
+- `vN · Changes` is a copy of `vN · After` with, around every changed or new element, a 3 px #E5007E outline and a
+  numbered #E5007E circle (white number), and a legend beside it: one plain line per number. Mark an element removed
+  from the interface with a dashed #E5007E box labelled "Removed" on its place. #E5007E is reserved for these
+  markers: never use it in the design itself.
+- In a revision after feedback, mark only what changed since the previous proposal, not since the first one.
+- The After frames stay clean: no markers, no legend (they are what gets implemented).
 Write ONLY these deliverables under /output/design/:
-- design.pen: the saved pen.dev document, containing both desktop and mobile frames.
-- desktop.png and mobile.png: actual PNG exports of the respective proposed frames, made by pen.dev.
+- design.pen: the saved pen.dev document, containing the frames above.
+- desktop.png and mobile.png: actual PNG exports of the clean After frames, made by pen.dev.
+- changes.png: the actual PNG export of the Changes frame, made by pen.dev.
 - design.md: human-readable changes, frame names, breakpoints, typography, colors, spacing, interactions,
   assets and implementation guidance; explain before/after differences when an interface exists.
-  Start design.md with a `## Summary for the reviewer` section: 3 to 8 short bullets, in plain words, on what
-  the person will see change on each screen. It is sent with the images for the approval, so name no file,
-  model, ID or code; keep it under 1,200 characters.
-Export with execute({input:'Export([desktopId], "png", "/tmp/pen-desktop"); Export([mobileId], "png", "/tmp/pen-mobile")'}), using the real frame IDs.
+  Start design.md with a `## Summary for the reviewer` section: 3 to 8 short numbered items (`1.`, `2.`), in plain
+  words, on what the person will see change on each screen; each number is the circle with that number in
+  changes.png. It is sent with the images for the approval, so name no file, model, ID or code; keep it under
+  1,200 characters.
+Export with execute({input:'Export([desktopId], "png", "/tmp/pen-desktop"); Export([mobileId], "png", "/tmp/pen-mobile"); Export([changesId], "png", "/tmp/pen-changes")'}), using the real frame IDs.
 IMPORTANT: Export writes a DIRECTORY containing <frame-id>.png, not a PNG at the outputPath itself.
-Copy /tmp/pen-desktop/<desktopId>.png to /output/design/desktop.png and
-/tmp/pen-mobile/<mobileId>.png to /output/design/mobile.png with the shell, then inspect both actual files.
-Confirm all four deliverables are regular files (test -f) and nonempty: pen export can fail while exiting zero. Missing authentication or
+Copy /tmp/pen-desktop/<desktopId>.png to /output/design/desktop.png,
+/tmp/pen-mobile/<mobileId>.png to /output/design/mobile.png and
+/tmp/pen-changes/<changesId>.png to /output/design/changes.png with the shell, then inspect the actual files.
+Confirm all five deliverables are regular files (test -f) and nonempty: pen export can fail while exiting zero. Missing authentication or
 rendering is BLOCKED, never a reason to invent screenshots or replace the design with application code.
 The project is mounted read-only. Return the normal agent-result contract. No commits are expected.
 """
@@ -133,26 +156,30 @@ class UIDesigns:
         self.package(uow, design)
         return design
 
+    def _read(self, uow, design, name):
+        """One file of a design, checked against its manifest entry: (artifact id, content, media type)."""
+        expected = design['manifest'].get(name)
+        if not expected:
+            raise Conflict(f'design package is missing {name}')
+        uow.cur.execute('SELECT * FROM artifacts WHERE id = %s AND task_id = %s AND purged_at IS NULL',
+                        (expected['artifact_id'], design['task_id']))
+        artifact = uow.cur.fetchone()
+        if not artifact:
+            raise Conflict('design artifact is unavailable')
+        try:
+            content = self.ctx.artifacts.read(artifact['path'])
+        except (OSError, ValueError) as exc:
+            raise Conflict('design artifact is unavailable') from exc
+        if sha256_hex(content) != expected['sha256'] or len(content) != expected['size_bytes']:
+            raise Conflict('design artifact differs from the approved package')
+        return artifact['id'], content, attachments.check(name, content).media_type
+
     def package(self, uow, design):
         refs = []
         for name in PACKAGE:
-            expected = design['manifest'].get(name)
-            if not expected:
-                raise Conflict(f'design package is missing {name}')
-            uow.cur.execute('SELECT * FROM artifacts WHERE id = %s AND task_id = %s AND purged_at IS NULL',
-                            (expected['artifact_id'], design['task_id']))
-            artifact = uow.cur.fetchone()
-            if not artifact:
-                raise Conflict('design artifact is unavailable')
-            try:
-                content = self.ctx.artifacts.read(artifact['path'])
-            except (OSError, ValueError) as exc:
-                raise Conflict('design artifact is unavailable') from exc
-            if sha256_hex(content) != expected['sha256'] or len(content) != expected['size_bytes']:
-                raise Conflict('design artifact differs from the approved package')
-            checked = attachments.check(name, content)
-            refs.append({'artifact_id': str(artifact['id']), 'name': 'ui-' + name,
-                         'sha256': expected['sha256'], 'size_bytes': len(content), 'media_type': checked.media_type})
+            artifact_id, content, media_type = self._read(uow, design, name)
+            refs.append({'artifact_id': str(artifact_id), 'name': 'ui-' + name,
+                         'sha256': design['manifest'][name]['sha256'], 'size_bytes': len(content), 'media_type': media_type})
         if sum(r["size_bytes"] for r in refs) > attachments.MAX_TOTAL_BYTES:
             raise Conflict("UI design package exceeds the attachment size limit")
         return refs
@@ -217,7 +244,7 @@ class UIDesigns:
                             (task['id'], f"executions/{execution['id']}"))
             artifacts = {a['path'].rsplit('/', 1)[-1][37:]: a for a in uow.cur.fetchall()}
             manifest = {}
-            for name in PACKAGE:
+            for name in COLLECTED:
                 artifact = artifacts.get('design__' + name)
                 if not artifact:
                     raise Conflict(f'pen.dev did not produce design/{name}')
@@ -229,6 +256,7 @@ class UIDesigns:
                 manifest[name] = {'artifact_id': str(saved.id), 'sha256': saved.sha256, 'size_bytes': saved.size_bytes}
             design['manifest'] = manifest
             self.package(uow, design)
+            self._read(uow, design, CHANGES)
             uow.cur.execute('UPDATE ui_designs SET manifest = %s WHERE id = %s', (jsonb(manifest), design['id']))
         except (Conflict, ValueError, OSError) as exc:
             uow.cur.execute("UPDATE ui_designs SET state = 'FAILED', feedback = %s WHERE id = %s", (str(exc)[:1000], design['id']))
@@ -245,9 +273,11 @@ class UIDesigns:
         if not self.matches(design, task) or S(task['state']) in (S.DONE, S.CANCELLED, S.FAILED):
             raise Conflict('requirements, plan or task changed; generate a new UI design')
         if approved:
-            if not set(IMAGES) <= set(design['delivered_images']):
-                raise Conflict('both UI images must be delivered or explicitly reviewed before approval')
+            if not set(shown(design)) <= set(design['delivered_images']):
+                raise Conflict('the UI images (changes, desktop and mobile) must be delivered or explicitly reviewed before approval')
             self.package(uow, design)
+            if CHANGES in design['manifest']:
+                self._read(uow, design, CHANGES)
             uow.cur.execute('SELECT effective_hash FROM project_configs WHERE id = %s', (task['config_id'],))
             if not self.approvals.consume(uow, approval, subject=self.subject(design),
                                           config_hash=uow.cur.fetchone()['effective_hash']):
@@ -288,9 +318,8 @@ class UIDesigns:
 
     def file(self, uow, task, design_id, name):
         design = self.current(uow, task)
-        if not self.matches(design, task) or str(design['id']) != str(design_id) or name not in PACKAGE:
+        if not self.matches(design, task) or str(design['id']) != str(design_id) or name not in COLLECTED \
+                or name not in design['manifest']:
             raise NotFound('UI design file not found')
-        refs = self.package(uow, design)
-        ref = next(r for r in refs if r['name'] == 'ui-' + name)
-        uow.cur.execute('SELECT path FROM artifacts WHERE id = %s', (ref['artifact_id'],))
-        return self.ctx.artifacts.read(uow.cur.fetchone()['path']), ref['media_type']
+        _, content, media_type = self._read(uow, design, name)
+        return content, media_type

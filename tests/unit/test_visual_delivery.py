@@ -85,6 +85,15 @@ def test_sends_the_changes_then_both_images_to_only_the_configured_destination()
     assert len(api.receipts) == 2
 
 
+def test_the_numbered_changes_go_first_when_the_design_has_them():
+    api, adapter = Api(), Adapter()
+    api.design['manifest']['changes.png'] = {'sha256': hashlib.sha256(PNG).hexdigest()}
+    asyncio.run(visual.deliver_once(api, adapter, 'authorized-chat'))
+    assert 'changes marked with numbers follow' in adapter.texts[0][1]
+    assert [entry[2] for entry in adapter.sent] == ['T-8 · UI v1 · Changes', 'T-8 · UI v1 · Desktop', 'T-8 · UI v1 · Mobile']
+    assert [r.rsplit('/', 1)[-1] for r in api.receipts] == ['changes.png', 'desktop.png', 'mobile.png']
+
+
 def test_a_design_without_summary_still_says_what_to_review():
     api, adapter = Api(), Adapter()
     api.design['summary'] = ''

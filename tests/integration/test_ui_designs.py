@@ -15,7 +15,7 @@ repo = orch.repo
 task = orch.task
 pytestmark = [pytest.mark.integration, pytest.mark.orchestration]
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1sAAAAASUVORK5CYII=')
-FILES = {'desktop.png': PNG, 'mobile.png': PNG, 'design.pen': b'opaque encrypted design',
+FILES = {'changes.png': PNG, 'desktop.png': PNG, 'mobile.png': PNG, 'design.pen': b'opaque encrypted design',
          'design.md': b'# Proposal\n\n## Summary for the reviewer\n- The list shows a document column\n\n## Colors\nPurple.\n'}
 
 
@@ -54,7 +54,7 @@ def finish_design(services, agents, task, files=None):
 
 
 def receipt(api, task, design):
-    for name in ('desktop.png', 'mobile.png'):
+    for name in ('changes.png', 'desktop.png', 'mobile.png'):
         response = api.post(f"/v1/tasks/{task}/ui-design/{design['id']}/delivered/{name}", {},
                             token=PLUGIN_TOKEN, principal='hermes:visual-delivery')
         assert response.status_code == 200, response.text
@@ -97,7 +97,8 @@ def test_design_images_required_then_explicit_human_approval_releases_developer(
     orch.step(services, agents, task, {'type': 'REQUEST_EXECUTION', 'subtask': 'page'})
     [developer] = orch.active(services, task, 'DEVELOPER')
     refs = developer['spec']['attachments']
-    assert {r['name'] for r in refs} == {'ui-' + n for n in FILES}
+    # The marked-up changes are for the person only: a marker is never taken as part of the design to build.
+    assert {r['name'] for r in refs} == {'ui-' + n for n in FILES if n != 'changes.png'}
     assert developer['spec']['ui_design_id'] == str(design['id'])
     assert 'ui-desktop.png' in developer['spec']['assignment']['prompt']
 
@@ -108,6 +109,48 @@ def test_missing_export_never_requests_an_approval(api, services, agents, task):
     assert design['state'] == 'FAILED' and orch.state(api, task) == 'BLOCKED'
     assert 'mobile.png' in design['feedback']
     assert not orch.q(services, "SELECT id FROM approvals WHERE action = 'UI_DESIGN'")
+
+
+def test_a_design_without_its_marked_up_changes_never_requests_an_approval(api, services, agents, task):
+    plan(services, agents, task)
+    design = finish_design(services, agents, task, {k: v for k, v in FILES.items() if k != 'changes.png'})
+    assert design['state'] == 'FAILED' and 'changes.png' in design['feedback']
+    assert not orch.q(services, "SELECT id FROM approvals WHERE action = 'UI_DESIGN'")
+
+
+def test_the_person_must_see_the_marked_up_changes_before_approving(api, services, agents, task):
+    plan(services, agents, task)
+    design = finish_design(services, agents, task)
+    for name in ('desktop.png', 'mobile.png'):
+        api.post(f"/v1/tasks/{task}/ui-design/{design['id']}/delivered/{name}", {}, token=PLUGIN_TOKEN,
+                 principal='hermes:visual-delivery')
+    response = api.post(f"/v1/approvals/{design['approval_id']}/decision", {'decision': 'APPROVE'})
+    assert response.status_code == 409 and 'changes' in response.text
+    # The operator attestation covers every image a person sees, the changes included.
+    assert api.post(f"/v1/tasks/{task}/ui-design/{design['id']}/reviewed", {}).status_code == 200
+    assert orch.q(services, 'SELECT delivered_images FROM ui_designs')[0]['delivered_images'] == \
+        ['changes.png', 'desktop.png', 'mobile.png']
+
+
+def test_a_design_made_before_changes_png_is_still_shown_and_approved(api, services, agents, task):
+    """Pending designs from before the rule keep working: two images, and no changes image to wait for."""
+    plan(services, agents, task)
+    design = finish_design(services, agents, task)
+    orch.q(services, "UPDATE ui_designs SET manifest = manifest - 'changes.png'")
+    design = orch.q(services, 'SELECT * FROM ui_designs')[0]
+    from control_plane.approvals import state_hash
+    [approval] = orch.q(services, 'SELECT * FROM approvals WHERE id = %s', design['approval_id'])
+    subject = services.executions.ui_designs.subject(design)  # as it was requested before the rule
+    orch.q(services, 'UPDATE approvals SET subject = %s, state_hash = %s WHERE id = %s', json.dumps(subject),
+           state_hash('UI_DESIGN', subject, approval['config_hash'], services.ctx.policy_version), approval['id'])
+    assert api.get(f"/v1/tasks/{task}/ui-design/{design['id']}/changes.png").status_code == 404
+    assert api.post(f"/v1/tasks/{task}/ui-design/{design['id']}/delivered/changes.png", {}, token=PLUGIN_TOKEN,
+                    principal='hermes:visual-delivery').status_code == 404
+    for name in ('desktop.png', 'mobile.png'):
+        api.post(f"/v1/tasks/{task}/ui-design/{design['id']}/delivered/{name}", {}, token=PLUGIN_TOKEN,
+                 principal='hermes:visual-delivery')
+    response = api.post(f"/v1/approvals/{design['approval_id']}/decision", {'decision': 'APPROVE'})
+    assert response.status_code == 200, response.text
 
 
 def test_rejection_generates_a_new_version_and_passes_human_feedback(api, services, agents, task):

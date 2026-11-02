@@ -6,7 +6,7 @@ Hermes creates the UI proposal itself with the official headless pen.dev CLI. A 
 
 1. Plan the task. Frontend language in the original request/requirements, UI paths in the plan, an explicit `ui_design_required: true` creation flag, or `REQUEST_UI_DESIGN` require visual approval. Detection is conservative and the orchestrator must explicitly request design for UI work whose wording/paths are ambiguous.
 2. `REQUEST_UI_DESIGN` launches a metered Claude/Codex worker with project files mounted read-only, no implementation workspace or Git write capability, and only the project's local/test `PEN_CLI_KEY` secret. It calls `ho-pen interactive` to create/edit the design; it does not start a nested pen.dev AI agent.
-3. Collect `design/design.pen`, `design/desktop.png`, `design/mobile.png`, `design/design.md` from `/output`. Missing/invalid exports block the task. Save a durable copy under `ui-designs/`, outside execution-output retention.
+3. Collect `design/design.pen`, `design/desktop.png`, `design/mobile.png`, `design/changes.png`, `design/design.md` from `/output`. Missing/invalid exports block the task. Save a durable copy under `ui-designs/`, outside execution-output retention.
 4. Request `UI_DESIGN` approval and move the task to `APPROVAL_REQUIRED`. The approval binds the manifest hash and the requirements version. Images must be delivered or an approver must explicitly attest review of the authenticated downloads before approval can be consumed.
 5. Human rejection records feedback and returns to planning. The next proposal includes the previous design package and feedback. New requirements require a new design approval. A new plan does not: re-planning to fix review or Quality Gate findings keeps the approved images, so the person approves a design once per requirements version.
 6. Implementation and cross-review receive the approved images, specification and encrypted source read-only. Creation and dispatch both check the current approval and package hashes. Reviewers compare the implemented structure (sections, fields and their order, labels, actions, states, behavior) with the approved exports; the framework's native look is not a deviation. What only rendering can show (appearance, pixel match, clicking through) is not an unmet requirement: reviewers list it for the person, who tests it in the preview before the merge.
@@ -38,12 +38,25 @@ The official CLI reference is <https://docs.pen.dev/for-developers/pen-cli>. `ho
 
 ## What the person sees
 
+### Finding what changed
+
+Every version is drawn as `vN · Before`, `vN · After` (desktop and mobile) and `vN · Changes`, beside the earlier
+versions, which are never overwritten. `changes.png` exports the Changes frame: a copy of After where each changed or
+new element has a 3 px `#E5007E` outline and a numbered `#E5007E` circle, with a legend, and each removed element a
+dashed box labelled "Removed". The numbers are the numbered items of `## Summary for the reviewer`. A revision marks only
+what changed since the rejected version. `#E5007E` is reserved for markers.
+
+`changes.png` is for the person only. It is part of the manifest (so the approval's manifest hash covers it), shown and
+sent first, and must be delivered or attested before approval, but it is never part of the implementation package:
+developers and reviewers get the clean `desktop.png` and `mobile.png`, so a marker is never built as part of the UI.
+A design collected before this rule has no `changes.png`; it is shown and approved with its two images.
+
 `design.md` starts with a `## Summary for the reviewer` section: a few plain bullets, in the notification language
 (`HO_NOTIFY_LANGUAGE`), on what changes on each screen. Older designs without it fall back to the "after" part of
 their before/after section. The control plane returns it as `summary` in `GET /v1/tasks/<key>/ui-design` and in the
 plugin's delivery list.
 
-- Chat: a message with the summary of changes, then the desktop and mobile images, then the approval request, which
+- Chat: a message with the summary of changes, then the numbered changes image, the desktop and mobile images, then the approval request, which
   also offers `diseño T-8` / `design T-8` (`/orch design T-8`) to send the changes and both images again. Every send is
   logged with the message ID the channel returned.
 - Dashboard (`ui/hermes-dashboard.pen`, "Orchestration — Approvals · UI design" and "UI design · Full size"): the
