@@ -156,10 +156,10 @@ _COUNTERS = {
 # Quality Gate exception reasons (ho_core.verification), in plain words.
 _REASONS = {
     "es": {"without running any test": "se cambió código sin ejecutar ningún test",
-           "critical change": "es un cambio crítico", "inadequate tests": "cambio sensible con tests insuficientes",
+           "critical change": "es un cambio crítico", "inadequate tests": "un cambio sensible al que le faltan verificaciones requeridas",
            "policy violations": "los agentes ejecutaron comandos que la política marca como de riesgo"},
     "en": {"without running any test": "code changed without running any test", "critical change": "a critical change",
-           "inadequate tests": "a sensitive change with inadequate tests",
+           "inadequate tests": "a sensitive change missing some required checks",
            "policy violations": "the agents ran commands the policy marks as risky"},
 }
 # Routine events in the digest.

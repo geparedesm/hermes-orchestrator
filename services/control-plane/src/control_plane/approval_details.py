@@ -127,7 +127,46 @@ RULE_WORDS = {"CMD-H01": "force-push code", "CMD-H02": "delete a branch on GitHu
 
 
 GATE_REASONS = {"without running any test": "code changed without running any test", "critical change": "it is a critical change",
-                "inadequate tests": "a sensitive change has too few tests"}
+                "inadequate tests": "a sensitive change is missing some required checks"}
+
+# What each verification gap (ho_core.verification.plan) means, for a person who does not write code. `{n}` is the
+# number of code files the gap's detail counts.
+GAP_WORDS = {"no_test_command": "This project has no test command, so no tests could run.",
+             "no_test_changes": "{n} code file(s) changed, but no test was added or updated to check them.",
+             "no_tests_ran": "{n} code file(s) changed and no tests ran.",
+             "no_typecheck_command": "This project has no type check (a tool that catches code using data the wrong way), "
+                                     "so that check was skipped.",
+             "no_build_command": "This project has no build command, so the change was not built.",
+             "no_lint_command": "This project has no code style check (lint), so that check was skipped.",
+             "no_security_command": "This project has no security scan, so that check was skipped."}
+# Listed after "Already passed: ", so in lower case; `{branch}` is the target branch.
+CHECK_WORDS = {"tests": "tests", "build": "build", "lint": "code style (lint)", "typecheck": "type check",
+               "security": "security scan", "browser": "browser checks", "ci_checks": "CI checks",
+               "requirements": "does what was asked", "no_conflicts": "up to date with {branch}",
+               "docs_updated": "documentation updated"}
+SEVERITY_WORDS = {"CRITICAL": "Critical", "HIGH": "High", "MEDIUM": "Medium", "LOW": "Low"}
+
+
+def _capital(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def _first_sentence(text: str, limit: int = 240) -> str:
+    """The opening sentence of a reviewer's finding (the full text stays in the technical details)."""
+    found = re.match(r"(.+?[.!?])(\s|$)", text.strip(), re.S)
+    sentence = " ".join((found.group(1) if found else text.strip()).split())
+    return sentence if len(sentence) <= limit else sentence[: limit - 1] + "…"
+
+
+def _areas(plan: dict[str, Any]) -> str:
+    """The sensitive areas a change touches, in words: `payments (4 files) and files the project marks as sensitive
+    (security/ir.model.access.csv)`."""
+    risk = plan.get("risk") or {}
+    parts = [f"{area.replace('_', ' ')} ({len(paths)} file{'s' if len(paths) != 1 else ''})"
+             for area, paths in (risk.get("areas") or {}).items()]
+    parts += [f"files the project marks as sensitive ({r.split(': ', 1)[1]})" for r in risk.get("reasons") or []
+              if r.startswith("project sensitive paths: ")]
+    return " and ".join([", ".join(parts[:-1]), parts[-1]] if len(parts) > 1 else parts)
 
 
 def _plain_reason(reason: str) -> str:
@@ -240,22 +279,27 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
                                                  + ", ".join(sorted(RULE_WORDS.get(r, r) for r in data.get("rules") or []))})
         for item in data.get("commands") or []:
             commands.append({"who": who, "command": item.get("command"), "rule": item.get("rule"),
-                             "meaning": RULE_WORDS.get(item.get("rule"), "run a risky command")})
+                             "meaning": RULE_WORDS.get(item.get("rule"), "run a risky command"),
+                             **({"match": item["match"]} if item.get("match") else {})})
         if not data.get("commands"):
             changes.append({"kind": "!", "text": row["summary"]})
     uow.cur.execute("SELECT summary FROM policy_decisions WHERE task_id = %s AND decision = 'DENY'", (tid,))
     denied = [r["summary"] for r in uow.cur.fetchall()]
     changes += [{"kind": "!", "text": f"refused by policy: {d}"} for d in denied]
-    uow.cur.execute("SELECT requirements FROM quality_gate_evaluations WHERE task_id = %s ORDER BY evaluated_at DESC LIMIT 1", (tid,))
+    commit = subject.get("commit")
+    # The gate evaluation of the commit this exception is for (the latest one when the commit is not recorded).
+    uow.cur.execute("SELECT requirements FROM quality_gate_evaluations WHERE task_id = %s AND (%s::text IS NULL OR commit_sha = %s) "
+                    "ORDER BY evaluated_at DESC LIMIT 1", (tid, commit, commit))
     gate = uow.cur.fetchone()
+    requirements = (gate or {}).get("requirements") or []
     # The gate's own line for policy violations only repeats the commands above.
-    failing = [r for r in (gate or {}).get("requirements") or [] if r.get("status") != "PASS"  # PENDING blocks the gate too
+    failing = [r for r in requirements if r.get("status") != "PASS"  # PENDING blocks the gate too
                and r.get("name") not in ("exception_approval", "no_policy_violations")]
     changes += [{"kind": "!", "text": f"{r['name'].replace('_', ' ')}: {r.get('detail') or r['status'].lower()}"} for r in failing]
     reasons = list(subject.get("reasons") or [])
     other = [r for r in reasons if not r.startswith("policy violations")]
     blocked = bool(count or denied) and unproven == 0  # policy denials were refused, so had no effect
-    tests, review_rows = _checks(uow, tid, subject.get("commit"))
+    tests, review_rows = _checks(uow, tid, commit)
     # Every other gate requirement passes too (reviewer coverage, CI, requirements met): only the exception is left.
     checked = (tests == "PASSED" and bool(review_rows) and all(r["outcome"] == "APPROVED" for r in review_rows)
                and gate is not None and not failing)
@@ -263,29 +307,115 @@ def _high_risk(uow: UnitOfWork, approval: Row) -> dict[str, Any]:
     severity = ["CMD-H11", "CMD-H06", "CMD-H05", "CMD-H03", "CMD-H01", "CMD-H02", "CMD-H04", "CMD-H10", "CMD-H08", "CMD-H09", "CMD-H07"]
     words = [RULE_WORDS.get(r, "run a risky command") for r in sorted((r for r in rules if r),
                                                                       key=lambda r: severity.index(r) if r in severity else 0)]
-    example = f" (for example, {words[0]})" if words else ""
-    if other:
-        headline = "This change needs a closer look before it is added: " + "; ".join(_plain_reason(r) for r in other) + "."
-        recommendation = _recommend("look", "Read the technical details, or ask the agents to fix it.")
-    elif blocked:
-        headline = (f"The agents tried {count} action(s) they are not allowed to do{example}. "
-                    "They were blocked and changed nothing.")
+
+    # Why the person is asked, point by point: each reason of the exception, with what it is about in this change.
+    uow.cur.execute("SELECT plan FROM verifications WHERE task_id = %s AND purpose = 'INTEGRATION' AND commit_sha = %s "
+                    "ORDER BY created_at DESC LIMIT 1", (tid, commit))
+    plan = (uow.cur.fetchone() or {}).get("plan") or {}
+    areas = _areas(plan)
+    gaps = []
+    for gap in plan.get("gaps") or []:
+        found = re.match(r"(\d+) ", gap.get("detail") or "")
+        gaps.append(GAP_WORDS.get(gap.get("kind"), gap.get("detail") or gap.get("kind")).replace("{n}", found.group(1) if found else "Some"))
+    ran_all = all(r.get("status") in ("PASS", "UNAVAILABLE") for r in requirements
+                  if r.get("name") in ("tests", "build", "lint", "typecheck", "security", "browser")) and bool(requirements)
+    explained: list[dict[str, Any]] = []
+    for reason in reasons:
+        if "without running any test" in reason:
+            explained.append({"kind": "rule", "title": "Code changed, but no tests ran",
+                              "detail": "Untested code never goes in without a person's OK.", "items": gaps})
+        elif "critical change" in reason:
+            explained.append({"kind": "rule", "title": "It is a critical change",
+                              "detail": (f"It changes {areas}. " if areas else "") + "Critical changes always need a person's OK.",
+                              "items": []})
+        elif "inadequate tests" in reason:
+            explained.append({"kind": "rule", "title": "A sensitive change is missing some required checks",
+                              "detail": (f"It changes {areas}, so the rules ask for extra checks." if areas
+                                         else "The change is sensitive, so the rules ask for extra checks.")
+                              + (" Every check that could run passed." if ran_all else ""),
+                              "items": gaps})
+        elif reason.startswith("policy violations"):
+            items = [f"{_capital(c['who'])}: the check matched \"{c['match']}\"" if c.get("match")
+                     else f"{_capital(c['who'])}: {c['command']}" for c in commands]
+            items += [f"Refused by policy: {d}" for d in denied]
+            explained.append({"kind": "commands",
+                              "title": f"An agent ran {count or len(denied)} command(s) the safety check flags",
+                              "detail": (f"They look like an attempt to {', '.join(dict.fromkeys(words)) or 'run a risky command'}. "
+                                         + ("They were blocked and changed nothing." if blocked else
+                                            "The check only warns, so they may have run: look at what it matched.")),
+                              "items": items[:MAX_CHANGES]})
+        else:
+            explained.append({"kind": "rule", "title": _capital(_plain_reason(reason)), "detail": "", "items": []})
+
+    uow.cur.execute("SELECT target_branch FROM git_changes WHERE task_id = %s", (tid,))
+    branch = (uow.cur.fetchone() or {}).get("target_branch") or "main"
+    # What passed, from the same gate evaluation.
+    passed = [CHECK_WORDS[r["name"]].format(branch=branch) for r in requirements if r.get("status") == "PASS" and r.get("name") in CHECK_WORDS]
+    approvers = [r["reviewer_provider"].capitalize() for r in review_rows if r["outcome"] == "APPROVED"]
+    if approvers and len(approvers) == len(review_rows):
+        passed.append("approved by " + " and ".join(approvers))
+
+    # The reviewer's open findings that fail the gate on their own: an exception does not cover them.
+    blockers: list[dict[str, Any]] = []
+    minor = 0
+    findings = next((r for r in requirements if r.get("name") == "no_blocking_findings" and r.get("status") == "FAIL"), None)
+    if commit:
+        found = re.search(r"severity ([A-Z, ]+)$", (findings or {}).get("detail") or "")
+        severities = {s.strip() for s in found.group(1).split(",")} if found else set()
+        uow.cur.execute("SELECT f.severity, f.category, f.path, f.description FROM review_findings f JOIN (SELECT DISTINCT ON "
+                        "(reviewer_provider) id FROM reviews WHERE task_id = %s AND commit_sha = %s AND subtask_id IS NULL "
+                        "ORDER BY reviewer_provider, created_at DESC) r ON r.id = f.review_id WHERE f.status = 'OPEN'",
+                        (tid, commit))
+        order = list(SEVERITY_WORDS)
+        for f in sorted(uow.cur.fetchall(), key=lambda f: order.index(f["severity"])):
+            if findings and f["severity"] in severities:
+                blockers.append({"severity": SEVERITY_WORDS[f["severity"]], "category": f["category"], "path": f["path"],
+                                 "text": _first_sentence(f["description"])})
+            else:
+                minor += 1
+
+    task = _task(uow, approval)
+    points = len(explained) or 1
+    headline = (f"Before this change can go into {branch}, the safety rules need your OK on {points} "
+                f"point{'s' if points != 1 else ''}.")
+    if blockers:
+        headline += f" The reviewer also found {len(blockers)} problem{'s' if len(blockers) != 1 else ''} that must be fixed first."
+    # The task only resumes from this decision while it waits for it (verification._on_exception_decision).
+    note = ("The agents are already working on this task again. When they finish, the new version is checked from the "
+            "start, and you are asked again only if something still needs your OK."
+            if task is not None and task["state"] != "APPROVAL_REQUIRED" else None)
+
+    if blockers:
+        recommendation = _recommend("reject", f"The reviewer's {len(blockers)} problem(s) block this change whatever you "
+                                              "decide, so approving now would not add it.")
+    elif blocked and not other:
         recommendation = (_recommend("approve", "Nothing happened, the tests passed, and the review approved the change.")
                           if checked else _recommend("look", "Nothing happened, but not every check passed."))
+    elif count and not blocked:
+        recommendation = _recommend("look", "Check what the safety check matched in each command before approving.")
+    elif checked:
+        recommendation = _recommend("look", "Everything else passed: approve if you accept the points above.")
     else:
-        headline = f"The agents ran {count} risky command(s){example}. Check what they did before continuing."
-        recommendation = _recommend("look", "Some of these commands may have had an effect: see the technical details.")
+        recommendation = _recommend("look", "Not every other check passed: see the technical details.")
+    version = f"commit {str(commit)[:7]}" if commit else "this version"
     return {
         "headline": headline,
         "highlights": [],
+        "passed": passed,
+        "reasons": explained,
+        "blockers": blockers,
+        "minor_findings": minor,
+        "note": note,
         "recommendation": recommendation,
         "display_risk": "low" if blocked and not other else None,
         "commands": commands[:MAX_CHANGES],
         "changes": changes[:MAX_CHANGES],
-        "why": "The quality gate found something that normally stops a merge: " + "; ".join(subject.get("reasons") or ["see the list"]) + ".",
-        "if_yes": "The gate accepts this exception for this exact commit and the task moves on to the merge decision.",
+        "why": "The quality gate found something that normally stops a merge: " + "; ".join(reasons or ["see the list"]) + ".",
+        "if_yes": f"You accept {'these points' if points != 1 else 'this point'} for this exact version only ({version}). "
+                  + ("It still cannot go in until the reviewer's problems are fixed." if blockers
+                     else f"Then you are asked whether to add it to {branch}."),
         "if_no": "The task goes back to the agents to fix it.",
-        "facts": [["Commit", str(subject.get("commit") or "")[:12]]],
+        "facts": [["Commit", str(commit or "")[:12]]],
         "links": [],
     }
 

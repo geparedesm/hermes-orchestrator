@@ -21,6 +21,9 @@ class Classification:
     command_class: CommandClass
     rule_id: str
     summary: str
+    # The text the rule matched, with a little context on each side: what a person checks to tell a real risk from
+    # a word that only looks like one (a stored command is cut short and may not contain it).
+    match: str = ""
 
 
 @dataclass(frozen=True)
@@ -118,12 +121,19 @@ def _search_only(text: str) -> bool:
     return bool(commands)
 
 
+def _context(text: str, found: re.Match[str], around: int = 40) -> str:
+    start, end = max(0, found.start() - around), min(len(text), found.end() + around)
+    excerpt = " ".join(text[start:end].split())
+    return ("…" if start else "") + excerpt + ("…" if end < len(text) else "")
+
+
 def _classify_segment(segment: str) -> Classification:
     for rule in _RULES:
         if rule.rule_id == "CMD-H07" and _search_only(segment):
             continue
-        if rule.pattern.search(segment):
-            return Classification(rule.command_class, rule.rule_id, rule.summary)
+        found = rule.pattern.search(segment)
+        if found:
+            return Classification(rule.command_class, rule.rule_id, rule.summary, _context(segment, found))
     return Classification(C, "CMD-C99", "Unrecognized command")
 
 
