@@ -69,6 +69,47 @@ def test_missing_pen_credentials_blocks_before_any_workspace(api, services, agen
     assert not orch.active(services, task, 'DEVELOPER')
 
 
+def block_designer(services, agents, task, reason):
+    [execution] = orch.active(services, task, 'DEVELOPER')
+    result = {**orch.DONE, 'status': 'blocked', 'blocked_reason': reason, 'commits': [], 'changed_files': []}
+    if execution['provider'] == 'claude':
+        final = {'type': 'result', 'subtype': 'success', 'is_error': False, 'session_id': 'design',
+                 'structured_output': result, 'usage': {}}
+        agents.finish_agent(str(execution['id']), json.dumps(final).encode())
+    else:
+        agents.finish_agent(str(execution['id']), (orch.FIXTURES / 'codex-success.jsonl').read_bytes(),
+                            extra={'ho/last_message.json': json.dumps(result).encode()})
+    services.scheduler.run_once()
+
+
+def test_design_workspace_confusion_recovers_once_without_bypassing_visual_approval(api, services, agents, task):
+    plan(services, agents, task)
+    [execution] = orch.active(services, task, 'DEVELOPER')
+    prompt = execution['spec']['inputs']['prompt.md']
+    assert prompt.startswith('You are the UI DESIGNER.')
+    assert 'Current plan assignments:' not in prompt
+    assert '## Implementation plan' not in prompt
+    reason = 'No writable workspace exists: the project is mounted read-only without .git.'
+    block_designer(services, agents, task, reason)
+    assert orch.state(api, task) != 'BLOCKED'
+    designs = orch.q(services, 'SELECT * FROM ui_designs ORDER BY version')
+    assert [d['state'] for d in designs] == ['FAILED', 'PREPARING']
+    assert not orch.q(services, 'SELECT id FROM workspaces')
+    assert not orch.q(services, "SELECT id FROM approvals WHERE action = 'UI_DESIGN'")
+    block_designer(services, agents, task, reason)
+    assert orch.state(api, task) == 'BLOCKED'
+    assert len(orch.q(services, "SELECT seq FROM events WHERE type = 'UI_DESIGN_RECOVERY'")) == 1
+
+
+@pytest.mark.parametrize('reason', ['PEN_CLI_KEY authentication failed', 'A required .pen file is missing',
+                                    'pen.dev could not render the mobile frame'])
+def test_real_design_prerequisite_failures_are_not_retried(api, services, agents, task, reason):
+    plan(services, agents, task)
+    block_designer(services, agents, task, reason)
+    assert orch.state(api, task) == 'BLOCKED'
+    assert not orch.q(services, "SELECT seq FROM events WHERE type = 'UI_DESIGN_RECOVERY'")
+
+
 def test_design_waiting_for_a_worker_is_queued_then_started(api, services, agents, task):
     # The orchestrator's own execution still holds a slot while its step is applied, so on a full machine the designer
     # is queued (pending_launches had no UI_DESIGN kind: the step failed and its sync was retried forever).
@@ -250,6 +291,41 @@ def test_new_plan_keeps_the_approved_design(api, services, agents, task):
     assert orch.state(api, task) != 'APPROVAL_REQUIRED'
     [developer] = orch.active(services, task, 'DEVELOPER')
     assert developer['spec']['ui_design_id'] == str(design['id'])
+
+
+def test_new_plan_keeps_a_pending_visual_decision_usable(api, services, agents, task):
+    plan(services, agents, task)
+    design = finish_design(services, agents, task)
+    receipt(api, task, design)
+    with services.ctx.unit_of_work() as uow:
+        current = services.tasks.get(uow, task)
+        services.orchestration._set_plan(uow, current, [orch.plan_item('page', title='Updated implementation',
+                                                                     files=['views/profile.xml'])])
+    response = api.post(f"/v1/approvals/{design['approval_id']}/decision", {'decision': 'APPROVE'})
+    assert response.status_code == 200, response.text
+    assert orch.q(services, 'SELECT * FROM ui_designs')[0]['state'] == 'APPROVED'
+
+
+def test_reference_package_is_identified_and_false_missing_report_recovers(api, services, agents, task):
+    plan(services, agents, task)
+    design = finish_design(services, agents, task)
+    receipt(api, task, design)
+    assert api.post(f"/v1/approvals/{design['approval_id']}/decision", {'decision': 'REJECT',
+                                                                  'note': 'Use a lighter header'}).status_code == 200
+    services.scheduler.run_once()
+    orch.step(services, agents, task, {'type': 'REQUEST_UI_DESIGN'})
+    [execution] = orch.active(services, task, 'DEVELOPER')
+    prompt = execution['spec']['inputs']['prompt.md']
+    assert 'Authoritative design input: proposal v1' in prompt
+    assert 'This execution creates proposal v2' in prompt
+    assert execution['spec']['design_package_id'] == str(design['id'])
+    assert len(execution['spec']['attachments']) == 4
+    block_designer(services, agents, task, 'The required design artifact is missing')
+    assert orch.state(api, task) != 'BLOCKED'
+    replacement = finish_design(services, agents, task)
+    assert replacement['state'] == 'PENDING'
+    # Recovery creates a proposal, never carries forward an earlier approval.
+    assert replacement['version'] == 3 and replacement['approval_id'] != design['approval_id']
 
 
 def test_expired_visual_approval_renews_the_same_package(api, services, agents, task):

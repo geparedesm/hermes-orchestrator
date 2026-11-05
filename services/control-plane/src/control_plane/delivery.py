@@ -39,7 +39,7 @@ def validate_feature_plan(items: list[dict[str, Any]], document: str | None) -> 
             raise ValueError(f'plan needs a nonempty section: ## {section}')
 
 
-def feature_context(ctx: Context, uow: UnitOfWork, task: Row, original: str) -> str:
+def feature_context(ctx: Context, uow: UnitOfWork, task: Row, original: str, *, design_only: bool = False) -> str:
     """Authoritative context is restored even when no provider session survived a restart."""
     parts = ['# Complete feature context', 'Current requirements take precedence over the original request and earlier answers.',
              '## Original request', original]
@@ -51,7 +51,7 @@ def feature_context(ctx: Context, uow: UnitOfWork, task: Row, original: str) -> 
     uow.cur.execute('SELECT a.path FROM feature_plans p JOIN artifacts a ON a.id = p.document_artifact_id '
                     'WHERE p.task_id = %s ORDER BY p.version DESC LIMIT 1', (task['id'],))
     row = uow.cur.fetchone()
-    if row:
+    if row and not design_only:
         parts += ['## Implementation plan', ctx.artifacts.read(row['path']).decode('utf-8', 'replace')]
     uow.cur.execute("SELECT questions, answers FROM clarifications WHERE task_id = %s AND state = 'ANSWERED' ORDER BY asked_at",
                     (task['id'],))
@@ -59,6 +59,11 @@ def feature_context(ctx: Context, uow: UnitOfWork, task: Row, original: str) -> 
         for question in entry['questions']:
             answer = (entry['answers'] or {}).get(question['id']) or {}
             parts.append(f"Human clarification: {question['text']} — {answer.get('text') or answer.get('label') or ''}")
-    parts.append('Own the complete requested behavior. Check every acceptance criterion. Keep decisions and unresolved '
-                 'issues in the operational result so a subsequent correction can continue. Report scope changes.')
+    if design_only:
+        parts.append('The request, requirements and answers above describe the product to design. They are not an '
+                     'assignment to implement it. Produce only the design deliverables; application code, tests and '
+                     'commits are handled after visual approval in a separate writable workspace.')
+    else:
+        parts.append('Own the complete requested behavior. Check every acceptance criterion. Keep decisions and unresolved '
+                     'issues in the operational result so a subsequent correction can continue. Report scope changes.')
     return '\n\n'.join(parts)

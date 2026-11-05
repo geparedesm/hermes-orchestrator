@@ -84,3 +84,26 @@ without spending dispatch retries. Expiry reports an infrastructure failure with
 An orchestrator refused before startup blocks with that cause rather than cycling providers.
 Launches definitively refused while still REQUESTED refund their launch charge and unused reservations.
 Ambiguous Docker communication failures keep their launch charge because a remote start may have succeeded.
+
+## Design assignment recovery
+
+Design workers deliberately receive a read-only tracked project view without Git metadata. They create the pen.dev
+package under `/output/design`; application changes, tests and commits belong to the later developer workspace.
+The platform supplies a designer-specific role brief, current requirements and human answers, without executable
+implementation assignments. Each revision names its actual input package and output version. Existing package
+artifacts are checked against their stored hashes before dispatch; absence from the project's main branch is not
+evidence that the design is missing.
+
+If a designer returns a structured `blocked` result asking for a writable checkout, or claims its attached reference
+design is missing while the platform can still verify that package, orchestration retries the design assignment
+once per requirements/configuration pair. `UI_DESIGN_RECOVERY` records that attempt. The current lease, ordinary
+launch budget, provider availability and worker queue still apply. Cancellation, stale leases, failed exports,
+missing authentication and genuinely unavailable reference packages do not trigger this recovery. A second matching
+failure remains blocked for inspection. The retry produces a new proposal and still requires human visual approval.
+
+Changing only an implementation plan preserves the current pending or approved visual decision. Requirements or
+configuration changes still invalidate it. Do not revise requirements just to record an approval or repair delivery.
+
+For tasks blocked before this correction was deployed, inspect `ho task design T-N` and `ho task inspect T-N`, then
+use the authorized operator action `ho task retry T-N`. The new execution uses the corrected assignment and retained
+reference artifacts. Approve an exact budget increase separately if the remaining launch budget is insufficient.

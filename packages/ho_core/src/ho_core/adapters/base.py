@@ -62,6 +62,7 @@ class AgentAssignment:
     read_dirs: tuple[str, ...] = ()  # read-only project checkouts granted to the orchestrator (/projects/<slug>)
     # Files the person attached to the task, (name, media type, size in bytes), read-only under ATTACHMENTS_DIR.
     attachments: tuple[tuple[str, str, int], ...] = ()
+    ui_designer: bool = False  # set only after the control plane validates its isolated design purpose
 
 
 @dataclass(frozen=True)
@@ -216,7 +217,13 @@ _ROLE_BRIEF = {
 def compose_prompt(assignment: AgentAssignment) -> str:
     """Platform framing around the assignment. Instructions are context, not policy:
     the container's mounts and network are what actually limit the agent."""
-    lines = [_ROLE_BRIEF.get(assignment.role, f"You are the {assignment.role.value}."), ""]
+    brief = _ROLE_BRIEF.get(assignment.role, f"You are the {assignment.role.value}.")
+    if assignment.ui_designer:
+        brief = ("You are the UI DESIGNER. Create only the pen.dev design deliverables under /output/design. "
+                 "The project is intentionally read-only and has no Git metadata. A writable project checkout, "
+                 "application tests and local commits belong to a later implementation execution; they are not "
+                 "prerequisites for this design assignment.")
+    lines = [brief, ""]
     if assignment.workspace == "NONE":
         lines.append("- No project workspace is mounted in this execution.")
     else:
