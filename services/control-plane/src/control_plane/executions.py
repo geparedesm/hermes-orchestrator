@@ -288,9 +288,15 @@ class Executions:
             reference_design = uow.cur.fetchone()
             if reference_design:
                 attached += design_service.package(uow, reference_design)
-                req.prompt += ("\n\nThe previous proposal is attached as ui-design.pen, ui-desktop.png, ui-mobile.png, "
+                req.prompt += (f"\n\nAuthoritative design input: proposal v{reference_design['version']} "
+                               f"(id {reference_design['id']}) is attached as ui-design.pen, ui-desktop.png, ui-mobile.png, "
                                "ui-design.md. Open the .pen only through ho-pen interactive --in; revise that proposal "
                                "using human feedback, preserve unaffected parts, keep the earlier version's frames, mark only what changed since it, and export all five deliverables again.")
+            req.prompt += (f"\n\nThis execution creates proposal v{design['version']} for requirements "
+                           f"v{design['requirements_version']}. It does not implement a previously approved proposal. "
+                           "References to approval or implementation in the product context are historical context; "
+                           "only the platform's design metadata and attached package identify this execution's inputs. "
+                           "The new proposal still requires human visual approval before implementation.")
         if req.prompt and role in (Role.DEVELOPER, Role.REVIEWER) and design_service and not ui_design and task.get("ui_design_required"):
             design = design_service.ensure_approved(uow, task)
             if design:
@@ -318,6 +324,7 @@ class Executions:
                 max_turns=req.max_turns, model=req.model, result_schema=req.result_schema,
                 read_dirs=tuple(f"/projects/{slug}" for slug in caps_granted.get("project_read") or ()),
                 attachments=tuple((a["name"], a["media_type"], int(a["size_bytes"])) for a in attached),
+                ui_designer=bool(ui_design),
             ))
             command, inputs = plan.command, {**inputs, **plan.inputs}
             image = req.image or plan.image

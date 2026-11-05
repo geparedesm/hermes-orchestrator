@@ -136,6 +136,7 @@ class Orchestration:
         self.gate = gate
         self.leases = Leases(ctx)
         self.ui_designs = executions.ui_designs
+        self.ui_designs.recover_failure = self._recover_design_assignment
         executions.on_agent_result.append(self._on_agent_result)
         executions.on_finished.append(self._on_execution_finished)
         reviews.on_recorded.append(self._on_review)
@@ -660,6 +661,10 @@ class Orchestration:
             lines.insert(0, f"UI design v{design['version']}: {design['state']}; "
                          f"current requirements: {bool(self.ui_designs.matches(design, task))}. "
                          + (f"Feedback: {design['feedback']}" if design.get('feedback') else ''))
+            lines.insert(1, "Design files are delivered by the platform as attachments, not necessarily tracked on main. "
+                         "Do not change requirements merely to record an approval or repair artifact delivery. "
+                         "Only the current design state above establishes visual approval; earlier versions and events "
+                         "do not approve a newer requirements version.")
         return "\n".join(lines)[:20000]
 
     def _on_agent_result(self, uow: UnitOfWork, execution: Row, result: Any) -> None:
@@ -1017,8 +1022,8 @@ class Orchestration:
         self._event(uow, task, "PLAN_VERSIONED", f"plan version {version}: {len(items)} subtask(s), {len(new_keys)} new",
                     {"version": version, "artifact": str(artifact.id)})
         task = self._task(uow, task["id"])  # the new plan version
-        self.approvals.invalidate_open(uow, project_id=task['project_id'], task_id=task['id'],
-                                       action=ApprovalAction.UI_DESIGN, reason='implementation plan changed')
+        # Visual approval follows requirements/configuration (UIDesigns.matches), not implementation plan versions.
+        # Invalidating only the approval here strands the unchanged PENDING design with an unusable decision.
         self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.PLAN,
                                        reason="superseded by a new plan")
         if self._supervised(uow, task):
@@ -1209,16 +1214,51 @@ class Orchestration:
         previous = uow.cur.fetchone()
         if previous:
             previous_feedback = "\n\nHuman feedback or previous failure: " + previous['feedback']
-        plan_context = "\n\nCurrent plan assignments:\n" + "\n".join(
-            f"{s['title']}: {s['description']}" for s in self._subtasks(uow, task))
         prompt = (DESIGN_INSTRUCTIONS + f"Write the `## Summary for the reviewer` section in {reviewer_language}.\n"
-                  + plan_context + "\n\n" + feature_context(self.ctx, uow, task, self.reviews._request_text(uow, task)) + previous_feedback)
+                  + "\n\n" + feature_context(self.ctx, uow, task, self.reviews._request_text(uow, task), design_only=True)
+                  + previous_feedback)
         self.launch(uow, task, 'UI_DESIGN', {"role": "DEVELOPER", "provider": provider, "prompt": prompt,
                     "capabilities": {"project_read": True, "egress": "STANDARD", "artifacts": "WRITE"},
                     "max_turns": UI_DESIGN_MAX_TURNS,
                     "secrets": ["PEN_CLI_KEY"], "env": {"NODE_USE_ENV_PROXY": "1"}, "lease_epoch": epoch,
                     "purpose": {"ui_design": str(design['id']), "kind": "UI_DESIGN", "fenced": True}})
         return f"UI design v{design['version']} requested; no frontend implementation before image approval"
+
+    def _recover_design_assignment(self, uow: UnitOfWork, task: Row, design: Row, execution: Row, reason: str) -> bool:
+        """One corrected design assignment per requirements/configuration, never an approval or budget bypass."""
+        spec = execution.get('spec') or {}
+        if execution.get('state') != 'SUCCEEDED' or (execution.get('result') or {}).get('status') != 'blocked':
+            return False
+        text = reason.lower()
+        workspace_confusion = ('workspace' in text or 'checkout' in text or 'mount' in text) and (
+            'read-only' in text or 'read only' in text or 'writable' in text)
+        package_confusion = 'missing' in text and ('artifact' in text or 'design' in text) and spec.get('design_package_id')
+        if not (workspace_confusion or package_confusion):
+            return False
+        # A cancelled/stale execution, missing key, export failure or genuine missing package is not repaired by retrying.
+        lease = self.leases.get(uow, task['id'], lock=True)
+        if not lease or int(lease['epoch']) != execution.get('lease_epoch'):
+            return False
+        if package_confusion:
+            uow.cur.execute('SELECT * FROM ui_designs WHERE id = %s AND task_id = %s',
+                            (spec['design_package_id'], task['id']))
+            reference = uow.cur.fetchone()
+            if not reference:
+                return False
+            try:
+                self.ui_designs.package(uow, reference)
+            except (ApiError, ValueError, OSError):
+                return False
+        uow.cur.execute("SELECT 1 FROM events WHERE task_id = %s AND type = 'UI_DESIGN_RECOVERY' "
+                        "AND data->>'requirements_version' = %s AND data->>'config_id' = %s LIMIT 1",
+                        (task['id'], str(design['requirements_version']), str(task['config_id'])))
+        if uow.cur.fetchone():
+            return False
+        self._event(uow, task, 'UI_DESIGN_RECOVERY', 'retrying the design-only assignment with verified platform inputs',
+                    {'requirements_version': design['requirements_version'], 'config_id': str(task['config_id']),
+                     'failed_design_id': str(design['id'])})
+        self._request_ui_design(uow, task, int(lease['epoch']))
+        return True
 
     def _check_plan_approved(self, uow: UnitOfWork, task: Row) -> None:
         """A supervised task starts work only on a plan explicitly approved: missing approval state is not permission

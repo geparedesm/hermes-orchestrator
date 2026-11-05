@@ -39,6 +39,17 @@ def assignment(**kwargs) -> AgentAssignment:
 # ------------------------------------------------------------------- building
 
 
+@pytest.mark.parametrize('adapter', [ClaudeAdapter(), CodexAdapter()])
+def test_designer_brief_does_not_require_an_implementation_workspace(adapter):
+    prompt = adapter.build_execution(assignment(ui_designer=True, workspace='NONE', git='NONE')).inputs['prompt.md']
+    assert prompt.startswith('You are the UI DESIGNER.')
+    assert 'Implement the assignment in /workspace' not in prompt
+    assert 'prerequisites for this design assignment' in prompt
+    assert 'Do not create commits' in prompt
+    developer = adapter.build_execution(assignment()).inputs['prompt.md']
+    assert developer.startswith('You are the DEVELOPER. Implement the assignment in /workspace')
+
+
 def test_claude_command_confines_configuration_and_tools():
     plan = ClaudeAdapter().build_execution(assignment(toolchain="node"))
     cmd = plan.command

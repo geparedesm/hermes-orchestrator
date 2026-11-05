@@ -11,7 +11,7 @@ from ho_core.ids import uuid7
 from ho_core.statemachine import ACTIVE_STATES, Trigger
 
 from .db import jsonb
-from .errors import Conflict, NotFound
+from .errors import ApiError, Conflict, NotFound
 from .events import record_event
 
 IMAGES = ('desktop.png', 'mobile.png')
@@ -114,6 +114,7 @@ The project is mounted read-only. Return the normal agent-result contract. No co
 class UIDesigns:
     def __init__(self, ctx, tasks, approvals, executions):
         self.ctx, self.tasks, self.approvals, self.executions = ctx, tasks, approvals, executions
+        self.recover_failure = None
         approvals.register_handler(ApprovalAction.UI_DESIGN, self._decision)
         approvals.register_renewer(ApprovalAction.UI_DESIGN, self._renew)
         executions.on_finished.append(self.finished)
@@ -232,7 +233,7 @@ class UIDesigns:
         if not self.matches(design, task) or S(task['state']) not in ACTIVE_STATES:
             uow.cur.execute("UPDATE ui_designs SET state = 'SUPERSEDED' WHERE id = %s", (design['id'],))
             return
-        uow.cur.execute('SELECT result, failure_reason FROM executions WHERE id = %s', (execution['id'],))
+        uow.cur.execute('SELECT * FROM executions WHERE id = %s', (execution['id'],))
         row = uow.cur.fetchone()
         result = row['result'] or {}
         try:
@@ -260,6 +261,13 @@ class UIDesigns:
             uow.cur.execute('UPDATE ui_designs SET manifest = %s WHERE id = %s', (jsonb(manifest), design['id']))
         except (Conflict, ValueError, OSError) as exc:
             uow.cur.execute("UPDATE ui_designs SET state = 'FAILED', feedback = %s WHERE id = %s", (str(exc)[:1000], design['id']))
+            if self.recover_failure:
+                try:
+                    with uow.cur.connection.transaction():
+                        if self.recover_failure(uow, task, design, row, str(exc)):
+                            return
+                except (ApiError, ValueError, OSError):
+                    pass  # recovery cannot prevent collection of the original failure
             self.tasks.transition(uow, task, S.BLOCKED, trigger=Trigger.SYSTEM, actor='ui-designer', reason=str(exc)[:300])
             return
         self._request_approval(uow, task, design)
