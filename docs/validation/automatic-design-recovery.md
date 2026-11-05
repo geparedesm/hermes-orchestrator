@@ -23,6 +23,7 @@ plan revisions. No frontend, worker permissions, project quality policy, approva
 - Integration tests exercise one automatic recovery followed by a bounded stop, verified reference package delivery,
   mandatory new visual approval, genuine prerequisite failures, and an unchanged pending approval after replanning.
 - The full unit suite passes: 462 tests. The UI design integration suite passes: 23 tests.
+- The complete integration suite passes: 337 tests, including the UI design tests.
 - Ruff and JSON Schema/example/machine-profile validation pass.
 - A review of the supplied complete patch and relevant source found no actionable P1/P2 regressions. The normal
   `codex review --uncommitted` could not inspect files because this host denies its bubblewrap loopback setup; that
@@ -36,3 +37,6 @@ T-14/T-15 are not rewritten in SQL or automatically marked approved. After deplo
 the corrected path. T-15 has only four of sixty launches remaining; budget request 151 proposes twenty additional
 launches and remains pending until a person approves it. Current requirements differ from v4's requirements: the v4
 package is revision input, not an approval for a new version.
+
+Reviewable change: https://github.com/geparedesm/hermes-orchestrator/pull/100. Platform update request 152 targets
+`task-recovery-20261106` and remains pending until an authorized human decision.
