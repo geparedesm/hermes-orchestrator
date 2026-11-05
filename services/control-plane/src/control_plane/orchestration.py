@@ -656,8 +656,12 @@ class Orchestration:
         if knowledge:
             lines += ["## Project knowledge", ""] + [f"- [{k['category']}, {k['trust']}] {k['title']}: {k['body'][:200]}"
                                                      for k in knowledge] + [""]
+        design_required = self.ui_designs.required(uow, task)
         design = self.ui_designs.current(uow, task)
-        if design:
+        if not design_required:
+            lines.insert(0, 'No UI design is required for the current scope. Start READY implementation subtasks with '
+                         'REQUEST_EXECUTION. Do not request design images for backend-only work.')
+        elif design:
             lines.insert(0, f"UI design v{design['version']}: {design['state']}; "
                          f"current requirements: {bool(self.ui_designs.matches(design, task))}. "
                          + (f"Feedback: {design['feedback']}" if design.get('feedback') else ''))
@@ -857,6 +861,7 @@ class Orchestration:
         uow.cur.execute("INSERT INTO requirement_versions (id, task_id, version, artifact_id, source, change_reason) "
                         "VALUES (%s, %s, %s, %s, %s, %s)", (uuid7(), task["id"], version, artifact.id, source, reason[:300]))
         uow.cur.execute("UPDATE tasks SET current_requirements_version = %s WHERE id = %s", (version, task["id"]))
+        task['current_requirements_version'] = version
         self.ui_designs.required(uow, task, text)
         if task.get('ui_design_required'):
             uow.cur.execute("SELECT id FROM executions WHERE task_id = %s AND role = 'DEVELOPER' AND state = ANY(%s)",
@@ -1192,6 +1197,8 @@ class Orchestration:
         if not task["current_plan_version"] or not task["current_requirements_version"]:
             raise Conflict("set requirements and a plan before requesting a UI design")
         self._check_plan_approved(uow, task)
+        if not self.ui_designs.required(uow, task):
+            return 'no UI design required for the current backend scope; request the READY implementation instead'
         design, created = self.ui_designs.prepare(uow, task)
         if not created:
             return f"UI design v{design['version']} is {design['state'].lower()}"

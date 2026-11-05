@@ -520,6 +520,21 @@ class QualityGate:
         def add(name: str, status: str, detail: str, evidence: Any = None) -> None:
             results.append({"name": name, "status": status, "detail": detail, **({"evidence": evidence} if evidence else {})})
 
+        # A backend-only scope is permission to omit mockups, not permission to merge undeclared UI changes.
+        # Check the authoritative integration diff, not the developer's reported changed_files or plan paths.
+        uow.cur.execute("SELECT 1 FROM events WHERE task_id = %s AND type = 'UI_SCOPE_CONFIRMED' LIMIT 1", (task['id'],))
+        if uow.cur.fetchone():
+            from .ui_designs import detects_ui
+            diff = self.ctx.git.changes(project['relative_path'], changes['base_sha'], commit)
+            paths = [f['path'] for f in diff['files']]
+            if detects_ui('', paths):
+                try:
+                    self.reviews.executions.ui_designs.ensure_approved(uow, task, files=paths)
+                except Conflict as exc:
+                    add('ui_design', 'FAIL', 'backend-only scope changed UI files: ' + str(exc))
+                else:
+                    add('ui_design', 'PASS', 'UI changes have a current approved design')
+
         if verification is None:
             add("verification", "FAIL", "the integrated commit has not been verified")
         elif verification["state"] in ("PREPARING", "RUNNING"):

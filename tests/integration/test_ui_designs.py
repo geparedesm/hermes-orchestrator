@@ -69,6 +69,89 @@ def test_missing_pen_credentials_blocks_before_any_workspace(api, services, agen
     assert not orch.active(services, task, 'DEVELOPER')
 
 
+BACKEND_ONLY = ('Move the migration to the next version. Esta tarea no tiene cambios de interfaz: '
+                'no tocar vistas, tarjetas ni pantallas; no hace falta diseño de UI.')
+
+
+def test_human_backend_revision_clears_sticky_ui_gate_and_starts_real_developer(api, services, agents, task):
+    plan(services, agents, task)
+    assert api.post(f'/v1/tasks/{task}/revise', {'text': BACKEND_ONLY}).status_code == 200
+    services.scheduler.run_once()
+    orch.step(services, agents, task,
+              {'type': 'SET_PLAN', 'subtasks': [orch.plan_item('page', title='Update migration', files=['app.py'])]},
+              {'type': 'REQUEST_EXECUTION', 'subtask': 'page'})
+    [developer] = orch.active(services, task, 'DEVELOPER')
+    assert developer['spec']['purpose']['kind'] == 'DEVELOP'
+    assert developer['spec']['grant']['capabilities']['workspace'] == 'WRITE'
+    assert developer['workspace'] and not developer['spec'].get('ui_design_id')
+    assert api.get(f'/v1/tasks/{task}/ui-design').json()['required'] is False
+    assert orch.q(services, "SELECT data FROM events WHERE type = 'UI_SCOPE_CONFIRMED'")
+
+
+def test_agent_backend_assertion_cannot_clear_visual_gate(api, services, agents, task):
+    plan(services, agents, task)
+    [designer] = orch.active(services, task, 'DEVELOPER')
+    # A model's requirements are not a human change of scope.
+    with services.ctx.unit_of_work() as uow:
+        current = services.tasks.get(uow, task)
+        services.orchestration._set_requirements(uow, current, BACKEND_ONLY, source='ORCHESTRATOR', reason='agent assertion')
+        current = services.tasks.get(uow, task)
+        assert services.executions.ui_designs.required(uow, current, files=['app.py'])
+    assert designer['spec']['grant']['capabilities']['workspace'] == 'NONE'
+
+
+def test_human_no_ui_declaration_cannot_waive_visual_paths(api, services, agents, task):
+    plan(services, agents, task)
+    assert api.post(f'/v1/tasks/{task}/revise', {'text': BACKEND_ONLY}).status_code == 200
+    with services.ctx.unit_of_work() as uow:
+        current = services.tasks.get(uow, task)
+        assert services.executions.ui_designs.required(uow, current, files=['views/payment_views.xml'])
+
+
+def test_original_human_backend_scope_does_not_generate_designs(api, services, agents, task):
+    key = api.post('/v1/tasks', {'project': 'demo', 'request': BACKEND_ONLY}).json()['key']
+    services.scheduler.run_once()
+    orch.step(services, agents, key,
+              {'type': 'SET_REQUIREMENTS', 'text': 'Move the migration to the next version.'},
+              {'type': 'SET_PLAN', 'subtasks': [orch.plan_item('migration', files=['app.py'])]},
+              {'type': 'REQUEST_EXECUTION', 'subtask': 'migration'})
+    [developer] = orch.active(services, key, 'DEVELOPER')
+    assert developer['spec']['purpose']['kind'] == 'DEVELOP'
+    assert api.get(f'/v1/tasks/{key}/ui-design').json()['required'] is False
+
+
+def test_explicit_design_checkbox_wins_over_conflicting_original_text(api, services, agents, task):
+    key = api.post('/v1/tasks', {'project': 'demo', 'request': BACKEND_ONLY, 'ui_design_required': True}).json()['key']
+    services.scheduler.run_once()
+    orch.step(services, agents, key,
+              {'type': 'SET_REQUIREMENTS', 'text': 'Move the migration to the next version.'},
+              {'type': 'SET_PLAN', 'subtasks': [orch.plan_item('migration', files=['app.py'])]},
+              {'type': 'REQUEST_EXECUTION', 'subtask': 'migration'})
+    assert api.get(f'/v1/tasks/{key}/ui-design').json()['required'] is True
+    assert not orch.active(services, key, 'DEVELOPER')  # missing PEN_CLI_KEY, never silently starts implementation
+
+
+@pytest.mark.parametrize('agent_revision', [False, True])
+def test_quality_gate_catches_ui_files_outside_declared_backend_scope(api, services, agents, repo, task, agent_revision):
+    assert api.post(f'/v1/tasks/{task}/revise', {'text': BACKEND_ONLY}).status_code == 200
+    orch.step(services, agents, task,
+              {'type': 'SET_PLAN', 'subtasks': [orch.plan_item('migration', files=['app.py'])]},
+              {'type': 'REQUEST_EXECUTION', 'subtask': 'migration', 'provider': 'codex'})
+    [developer] = orch.active(services, task, 'DEVELOPER')
+    orch.develop(services, agents, repo, developer, {'views/unplanned.xml': '<list/>'})
+    [reviewer] = orch.active(services, task, 'REVIEWER')
+    orch.review_verdict(services, agents, reviewer)
+    with services.ctx.unit_of_work() as uow:
+        if agent_revision:
+            current = services.tasks.get(uow, task)
+            services.orchestration._set_requirements(uow, current, 'Move the migration to the next version.',
+                                                     source='ORCHESTRATOR', reason='agent plan detail')
+        evaluation = services.gate.evaluate(uow, task)
+    finding = next(r for r in evaluation['requirements'] if r['name'] == 'ui_design')
+    assert finding['status'] == 'FAIL' and 'backend-only scope changed UI files' in finding['detail']
+    assert evaluation['outcome'] == 'FAIL'
+
+
 def block_designer(services, agents, task, reason):
     [execution] = orch.active(services, task, 'DEVELOPER')
     result = {**orch.DONE, 'status': 'blocked', 'blocked_reason': reason, 'commits': [], 'changed_files': []}
