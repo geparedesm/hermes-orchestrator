@@ -28,7 +28,9 @@ No frontend design or application UI changes are included in this patch.
 - Supplied-patch review found that a later agent-authored requirements version could remove the new final diff check.
   Fixed the guard to retain the check for any task with a recorded backend-scope decision, regardless of later
   requirements versions. A regression test explicitly creates that agent revision before evaluating the gate.
-- Full integration and final image build results are recorded before release.
+- The complete integration suite passes: 344 tests. Together with the unit suite, 813 tests pass.
+- The final `backend-ui-scope-20261106` control-plane image builds and passes an offline check of backend scope and
+  visual-path protection. The running platform passes `scripts/check.sh` before deployment.
 - Ruff and schema/example/machine-profile checks pass.
 
 ## Existing task
@@ -37,3 +39,5 @@ T-14 remains blocked until the approved platform update is installed and an auth
 current USER requirements and backend plan provide the scope decision; no database state is rewritten manually and no
 visual artifacts or approvals are fabricated. T-15 is not retried by this correction.
 Update request 153 proposes `backend-ui-scope-20261106`; it remains subject to a concrete human approval.
+Reviewable change: https://github.com/geparedesm/hermes-orchestrator/pull/101. T-15 has an approved new design and is
+RUNNING; it is not blocked by the T-14 scope issue.
