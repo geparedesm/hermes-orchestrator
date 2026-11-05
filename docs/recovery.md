@@ -107,3 +107,17 @@ configuration changes still invalidate it. Do not revise requirements just to re
 For tasks blocked before this correction was deployed, inspect `ho task design T-N` and `ho task inspect T-N`, then
 use the authorized operator action `ho task retry T-N`. The new execution uses the corrected assignment and retained
 reference artifacts. Approve an exact budget increase separately if the remaining launch budget is insufficient.
+
+### Explicit backend-only requirements
+
+A human revision such as `Esta tarea no tiene cambios de interfaz; no hace falta diseño de UI.` or
+`This task has no UI changes.` can clear a stale visual-design requirement when every declared plan file is concrete
+and nonvisual. Empty scopes, wildcards, visual files and conflicting positive UI requests keep the gate in place.
+Only a current USER revision can override an earlier explicit design requirement. For new tasks, the original human
+request can establish backend scope when design was not explicitly selected; task-creation events record that choice.
+Older tasks with unknown creation provenance remain conservative. An agent's assertion alone cannot waive approval.
+
+`UI_SCOPE_CONFIRMED` records the requirements version and file scope. Backend work starts in the ordinary writable
+developer clone rather than spending a design execution. Replanning or an explicit design request reevaluates the
+scope. The Quality Gate checks the actual integrated diff for tasks with confirmed backend scope: undeclared UI files
+require a current approved design and cannot merge merely because the plan or developer result omitted them.

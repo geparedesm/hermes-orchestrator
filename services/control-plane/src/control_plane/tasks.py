@@ -180,6 +180,7 @@ class Tasks:
             uow.cur, "TASK_CREATED", actor=principal.value, project_id=project["id"], task_id=task_id,
             summary=f"{key} created: {title}",
             data={"priority": task["priority"], "budget_profile": budget_profile, "project_status": project["status"],
+                  "ui_design_requested": bool(body.get('ui_design_required')),
                   **({"attachments": [a["name"] for a in attached]} if attached else {})},
             pending=uow.events,
         )

@@ -36,11 +36,23 @@ _UI = re.compile(r'\b(front[ -]?end|ui|ux|portfolio|portafolio|landing|dashboard
                  r'pagina web|sitio web|website|web page|user interface|visual design|diseno visual|css|html)\b|\.pen\b', re.I)
 _UI_PATH = re.compile(r'(^|/)(ui|frontend|templates|views|static|components|pages)(/|$)|'
                       r'\.(tsx|jsx|vue|svelte|html|css|scss|sass|less|pen)$', re.I)
+_NO_UI = re.compile(r'\b(?:esta tarea no tiene cambios de interfaz|no hace falta diseno de ui|'
+                    r'this task has no (?:ui|interface) changes|no ui (?:changes|design)(?: is required)?)'
+                    r'(?=\s*(?:[.;:\n]|$))', re.I)
 
 
 def detects_ui(text: str, files: list[str] | tuple[str, ...] = ()) -> bool:
     plain = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
     return bool(_UI.search(plain) or any(_UI_PATH.search(p) for p in files))
+
+
+def backend_scope_declared(text: str, files: list[str] | tuple[str, ...]) -> bool:
+    """An explicit human no-UI declaration plus a concrete backend scope, never an agent's assertion alone."""
+    plain = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+    if not files or any(not p.strip() or any(c in p for c in '*?[') or _UI_PATH.search(p) for p in files):
+        return False
+    # A conflicting positive UI request, or an unspecified surface, keeps the visual gate in place.
+    return bool(_NO_UI.search(plain)) and not detects_ui(_NO_UI.sub('', plain))
 
 
 def review_summary(markdown: str, limit: int = SUMMARY_LIMIT) -> str:
@@ -132,14 +144,47 @@ class UIDesigns:
             and design['config_id'] == task['config_id']
 
     def required(self, uow, task, text='', files=()):
+        uow.cur.execute('SELECT title, description, estimated_scope FROM subtasks WHERE task_id = %s '
+                        "AND plan_version = %s AND state <> 'CANCELLED'",
+                        (task['id'], task['current_plan_version'] or 0))
+        subtasks = uow.cur.fetchall()
+        scope = list(files) + [p for subtask in subtasks for p in (subtask['estimated_scope'] or {}).get('files', [])]
+        uow.cur.execute('SELECT r.source, a.path FROM requirement_versions r JOIN artifacts a ON a.id = r.artifact_id '
+                        'WHERE r.task_id = %s AND r.version = %s',
+                        (task['id'], task['current_requirements_version'] or 0))
+        requirements = uow.cur.fetchone()
+        human_text = None
+        if requirements and requirements['source'] == 'USER':
+            human_text = self.ctx.artifacts.read(requirements['path']).decode('utf-8')
+        else:
+            uow.cur.execute("SELECT 1 FROM requirement_versions WHERE task_id = %s AND source = 'USER' "
+                            'AND version <= %s LIMIT 1', (task['id'], task['current_requirements_version'] or 0))
+            if not uow.cur.fetchone():
+                uow.cur.execute("SELECT data->'ui_design_requested' AS explicit FROM events "
+                                "WHERE task_id = %s AND type = 'TASK_CREATED' ORDER BY seq LIMIT 1", (task['id'],))
+                creation = uow.cur.fetchone()
+                # Preserve an explicit checkbox, and stay conservative for older tasks with unknown provenance.
+                if not task.get('ui_design_required') or (creation and creation['explicit'] is False):
+                    uow.cur.execute('SELECT path FROM artifacts WHERE id = %s', (task['original_request_artifact_id'],))
+                    original = uow.cur.fetchone()
+                    human_text = self.ctx.artifacts.read(original['path']).decode('utf-8') if original else ''
+        if human_text is not None and backend_scope_declared(human_text, scope):
+            if task.get('ui_design_required'):
+                uow.cur.execute('UPDATE tasks SET ui_design_required = false WHERE id = %s', (task['id'],))
+                task['ui_design_required'] = False
+            uow.cur.execute("SELECT 1 FROM events WHERE task_id = %s AND type = 'UI_SCOPE_CONFIRMED' "
+                            "AND data->>'requirements_version' = %s LIMIT 1",
+                            (task['id'], str(task['current_requirements_version'])))
+            if not uow.cur.fetchone():
+                record_event(uow.cur, 'UI_SCOPE_CONFIRMED', actor='control-plane', project_id=task['project_id'],
+                             task_id=task['id'], summary='human requirements explicitly exclude UI changes; backend files only',
+                             data={'requirements_version': task['current_requirements_version'], 'files': scope},
+                             pending=uow.events)
+            return False
         if not task.get('ui_design_required'):
             uow.cur.execute('SELECT path FROM artifacts WHERE id = %s', (task['original_request_artifact_id'],))
             original = uow.cur.fetchone()
             request = self.ctx.artifacts.read(original['path']).decode('utf-8') if original else ''
-            uow.cur.execute('SELECT title, description, estimated_scope FROM subtasks WHERE task_id = %s AND plan_version = %s',
-                            (task['id'], task['current_plan_version'] or 0))
-            subtasks = uow.cur.fetchall()
-            scope = list(files) + [p for subtask in subtasks for p in (subtask['estimated_scope'] or {}).get('files', [])]
             plan_text = '\n'.join(s['title'] + ' ' + s['description'] for s in subtasks)
             if not detects_ui(request + '\n' + text + '\n' + plan_text, scope):
                 return False
@@ -232,6 +277,11 @@ class UIDesigns:
         task = uow.cur.fetchone()
         if not self.matches(design, task) or S(task['state']) not in ACTIVE_STATES:
             uow.cur.execute("UPDATE ui_designs SET state = 'SUPERSEDED' WHERE id = %s", (design['id'],))
+            return
+        if not self.required(uow, task):
+            uow.cur.execute("UPDATE ui_designs SET state = 'SUPERSEDED', feedback = %s WHERE id = %s",
+                            ('Human requirements explicitly exclude UI changes; backend scope confirmed', design['id']))
+            uow.cur.execute('UPDATE tasks SET step_requested = true WHERE id = %s', (task['id'],))
             return
         uow.cur.execute('SELECT * FROM executions WHERE id = %s', (execution['id'],))
         row = uow.cur.fetchone()

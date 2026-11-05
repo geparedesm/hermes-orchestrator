@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from control_plane.ui_designs import detects_ui
+from control_plane.ui_designs import backend_scope_declared, detects_ui
 from ho_core import attachments
 
 
@@ -17,6 +17,27 @@ def test_frontend_detection(text, files):
 
 def test_backend_work_does_not_require_visual_design():
     assert not detects_ui('Add a greeting endpoint', ['app.py', 'tests/test_app.py'])
+
+
+@pytest.mark.parametrize('text', [
+    'Esta tarea no tiene cambios de interfaz: no tocar vistas, tarjetas ni pantallas; no hace falta diseño de UI.',
+    'This task has no UI changes. Fix the payment calculation.',
+    'No UI design is required. Move the migration to the next version.',
+])
+def test_explicit_backend_declarations_need_concrete_nonvisual_files(text):
+    assert backend_scope_declared(text, ['models/payment.py', 'migrations/19.0.1.15.0/post-migrate.py'])
+    for files in ([], ['*'], ['models/*.py'], ['views/payment_views.xml'], ['static/src/app.js']):
+        assert not backend_scope_declared(text, files)
+
+
+@pytest.mark.parametrize('text', [
+    'No UI changes in the payment calculator, but add a dashboard.',
+    'This task has no UI changes. Also create a portfolio.',
+    'No UI design for this step; add buttons later.',
+    'No backend changes; create the UI.',
+])
+def test_ambiguous_or_conflicting_declarations_keep_visual_approval(text):
+    assert not backend_scope_declared(text, ['models/payment.py'])
 
 
 def test_encrypted_pen_attachment_is_opaque_and_bounded():
