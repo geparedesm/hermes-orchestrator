@@ -150,6 +150,12 @@ def test_quality_gate_catches_ui_files_outside_declared_backend_scope(api, servi
     finding = next(r for r in evaluation['requirements'] if r['name'] == 'ui_design')
     assert finding['status'] == 'FAIL' and 'backend-only scope changed UI files' in finding['detail']
     assert evaluation['outcome'] == 'FAIL'
+    with services.ctx.unit_of_work() as uow:  # the gate's demand can be met: a design is now required (T-18)
+        current = services.tasks.get(uow, task)
+        assert services.executions.ui_designs.required(uow, current)
+        lease = services.orchestration.leases.get(uow, current['id'])
+        outcome = services.orchestration._request_ui_design(uow, current, int(lease['epoch']))
+        assert 'no UI design required' not in outcome
 
 
 def block_designer(services, agents, task, reason):
