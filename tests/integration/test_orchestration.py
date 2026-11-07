@@ -1233,3 +1233,28 @@ def test_every_pipeline_agent_receives_the_gate_contract(api, services, agents, 
     develop(services, agents, repo, developer, {'a.py': "print('hello')\n"})
     [reviewer] = active(services, task, 'REVIEWER')
     assert 'Quality Gate contract' in agents.specs[str(reviewer['id'])]['inputs']['prompt.md']
+
+
+def test_an_unchanged_fix_is_not_reviewed_again_and_the_fix_gets_the_review_findings(api, services, agents, repo, task):
+    """T-15: fixes started by the orchestrator saw only stale gate findings, changed nothing, and the same commit was
+    reviewed again and again (each review finding something new) until a person cancelled the task."""
+    plan_and_start(services, agents, task)
+    develop(services, agents, repo, active(services, task, "DEVELOPER")[0], {"a.py": "x = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0], CHANGES)
+    [fix] = active(services, task, "DEVELOPER")
+    answer(services, agents, fix["id"], DONE)  # "already fixed": no new commit
+    assert not active(services, task, "REVIEWER")  # the reviewed commit is not reviewed again
+    assert subtasks(services, task)["a"]["state"] == "BLOCKED"
+    assert len(q(services, "SELECT 1 FROM events WHERE type = 'FIX_WITHOUT_CHANGES'")) == 1
+    [leader] = active(services, task, "ORCHESTRATOR")
+    prompt = agents.specs[str(leader["id"])]["inputs"]["prompt.md"]
+    assert "Latest review of a" in prompt and "No test covers the greeting" in prompt
+    step(services, agents, task, {"type": "REJECT_SUBTASK", "subtask": "a", "text": "Add the missing test."},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "a", "prompt": "Fix what the review asked for."})
+    [again] = active(services, task, "DEVELOPER")
+    assert "No test covers the greeting" in agents.specs[str(again["id"])]["inputs"]["prompt.md"]
+    answer(services, agents, again["id"], DONE)  # unchanged a second time: the person decides
+    assert not active(services, task, "REVIEWER")
+    assert state(api, task) == "BLOCKED"
+    assert len(q(services, "SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id WHERE t.key = %s "
+                 "AND e.role = 'REVIEWER'", task)) == 1
