@@ -27,7 +27,7 @@ from ho_core.adapters.base import FailureClass
 from ho_core.enums import ApprovalAction, Priority, Risk, TaskState
 from ho_core.ids import uuid7
 from ho_core.routing import ProviderStats, route
-from ho_core.statemachine import ACTIVE_STATES, WAITING_STATES, Trigger
+from ho_core.statemachine import ACTIVE_STATES, TERMINAL_STATES, WAITING_STATES, Trigger
 
 from . import budgets, manifests, recovery, testenv
 from .agents import out_of_credit, paused
@@ -355,8 +355,10 @@ class Orchestration:
             if files:
                 uow.cur.execute(
                     "SELECT s.key, s.estimated_scope, t.priority, t.key AS task_key FROM subtasks s JOIN tasks t ON t.id = s.task_id "
-                    "WHERE t.project_id = %s AND s.id <> %s AND s.state IN ('IN_PROGRESS', 'IN_REVIEW')",
-                    (task["project_id"], subtask["id"]))
+                    "WHERE t.project_id = %s AND s.id <> %s AND s.state IN ('IN_PROGRESS', 'IN_REVIEW') "
+                    # A cancelled or finished task leaves its subtasks as they were; they hold no scope (T-15 held T-18).
+                    "AND t.state <> ALL(%s)",
+                    (task["project_id"], subtask["id"], [s.value for s in TERMINAL_STATES]))
                 for other in uow.cur.fetchall():
                     overlap = files & set((other["estimated_scope"] or {}).get("files") or [])
                     if overlap and (other["task_key"] == task["key"] or Priority(other["priority"]).rank <= Priority(task["priority"]).rank):
