@@ -32,7 +32,7 @@ _presentation = importlib.util.module_from_spec(_presentation_spec)
 _presentation_spec.loader.exec_module(_presentation)
 
 PRINCIPAL = "dashboard:operator"
-TASK_ACTIONS = ("pause", "resume", "cancel", "retry")
+TASK_ACTIONS = ("pause", "resume", "cancel", "retry", "repair")
 def same_origin_mutation(request: Request) -> None:
     """Preview application code must not submit authenticated Dashboard actions across origins."""
     origin = request.headers.get('origin')

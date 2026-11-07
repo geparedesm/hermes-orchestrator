@@ -432,7 +432,11 @@ def create_app(services: Services) -> FastAPI:
     def task_command(action: str):
         def endpoint(key: str, who: Principal = Depends(principal), idempotency_key: str | None = Header(default=None)) -> JSONResponse:
             def command(uow: UnitOfWork):
-                if action == "retry":
+                if action == "repair":
+                    if services.orchestration is None:
+                        raise Conflict("orchestration is disabled")
+                    task = services.orchestration.repair(uow, key, principal=who)
+                elif action == "retry":
                     task = services.tasks.retry(uow, key, principal=who, idempotency_key=f"retry:{idempotency_key}")
                 else:
                     task = getattr(services.tasks, action)(uow, key, principal=who)
@@ -440,7 +444,7 @@ def create_app(services: Services) -> FastAPI:
             return idempotent(idempotency_key, who, {"op": action, "task": key}, command)
         return endpoint
 
-    for action in ("pause", "resume", "cancel", "retry"):
+    for action in ("pause", "resume", "cancel", "retry", "repair"):
         app.post(f"/v1/tasks/{{key}}/{action}", name=f"{action}_task")(task_command(action))
 
     # ------------------------------------------------------------ executions

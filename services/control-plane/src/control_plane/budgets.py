@@ -140,6 +140,14 @@ def charge(uow: UnitOfWork, task: Row, counter: str, amount: int = 1) -> None:
     _save(uow, task, budget, consumed, dict(budget.get("reserved") or {}))
 
 
+def require_available(uow: UnitOfWork, task: Row) -> None:
+    """Check actual counters under lock, rather than trusting a cached threshold label."""
+    budget = _lock(uow, task)
+    current, counter, _ = _state(budget, budget["consumed"], budget.get("reserved") or {}, task)
+    if current == "EXHAUSTED":
+        raise BudgetExhausted(f"{task['key']} has exhausted its {counter} budget; request and approve an increase first")
+
+
 def usage_units(units: dict[str, Any]) -> int:
     """Provider usage in tokens as reported by the CLI (cached reads excluded)."""
     return int(sum(int(units.get(k) or 0) for k in ("input_tokens", "output_tokens", "cache_creation_input_tokens")))

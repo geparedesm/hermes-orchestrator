@@ -35,6 +35,10 @@ def dashboard(monkeypatch):
             calls.append((self.principal, args, kwargs))
             return {"key": "T-7", "state": "BACKLOG"}
 
+        def action(self, key, verb):
+            calls.append((self.principal, (key, verb), {}))
+            return {"key": key, "state": "READY"}
+
         def board(self):
             calls.append((self.principal, "board", {}))
             return {"tasks": [{"key": "T-7", "subtasks": 3, "subtasks_done": 1}]}
@@ -192,3 +196,21 @@ def test_preview_origin_cannot_create_tasks_using_dashboard_cookies(dashboard):
     assert client.post('/tasks', json=body, headers={'Origin': 'https://test.gp-developer.com'}).status_code == 403
     assert not calls
     assert client.post('/tasks', json=body, headers={'Origin': 'http://testserver'}).status_code == 200
+
+
+def test_dashboard_repair_uses_the_operator_and_same_origin_protection(dashboard):
+    client, calls = dashboard
+    result = client.post('/tasks/T-7/repair')
+    assert result.status_code == 200 and result.json()['state'] == 'READY'
+    assert calls == [('dashboard:operator', ('T-7', 'repair'), {})]
+    assert client.post('/tasks/T-7/repair', headers={'Origin': 'https://preview.example'}).status_code == 403
+    assert len(calls) == 1
+
+
+def test_client_forwards_repair_to_the_existing_task(monkeypatch):
+    client = _load('orchestration_repair_client_test', ROOT / 'orch_client.py')
+    api = client.TaskApi('dashboard:operator')
+    calls = []
+    monkeypatch.setattr(api, 'call', lambda *args: calls.append(args) or {'key': 'T-7'})
+    assert api.action('T-7', 'repair') == {'key': 'T-7'}
+    assert calls == [('POST', '/v1/tasks/T-7/repair')]

@@ -63,7 +63,32 @@
       view.mode === "simple" && g.blockers.length ? h(Button, { onClick: function () { view.change("advanced"); } }, "View technical details") : null,
       view.mode === "advanced" && g.waiting_details.length ? h("details", null, h("summary", null, "Queue evidence"),
         g.waiting_details.map(function (q, i) { return h("p", { key: i, className: "orch-muted" }, q.reason); })) : null,
-      !g.can_retry && d.task.state === "BLOCKED" ? h("p", { className: "orch-muted orch-small" }, "Check the blockers before retrying. Extra runs alone may not resolve the problem.") : null);
+      h(RecoveryAction, { task: d.task.key, allowed: !!g.can_repair, reload: props.reload }),
+      !g.can_repair && !g.can_retry && d.task.state === "BLOCKED" ? h("p", { className: "orch-muted orch-small" }, "Check the blockers before retrying. Extra runs alone may not resolve the problem.") : null);
+  }
+  function RecoveryAction(props) {
+    const [busy, setBusy] = useState(false);
+    const [requested, setRequested] = useState(false);
+    const [error, setError] = useState(null);
+    useEffect(function () { setRequested(false); setError(null); }, [props.task]);
+    if (!props.allowed && !requested && !error) return null;
+    function repair() {
+      if (busy || requested) return;
+      setBusy(true); setError(null);
+      post("/tasks/" + props.task + "/repair").then(function () {
+        setRequested(true);
+        if (props.reload) props.reload();
+      }).catch(function (e) { setError("Could not request recovery. " + message(e)); })
+        .finally(function () { setBusy(false); });
+    }
+    return h("section", { className: "orch-simple-section", "aria-label": "Hermes recovery" },
+      requested ? h("p", { role: "status" }, "Recovery requested. Check the refreshed task status.") : h(Fragment, null,
+        h("h3", null, "Let Hermes resolve the blockage"),
+        h("p", { className: "orch-muted" }, "Hermes will check the blockage and try to continue using the remaining allowance."),
+        h(Button, { kind: "primary", icon: "wrench", disabled: busy || !props.allowed, onClick: repair },
+          busy ? "Requesting recovery…" : "Resolve with Hermes"),
+        h("p", { className: "orch-muted orch-small" }, "Approvals and allowance limits still apply. Hermes will ask when it needs your help.")),
+      error ? h("p", { className: "orch-alert", role: "alert" }, error) : null);
   }
   function SimpleTask(props) {
     const d = props.data, g = d.guidance || {}, t = d.task;
@@ -72,7 +97,7 @@
     const decisions = d.approvals.filter(function (a) { return a.state === "PENDING" && (!a.expires_at || Date.parse(a.expires_at) > Date.now()); });
     const questions = (d.clarifications || []).filter(function (c) { return c.state === "PENDING"; });
     return h("div", { className: "orch-stack orch-simple-task" },
-      h(Guidance, { data: d }),
+      h(Guidance, { data: d, reload: props.reload }),
       g.preview_ready ? h(HumanTest, { data: d, reload: props.reload, simple: true }) : null,
       questions.map(function (c) { return h(QuestionCard, { key: c.id, round: Object.assign({ task: t.key }, c), done: props.reload }); }),
       decisions.map(function (a) { return h(ApprovalCard, { key: a.id, approval: Object.assign({ task_title: t.title }, a),
@@ -157,7 +182,7 @@
   const KEY_EVENTS = ["TASK_CREATED", "PLAN_VERSIONED", "SUBTASK_ACCEPTED", "INTEGRATION_COMPLETED", "INTEGRATION_CONFLICT",
     "TEST_PASSED", "TEST_FAILED", "REVIEW_PASSED", "REVIEW_FAILED", "QUALITY_GATE_EVALUATED", "READY_FOR_MERGE", "PR_CREATED",
     "MERGE_COMPLETED", "TASK_COMPLETED", "TASK_FAILED", "TASK_CANCELLED", "BLOCKED", "PAUSED_BUDGET", "AUTH_REQUIRED",
-    "APPROVAL_REQUIRED", "APPROVAL_DECIDED", "BUDGET_RAISED", "REQUIREMENTS_REVISED", "TASK_STATE_CHANGED"];
+    "APPROVAL_REQUIRED", "APPROVAL_DECIDED", "BUDGET_RAISED", "REQUIREMENTS_REVISED", "TASK_REPAIR_REQUESTED", "TASK_STATE_CHANGED"];
   const EVENT_TONE = { SUBTASK_ACCEPTED: "good", INTEGRATION_COMPLETED: "good", TEST_PASSED: "good", REVIEW_PASSED: "good",
     READY_FOR_MERGE: "good", MERGE_COMPLETED: "good", TASK_COMPLETED: "good", TEST_FAILED: "bad", TASK_FAILED: "bad",
     BLOCKED: "bad", INTEGRATION_CONFLICT: "warn", REVIEW_FAILED: "warn", PAUSED_BUDGET: "warn", AUTH_REQUIRED: "warn",
@@ -244,6 +269,7 @@
   // ------------------------------------------------------------ small pieces
 
   const ICONS = {
+    wrench: "M8.98926 0.58789q-0.71436 0.07178-1.36719 0.37256-0.64941 0.30078-1.15527 0.78955-1.0083 1.0083-1.18946 2.45068-0.05469 0.38965-0.01367 0.86133 0.04102 0.46826 0.16748 0.78955l0.02735 0.1128-2.21143 2.21142q-2.21143 2.21143-2.29346 2.32422-0.25293 0.33496-0.33838 0.74854-0.08203 0.41357 0.02735 0.82031 0.12646 0.46143 0.4751 0.81347 0.35205 0.34863 0.81347 0.4751 0.67334 0.18115 1.28858-0.14013 0.15381-0.07178 0.28027-0.18458 0.18115-0.15381 0.67334-0.64257l3.87598-3.84864 0.07177 0.02735q0.2085 0.06836 0.58789 0.14013 0.18115 0.02734 0.60157 0.02735 0.42041 0 0.61523-0.02735 1.12109-0.18457 1.97559-0.86816 0.92285-0.7417 1.30566-1.87646 0.38623-1.13477 0.09229-2.29688-0.08203-0.29395-0.26661-0.4751-0.2085-0.22559-0.50244-0.25976-0.29394-0.03418-0.58789 0.10595-0.08545 0.04102-0.25293 0.20166-0.16748 0.16064-0.82715 0.82032l-0.95019 0.93652-0.90918-0.90918 0.93652-0.95019q0.93994-0.93994 0.99463-1.02198 0.12646-0.22559 0.14014-0.4751 0.01367-0.25293-0.11279-0.47851-0.05469-0.11279-0.16065-0.2085-0.10596-0.09912-0.21191-0.15381-0.10254-0.05811-0.32813-0.10595-0.22217-0.05127-0.43408-0.07862-0.15381-0.02734-0.42041-0.02734-0.26318 0-0.41699 0.01367l0-0.01367z m0.60156 1.17578q0.02734 0 0 0.04444-0.02734 0.04102-0.18115 0.19482l-0.54688 0.56055q-0.78613 0.78271-0.85449 0.88183-0.16748 0.26318-0.18115 0.57422-0.01367 0.30762 0.12646 0.58789 0.04102 0.0957 0.13672 0.20166 0.09912 0.10596 0.54688 0.56055 0.44775 0.45459 0.54687 0.54687 0.09912 0.08887 0.2085 0.12989 0.29395 0.14014 0.59472 0.12646 0.3042-0.01367 0.56739-0.18115 0.08545-0.06836 0.88183-0.85449l0.79981-0.78272 0 0.08203q0.01367 0.09912 0.00683 0.35205-0.00684 0.25293-0.03418 0.40674-0.02734 0.15381-0.10595 0.38623-0.07861 0.229-0.16065 0.38282-0.21191 0.43408-0.57763 0.79296-0.36231 0.35547-0.78955 0.5503-0.42383 0.19482-0.90918 0.25293-0.48193 0.05469-0.92969-0.04102-0.22559-0.04443-0.62891-0.19824-0.11279-0.04102-0.25293-0.04102l-0.04101 0q-0.09912 0.01367-0.19825 0.08203-0.15381 0.11279-0.58789 0.53321l-3.7666 3.75293q-0.42041 0.42041-0.57422 0.51611-0.0957 0.07178-0.19482 0.08545l-0.04102 0q-0.21191 0.01367-0.37939-0.08887-0.16748-0.10596-0.25293-0.29053-0.04102-0.08203-0.04785-0.12304-0.00684-0.04443-0.00684-0.15723l0-0.05468q-0.01367-0.08203 0.01367-0.14014 0.04102-0.09912 0.2085-0.28028 0.1709-0.18115 0.57764-0.58789l1.67822-1.67822q1.45605-1.46973 1.92432-1.95166 0.47168-0.48535 0.49902-0.54004 0.04102-0.08545 0.05469-0.22558 0-0.09912-0.00684-0.14698-0.00684-0.04785-0.06152-0.18798-0.12646-0.30762-0.17774-0.56055-0.04785-0.25293-0.04785-0.54688 0-0.58789 0.21192-1.12109 0.18115-0.4751 0.55029-0.87842 0.37256-0.40674 0.83398-0.6289 0.46143-0.22559 0.95362-0.29737 0.10938-0.01367 0.33154-0.01367 0.22559 0 0.28369 0.01367z",
     plus: "M12 5v14M5 12h14", search: "M11 19a8 8 0 1 1 0-16 8 8 0 0 1 0 16zM21 21l-4.3-4.3", x: "M18 6 6 18M6 6l12 12",
     check: "M20 6 9 17l-5-5", info: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01", alert: "M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
     clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2", play: "M6 4l14 8-14 8z", pause: "M6 4h4v16H6zM14 4h4v16h-4z",
@@ -259,8 +285,8 @@
     message: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   };
   function Icon(props) {
-    return h("svg", { className: cx("orch-icon", props.className), viewBox: "0 0 24 24", width: props.size || 16, height: props.size || 16,
-      fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
+    return h("svg", { className: cx("orch-icon", props.className), viewBox: props.name === "wrench" ? "0 0 14 14" : "0 0 24 24", width: props.size || 16, height: props.size || 16,
+      fill: props.name === "wrench" ? "currentColor" : "none", stroke: props.name === "wrench" ? "none" : "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" },
     h("path", { d: ICONS[props.name] }));
   }
   function Pill(props) {
@@ -1785,7 +1811,7 @@
           h(ViewSwitch),
           viewMode.notice ? h("div", { className: "orch-callout", role: "status" }, viewMode.notice) : null,
           simple ? h("fieldset", { className: "orch-fresh-actions", disabled: !!view.error }, h(SimpleTask, { data: d, reload: view.reload })) : h("fieldset", { className: "orch-fresh-actions", disabled: !!view.error },
-          h(Guidance, { data: d }),
+          h(Guidance, { data: d, reload: view.reload }),
           h(Actions, { task: t, done: view.reload, guidance: d.guidance }),
           h("nav", { className: "orch-tabs" }, PANEL_TABS.map(function (x) {
             const n = x[0] === "plan" ? d.dag.subtasks.length : x[0] === "summary" ? d.approvals.filter(function (a) { return a.state === "PENDING"; }).length : null;

@@ -148,6 +148,21 @@ class Orchestration:
         approvals.register_handler(ApprovalAction.BUDGET_INCREASE, self._on_budget_increase)
         approvals.register_handler(ApprovalAction.PLAN, self._on_plan_decision)
 
+    def repair(self, uow: UnitOfWork, key: str, *, principal: Principal) -> Row:
+        """Ask Hermes to recover a blocked task with its recorded evidence and normal limits."""
+        task = self.tasks.get(uow, key, lock=True)
+        if task["state"] != S.BLOCKED:
+            raise Conflict(f"{key} is {task['state']}; repair requires BLOCKED")
+        uow.cur.execute("SELECT 1 FROM executions WHERE task_id = %s AND state = ANY(%s) LIMIT 1",
+                        (task["id"], list(ACTIVE)))
+        if uow.cur.fetchone():
+            raise Conflict("work is still active; wait for it to finish before requesting repair")
+        budgets.require_available(uow, task)
+        self._event(uow, task, "TASK_REPAIR_REQUESTED", "Hermes will diagnose the recorded blockage and attempt recovery",
+                    {"reason": task.get("state_reason"), "resume_state": task.get("resume_state")}, actor=principal.value)
+        # The existing retry path preserves post-merge recovery, accepted work and all approval boundaries.
+        return self.tasks.retry(uow, key, principal=principal, idempotency_key=f"repair:{task['id']}")
+
     # ------------------------------------------------------------- helpers
 
     def _task(self, uow: UnitOfWork, task_id: UUID, *, lock: bool = True) -> Row:
@@ -540,6 +555,16 @@ class Orchestration:
                  "## Project files", "", f"The tracked files of the project's main branch are mounted read-only at /projects/{self._slug(uow, task)} "
                  "(no Git metadata; files the project ignores, such as local secrets, are not there). Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
                  "accurate `files`.", ""]
+        uow.cur.execute("SELECT data FROM events WHERE task_id = %s AND type = 'TASK_REPAIR_REQUESTED' ORDER BY seq DESC LIMIT 1",
+                        (task["id"],))
+        repair = uow.cur.fetchone()
+        if repair:
+            lines += ["## Recovery requested by the person", "", json.dumps(repair["data"], default=str),
+                      "Diagnose this recorded blockage using the current state and rejected actions below. "
+                      "Preserve accepted work. Use REJECT_SUBTASK with concrete guidance before restarting accepted or blocked work. "
+                      "If all work is accepted, SUBMIT_FOR_QUALITY_GATE reintegrates it, including from FIX_REQUIRED. "
+                      "Do not repeat an unchanged rejected action. If credentials, approval or budget need the person, "
+                      "report the exact dependency and stop; do not bypass it.", ""]
         if task.get("delivery_mode") == "FEATURE":
             from .delivery import PLANNING_INSTRUCTIONS
             lines = [line.replace("Plan small, independent subtasks", "Plan one complete implementation assignment") for line in lines]
@@ -631,7 +656,7 @@ class Orchestration:
                     lines += ["Its open blocking findings (a fix run of a FIX_REQUIRED subtask receives this list too):", "",
                               *findings, ""]
                 if subtasks and all(x["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in subtasks):
-                    lines += ["Every subtask is accepted, so starting them again does nothing: add new subtasks (new keys) with "
+                    lines += ["Every subtask is accepted, so starting them again does nothing. If the accepted work fixes the findings, use SUBMIT_FOR_QUALITY_GATE for fresh verification. Otherwise add new subtasks (new keys) with "
                               "SET_PLAN that fix these points, then REQUEST_EXECUTION; or REJECT_SUBTASK one whose work must "
                               "change.", ""]
         uow.cur.execute("SELECT type, summary FROM events WHERE task_id = %s AND seq > %s AND type NOT IN "
@@ -1892,6 +1917,8 @@ class Orchestration:
             if explicit:
                 raise Conflict(f"not all subtasks are accepted: {', '.join(open_) or 'no plan'}")
             return None
+        if task["state"] == S.FIX_REQUIRED:
+            task = self._move(uow, task, S.RUNNING, reason="accepted corrections; reintegrating for verification")
         if task["state"] in (S.PLANNING, S.QUEUED):  # an accepted plan, re-planned or retried: nothing to develop
             task = self._move(uow, task, S.QUEUED, S.RUNNING, reason="every subtask accepted; integrating")
         if task["state"] != S.RUNNING:

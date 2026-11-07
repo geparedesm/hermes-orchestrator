@@ -134,7 +134,7 @@ class TaskApi:
                          f"{urllib.parse.quote(name, safe='')}", raw=True, timeout=60)
 
     def action(self, key: str, verb: str) -> Any:
-        if verb not in ("pause", "resume", "cancel", "retry"):
+        if verb not in ("pause", "resume", "cancel", "retry", "repair"):
             raise ApiError(400, f"unknown task action {verb}")
         return self.call("POST", f"/v1/tasks/{_key(key)}/{verb}")
 

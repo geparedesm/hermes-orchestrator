@@ -175,3 +175,23 @@ def test_explicit_missing_review_input_is_recognized(reason):
     d = sample()
     d['dag']['subtasks'] = [{'state': 'BLOCKED', 'state_reason': reason}]
     assert [b['code'] for b in explain(d)['blockers']] == ['review_input']
+
+
+def test_hermes_can_diagnose_a_blockage_with_current_context_and_allowance():
+    d = sample()
+    d['dag']['subtasks'] = [{'state': 'BLOCKED', 'state_reason': 'Review findings are missing.'}]
+    g = explain(d)
+    assert g['can_repair'] and not g['can_retry']
+    assert g['blockers'][0]['owner'] == 'Hermes'
+    assert 'Resolve with Hermes' in g['blockers'][0]['next_step']
+    d['budget']['state'] = 'EXHAUSTED'
+    assert not explain(d)['can_repair']
+
+
+def test_hermes_repair_is_unavailable_for_stale_context_active_runs_or_other_states():
+    d = sample()
+    assert not presentation.guidance(d, None, NOW)['can_repair']
+    d['executions'] = [{'state': 'RUNNING'}]
+    assert not explain(d)['can_repair']
+    for state in ['APPROVAL_REQUIRED', 'AUTH_REQUIRED', 'PAUSED_BUDGET', 'PAUSED', 'DONE', 'FAILED']:
+        assert not explain(sample(state))['can_repair']
