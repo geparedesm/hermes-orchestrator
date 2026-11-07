@@ -39,6 +39,7 @@ summary = {'required_actions': {'approvals': [], 'clarifications': [], 'waiting_
 seen, errors, mutation_attempts, staged = {}, [], [], []
 flags = {"fail_detail": False, "fail_mobile": False, "design": False}
 simulated_posts = []
+held_repairs = []
 design_id = "01a16f5d-0727-7964-b953-c9f68e03b8c7"
 with sync_playwright() as p:
     browser = p.chromium.launch(args=['--disable-dev-shm-usage'])
@@ -85,6 +86,15 @@ with sync_playwright() as p:
             detail['approvals'] = []
             summary['required_actions']['approvals'] = []
             return request_route.fulfill(json={'state': 'CONSUMED'})
+        if tail == '/tasks/T-13/repair' and request.method == 'POST':
+            simulated_posts.append(tail)
+            if flags.get('hold_repair'):
+                held_repairs.append(request_route)
+                return
+            task['state'] = 'READY'
+            context['state'] = 'READY'
+            detail['guidance'] = m.guidance(detail, context)
+            return request_route.fulfill(json=task)
         if request.method != 'GET':
             mutation_attempts.append(tail)
             return request_route.fulfill(status=403, json={'detail': 'Browser checks never mutate the platform.'})
@@ -97,7 +107,10 @@ with sync_playwright() as p:
     page.route('**/*', route)
     page.clock.install()
     page.goto(base + '/orchestration', wait_until='networkidle')
-    page.get_by_role('heading', name='Needs a decision', exact=True).wait_for(timeout=30000)
+    try:
+        page.get_by_role('heading', name='Needs a decision', exact=True).wait_for(timeout=30000)
+    except Exception as exc:
+        raise AssertionError({'page_errors': errors, 'body': page.locator('body').inner_text()[:2000]}) from exc
     assert {'js', 'css'} <= set(staged), f'Staged assets not loaded: {staged}'
     assert page.get_by_role('button', name='System', exact=True).count() == 0
     page.get_by_role('button', name='Tasks', exact=True).click()
@@ -170,5 +183,45 @@ with sync_playwright() as p:
     assert not mutation_attempts, mutation_attempts
     seen.update({'staged_assets': sorted(set(staged)), 'screenshots': 5, 'mobile_widths': [390, 320, 768],
                  'page_errors': errors, 'platform_mutations': mutation_attempts})
+    flags['design'] = False
+    budget['state'] = 'OK'
+    budget['consumed']['agent_launches'] = 21
+    subtask['state'] = 'ACCEPTED'
+    detail['guidance'] = m.guidance(detail, context)
+    page.set_viewport_size({'width': 1400, 'height': 1100})
+    page.reload(wait_until='networkidle')
+    page.get_by_role('button', name='Tasks', exact=True).click()
+    page.get_by_role('button', name='T-13 WhatsApp payment reminders', exact=False).click()
+    repair = dialog.get_by_role('button', name='Resolve with Hermes', exact=True)
+    expect(repair).to_be_visible()
+    page.screenshot(path=str(out / 'recovery-desktop.png'), full_page=True, animations='disabled')
+    dialog.get_by_role('button', name='Advanced', exact=True).click()
+    expect(repair).to_be_visible()
+    dialog.get_by_role('button', name='Simple', exact=True).click()
+    for width in [390, 320]:
+        page.set_viewport_size({'width': width, 'height': 1000})
+        expect(repair).to_be_visible()
+        assert not dialog.evaluate('(el) => el.scrollWidth > el.clientWidth + 1')
+        page.screenshot(path=str(out / f'recovery-{width}.png'), full_page=True, animations='disabled')
+    flags['hold_repair'] = True
+    repair.click()
+    busy = dialog.get_by_role('button', name='Requesting recovery…', exact=True)
+    expect(busy).to_be_disabled()
+    assert len(held_repairs) == 1
+    held_repairs[0].fulfill(status=409, json={'detail': 'More allowance needs approval.'})
+    expect(dialog.get_by_role('alert')).to_contain_text('More allowance needs approval.')
+    assert task['state'] == 'BLOCKED'
+    flags['hold_repair'] = False
+    expect(repair).to_be_enabled()
+    repair.click()
+    expect(dialog.get_by_role('status')).to_contain_text('Recovery requested.')
+    expect(repair).to_have_count(0)
+    assert task['state'] == 'READY'
+    assert simulated_posts.count('/tasks/T-13/repair') == 2  # one rejected request, one successful recovery
+    assert not errors, errors
+    assert not mutation_attempts, mutation_attempts
+    seen.update({'recovery_simple_and_advanced': True, 'recovery_busy_disabled': True,
+                 'recovery_error_and_success': True, 'recovery_mobile_widths': [390, 320],
+                 'fixture_only_posts': len(simulated_posts)})
     browser.close()
 print(json.dumps(seen))

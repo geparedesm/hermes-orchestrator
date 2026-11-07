@@ -90,6 +90,13 @@ def guidance(data: dict, context: dict | None, now: datetime | None = None) -> d
     elif blockers and state not in TERMINAL:
         title = 'Work is on hold' if state == 'BLOCKED' else 'The task needs attention'
         explanation = 'The following items affect the next step. Resolve them in the order shown.'
+    can_repair = consistent and state == 'BLOCKED' and not exhausted and not running
+    if can_repair:
+        explanation = 'Hermes can check the blockage. Your accepted work is saved.'
+        for blocker in blockers:
+            if blocker['code'] in {'unknown', 'review_input'}:
+                blocker['owner'] = 'Hermes'
+                blocker['next_step'] = 'Use Resolve with Hermes to diagnose the blockage and try to continue.'
     actionable = [a for a in data.get('approvals', []) if a.get('state') == 'PENDING'
                   and (not a.get('expires_at') or _future(a['expires_at'], now))]
     expired = sum(a.get('state') == 'EXPIRED' or (a.get('state') == 'PENDING' and
@@ -100,7 +107,7 @@ def guidance(data: dict, context: dict | None, now: datetime | None = None) -> d
     latest = next(({'label': LABELS_EVENT[e['type']], 'at': e['occurred_at']}
                    for e in data.get('timeline', []) if e.get('type') in LABELS_EVENT), None)
     return {'title': title, 'explanation': explanation, 'blockers': blockers, 'checked_at': now.isoformat(),
-            'context_current': consistent, 'can_retry': consistent and not exhausted and all(b['code'] == 'unknown' for b in blockers) and not running and
+            'context_current': consistent, 'can_repair': can_repair, 'can_retry': consistent and not exhausted and all(b['code'] == 'unknown' for b in blockers) and not running and
             state in {'BLOCKED', 'FAILED', 'CANCELLED'},
             'can_resume': consistent and not blockers and not running and state in {'PAUSED', 'PAUSED_BUDGET'},
             'needs_budget': exhausted and not finished, 'preview_ready': preview_ready,
@@ -121,4 +128,5 @@ LABELS_EVENT = {'TASK_CREATED': 'Task created', 'PLAN_VERSIONED': 'The work plan
                 'TEST_FAILED': 'Automated tests found an issue', 'REVIEW_PASSED': 'Review passed',
                 'REVIEW_FAILED': 'A review requested corrections', 'READY_FOR_MERGE': 'The change is ready to apply',
                 'TASK_COMPLETED': 'The task completed', 'BUDGET_RAISED': 'More allowance was authorized',
+                'TASK_REPAIR_REQUESTED': 'Hermes recovery was requested',
                 'APPROVAL_DECIDED': 'A decision was recorded', 'BLOCKED': 'Work was put on hold'}

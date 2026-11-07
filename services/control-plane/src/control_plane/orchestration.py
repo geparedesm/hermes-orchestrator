@@ -148,6 +148,21 @@ class Orchestration:
         approvals.register_handler(ApprovalAction.BUDGET_INCREASE, self._on_budget_increase)
         approvals.register_handler(ApprovalAction.PLAN, self._on_plan_decision)
 
+    def repair(self, uow: UnitOfWork, key: str, *, principal: Principal) -> Row:
+        """Ask Hermes to recover a blocked task with its recorded evidence and normal limits."""
+        task = self.tasks.get(uow, key, lock=True)
+        if task["state"] != S.BLOCKED:
+            raise Conflict(f"{key} is {task['state']}; repair requires BLOCKED")
+        uow.cur.execute("SELECT 1 FROM executions WHERE task_id = %s AND state = ANY(%s) LIMIT 1",
+                        (task["id"], list(ACTIVE)))
+        if uow.cur.fetchone():
+            raise Conflict("work is still active; wait for it to finish before requesting repair")
+        budgets.require_available(uow, task)
+        self._event(uow, task, "TASK_REPAIR_REQUESTED", "Hermes will diagnose the recorded blockage and attempt recovery",
+                    {"reason": task.get("state_reason"), "resume_state": task.get("resume_state")}, actor=principal.value)
+        # The existing retry path preserves post-merge recovery, accepted work and all approval boundaries.
+        return self.tasks.retry(uow, key, principal=principal, idempotency_key=f"repair:{task['id']}")
+
     # ------------------------------------------------------------- helpers
 
     def _task(self, uow: UnitOfWork, task_id: UUID, *, lock: bool = True) -> Row:
@@ -194,6 +209,26 @@ class Orchestration:
         sets = ", ".join(f"{k} = %s" for k in fields)
         uow.cur.execute(f"UPDATE subtasks SET state = %s, state_reason = %s, updated_at = now(){', ' + sets if sets else ''} "
                         f"WHERE id = %s", (state, reason, *fields.values(), subtask["id"]))
+
+    def _last_subtask_review(self, uow: UnitOfWork, subtask: Row) -> Row | None:
+        uow.cur.execute("SELECT * FROM reviews WHERE subtask_id = %s ORDER BY created_at DESC LIMIT 1", (subtask["id"],))
+        return uow.cur.fetchone()
+
+    @staticmethod
+    def _approving(review: Row) -> bool:
+        return review["outcome"] == "APPROVED" and bool(review["requirements_met"])
+
+    def _review_feedback(self, uow: UnitOfWork, review: Row, *, limit: int = 40) -> str:
+        """A subtask review's verdict and findings, as given to the developer that fixes them."""
+        uow.cur.execute("SELECT severity, path, line, description FROM review_findings WHERE review_id = %s ORDER BY severity",
+                        (review["id"],))
+        findings = uow.cur.fetchall()
+        return "\n".join([
+            "## Review feedback (fix these)",
+            f"Verdict: {review['outcome'].lower()} by {review['reviewer_provider']} on commit {review['commit_sha'][:12]}",
+            *[f"- [{f['severity']}] {f['path'] or ''}{':' + str(f['line']) if f['line'] else ''} {f['description'][:1500]}"
+              for f in findings[:limit]],
+            *[f"- unmet requirement: {u}" for u in (review["unmet_requirements"] or [])[:10]]])
 
     def _config(self, uow: UnitOfWork, task: Row) -> dict[str, Any]:
         return self.git._context(uow, task["key"])[2]
@@ -540,6 +575,16 @@ class Orchestration:
                  "## Project files", "", f"The tracked files of the project's main branch are mounted read-only at /projects/{self._slug(uow, task)} "
                  "(no Git metadata; files the project ignores, such as local secrets, are not there). Read it (structure, code, tests, conventions) before writing requirements or a plan; give each subtask "
                  "accurate `files`.", ""]
+        uow.cur.execute("SELECT data FROM events WHERE task_id = %s AND type = 'TASK_REPAIR_REQUESTED' ORDER BY seq DESC LIMIT 1",
+                        (task["id"],))
+        repair = uow.cur.fetchone()
+        if repair:
+            lines += ["## Recovery requested by the person", "", json.dumps(repair["data"], default=str),
+                      "Diagnose this recorded blockage using the current state and rejected actions below. "
+                      "Preserve accepted work. Use REJECT_SUBTASK with concrete guidance before restarting accepted or blocked work. "
+                      "If all work is accepted, SUBMIT_FOR_QUALITY_GATE reintegrates it, including from FIX_REQUIRED. "
+                      "Do not repeat an unchanged rejected action. If credentials, approval or budget need the person, "
+                      "report the exact dependency and stop; do not bypass it.", ""]
         if task.get("delivery_mode") == "FEATURE":
             from .delivery import PLANNING_INSTRUCTIONS
             lines = [line.replace("Plan small, independent subtasks", "Plan one complete implementation assignment") for line in lines]
@@ -614,6 +659,12 @@ class Orchestration:
                           "for a new attempt (a supervised plan asks the person first);",
                           "- REJECT_SUBTASK with `text` = the guidance that resolves it: it goes to FIX_REQUIRED, then REQUEST_EXECUTION;",
                           "- REPORT_BLOCKED when only the person can resolve it.", ""]
+            for s in subtasks:
+                last = self._last_subtask_review(uow, s) if s["state"] in ("BLOCKED", "FIX_REQUIRED") else None
+                if last is not None and not self._approving(last):
+                    # Base REJECT_SUBTASK guidance on these, not only on the gate's (T-15); the fix run receives them too.
+                    lines += [f"## Latest review of {s['local_key']} [{s['key']}] (its fix run receives these findings)", "",
+                              *self._review_feedback(uow, last, limit=15).splitlines()[1:], ""]
         if task["state"] in (S.FIX_REQUIRED, S.RUNNING, S.PLANNING):
             # The gate's reasons stay in view until the fixes pass a new evaluation: the event that announced them is
             # read once, and a step that could not act on it (an assumption made the task wait) would lose them (T-6).
@@ -631,7 +682,7 @@ class Orchestration:
                     lines += ["Its open blocking findings (a fix run of a FIX_REQUIRED subtask receives this list too):", "",
                               *findings, ""]
                 if subtasks and all(x["state"] in ("ACCEPTED", "INTEGRATED", "CANCELLED") for x in subtasks):
-                    lines += ["Every subtask is accepted, so starting them again does nothing: add new subtasks (new keys) with "
+                    lines += ["Every subtask is accepted, so starting them again does nothing. If the accepted work fixes the findings, use SUBMIT_FOR_QUALITY_GATE for fresh verification. Otherwise add new subtasks (new keys) with "
                               "SET_PLAN that fix these points, then REQUEST_EXECUTION; or REJECT_SUBTASK one whose work must "
                               "change.", ""]
         uow.cur.execute("SELECT type, summary FROM events WHERE task_id = %s AND seq > %s AND type NOT IN "
@@ -1482,6 +1533,11 @@ class Orchestration:
             uow.cur.execute("UPDATE subtasks SET workspace_id = %s, attempts = %s WHERE id = %s",
                             (workspace["id"], attempt, subtask["id"]))
         if kind == "FIX":
+            last = self._last_subtask_review(uow, subtask)
+            if last is not None and not self._approving(last) and "## Review feedback" not in extra:
+                # A fix the orchestrator starts (after REJECT_SUBTASK) needs the reviewer's findings in full too, not only
+                # the gate's: given only already-fixed gate findings, the developer changed nothing (T-15).
+                extra = "\n".join([extra.strip(), "", self._review_feedback(uow, last)]).strip()
             findings = self._gate_findings(uow, task)
             if findings:  # the orchestrator's guidance is short; the fix needs the gate's findings in full (T-13)
                 extra = "\n".join([extra.strip(), "", "## Open findings from the last Quality Gate evaluation (fix these; "
@@ -1684,9 +1740,37 @@ class Orchestration:
                     self._set_subtask(uow, subtask, "FIX_REQUIRED", "the developer made no commits")
                     self._input(uow, task, f"{subtask['key']}: the developer finished without committing", {"subtask": subtask["key"]})
                     return
+                last = self._last_subtask_review(uow, subtask)
+                if last is not None and last["commit_sha"] == result["head_sha"]:
+                    self._fix_without_changes(uow, task, subtask, last)
+                    return
                 self._request_subtask_review(uow, task, subtask, developer, workspace, result["head_sha"])
         except ApiError as exc:
             log.warning("review of %s not started: %s", task_key, exc)
+
+    def _fix_without_changes(self, uow: UnitOfWork, task: Row, subtask: Row, review: Row) -> None:
+        """The developer left the reviewed commit unchanged. Reviewing it again only draws new findings from the
+        reviewer, never progress: T-15 reviewed one commit nine times. The orchestrator gets the open findings once;
+        a second unchanged run on the same commit (since the person last acted) blocks the task for the person."""
+        head = review["commit_sha"]
+        uow.cur.execute("SELECT count(*) AS n FROM events WHERE task_id = %s AND type = 'FIX_WITHOUT_CHANGES' "
+                        "AND data->>'subtask' = %s AND data->>'commit' = %s AND occurred_at > coalesce((SELECT max(occurred_at) "
+                        "FROM events WHERE task_id = %s AND type = 'TASK_STATE_CHANGED' AND data->>'trigger' = 'USER'), '-infinity')",
+                        (task["id"], subtask["key"], head, task["id"]))
+        repeated = int(uow.cur.fetchone()["n"])  # type: ignore[index]
+        verdict = "approved it" if self._approving(review) else f"{review['outcome'].lower()} by {review['reviewer_provider']}"
+        self._event(uow, task, "FIX_WITHOUT_CHANGES", f"{subtask['key']}: the fix left {head[:12]} unchanged ({verdict}); "
+                    "not reviewed again", {"subtask": subtask["key"], "commit": head, "review": str(review["id"])})
+        reason = f"fix made no changes to {head[:12]}, last reviewed {verdict}"
+        self._set_subtask(uow, subtask, "BLOCKED", reason[:300])
+        if repeated:
+            self._move(uow, task, S.BLOCKED, reason=f"{subtask['key']}: two fix runs left {head[:12]} unchanged while its review "
+                       "findings stay open; the developer and the reviewer disagree, so the person decides (revise the request "
+                       "or the acceptance criteria, then retry)")
+            return
+        self._input(uow, task, f"{subtask['key']}: the fix left {head[:12]} unchanged, so it was not reviewed again; its latest "
+                    "review findings are still open (listed under 'Latest review'). REJECT_SUBTASK with guidance that addresses "
+                    "them, or REPORT_BLOCKED if they need the person", {"subtask": subtask["key"]})
 
     def _accept_research(self, uow: UnitOfWork, task: Row, subtask: Row) -> None:
         """Research produces findings, not code: there is nothing to cross-review, so a completed run is accepted
@@ -1851,13 +1935,7 @@ class Orchestration:
                     self._input(uow, task, f"{subtask['key']} accepted; ready to start: {', '.join(ready)}",
                                 {"subtask": subtask["key"], "ready": ready})
             return
-        uow.cur.execute("SELECT severity, path, line, description FROM review_findings WHERE review_id = %s ORDER BY severity",
-                        (review["id"],))
-        findings = uow.cur.fetchall()
-        feedback = "\n".join(["## Review feedback (fix these)", f"Verdict: {review['outcome'].lower()} by {review['reviewer_provider']}",
-                              *[f"- [{f['severity']}] {f['path'] or ''}{':' + str(f['line']) if f['line'] else ''} {f['description']}"
-                                for f in findings[:40]],
-                              *[f"- unmet requirement: {u}" for u in (review["unmet_requirements"] or [])[:10]]])
+        feedback = self._review_feedback(uow, review)
         cycles = int(subtask["review_cycles"]) + 1
         try:
             budgets.charge(uow, task, "review_cycles")
@@ -1892,6 +1970,8 @@ class Orchestration:
             if explicit:
                 raise Conflict(f"not all subtasks are accepted: {', '.join(open_) or 'no plan'}")
             return None
+        if task["state"] == S.FIX_REQUIRED:
+            task = self._move(uow, task, S.RUNNING, reason="accepted corrections; reintegrating for verification")
         if task["state"] in (S.PLANNING, S.QUEUED):  # an accepted plan, re-planned or retried: nothing to develop
             task = self._move(uow, task, S.QUEUED, S.RUNNING, reason="every subtask accepted; integrating")
         if task["state"] != S.RUNNING:

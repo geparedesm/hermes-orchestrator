@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     lst = task.add_parser("list")
     lst.add_argument("--project")
     lst.add_argument("--state")
-    for name in ("show", "pause", "resume", "cancel", "retry", "events"):
+    for name in ("show", "pause", "resume", "cancel", "retry", "repair", "events"):
         task.add_parser(name).add_argument("key")
     task.add_parser("queue")
     task.add_parser("design", help="inspect the current pen.dev design and approval").add_argument("key")

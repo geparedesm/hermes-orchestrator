@@ -214,6 +214,7 @@ Orange nodes run an agent; purple nodes wait for you; the rest is the platform. 
 
 ```bash
 ho task inspect T-1        # plan, subtasks, lease, recent orchestrator actions, budget
+ho task repair T-1         # ask Hermes to diagnose and recover a blocked task with its remaining allowance
 ho task events T-1         # audit timeline
 ho workers                 # capacity, running workers
 ho execution list --task T-1
@@ -269,7 +270,7 @@ Credentials, Redis, workers, and test environments are never backed up. Schedule
 | --- | --- |
 | A task waits in `AUTH_REQUIRED` | `make auth-claude` or `make auth-codex`, then `ho auth status` |
 | A task is `PAUSED_BUDGET` | `ho task budget T-1` to see it; `ho task budget T-1 --add agent_launches=10` and approve |
-| A task is `BLOCKED` | `ho task inspect T-1` and `ho task events T-1`; then `ho task retry T-1` or `ho task cancel T-1` |
+| A task is `BLOCKED` | Use **Resolve with Hermes** in the Dashboard or `ho task repair T-1` to diagnose and attempt recovery. Human approvals and allowance limits still apply. `ho task inspect T-1` and `ho task events T-1` show the evidence. |
 | `ho recovery status` shows `DEGRADED` | `docker compose ps`; restart the failing service (`docker compose up -d --wait`); work waits instead of failing |
 | Executions are refused for memory | Give Docker more memory or lower `resource_profiles` in your machine profile |
 | No notifications in chat | `HO_HERMES_DELIVER` and `HO_HERMES_WEBHOOK_URL` set? `ho recovery status` shows pending notifications; `docker compose logs hermes` |

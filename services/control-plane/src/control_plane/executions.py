@@ -315,10 +315,12 @@ class Executions:
                                "structure with both approved images and ui-design.md, and request changes only for "
                                "structural or behavioral deviations.")
         if req.prompt:
+            from .gate_context import assignment_contract
+            gate_prompt = assignment_contract(uow, task, config)
             assert provider is not None
             caps_granted = grant["capabilities"]
             plan = adapter_for(provider).build_execution(AgentAssignment(
-                role=role, prompt=req.prompt, toolchain=toolchain, egress=caps_granted["network"]["egress"],
+                role=role, prompt=req.prompt + "\n\n" + gate_prompt, toolchain=toolchain, egress=caps_granted["network"]["egress"],
                 workspace=caps_granted["workspace"], git=caps_granted["git"],
                 resume_session=resume_row["provider_session_id"] if resume_row else None,
                 max_turns=req.max_turns, model=req.model, result_schema=req.result_schema,

@@ -1,0 +1,1144 @@
+{
+  "version": "2.21",
+  "variables": {
+    "bg": {
+      "type": "color",
+      "value": "#08081C"
+    },
+    "surface": {
+      "type": "color",
+      "value": "#0D0D28"
+    },
+    "surface-2": {
+      "type": "color",
+      "value": "#13133A"
+    },
+    "border": {
+      "type": "color",
+      "value": "#1E1E52"
+    },
+    "text": {
+      "type": "color",
+      "value": "#DDD6FF"
+    },
+    "muted": {
+      "type": "color",
+      "value": "#7C7AB0"
+    },
+    "faint": {
+      "type": "color",
+      "value": "#55538A"
+    },
+    "accent": {
+      "type": "color",
+      "value": "#8B80E8"
+    },
+    "good": {
+      "type": "color",
+      "value": "#46C08A"
+    },
+    "warn": {
+      "type": "color",
+      "value": "#E5AE55"
+    },
+    "bad": {
+      "type": "color",
+      "value": "#B03060"
+    },
+    "claude": {
+      "type": "color",
+      "value": "#D97757"
+    },
+    "codex": {
+      "type": "color",
+      "value": "#5BB8E8"
+    },
+    "ux-muted": {
+      "type": "color",
+      "value": "#B6B2CF"
+    },
+    "ux-heading": {
+      "type": "color",
+      "value": "#F2EFFF"
+    },
+    "ux-warning-bg": {
+      "type": "color",
+      "value": "#262035"
+    },
+    "ux-warning-text": {
+      "type": "color",
+      "value": "#FFD38A"
+    },
+    "ux-on-accent": {
+      "type": "color",
+      "value": "#100D24"
+    }
+  },
+  "children": [
+    {
+      "type": "frame",
+      "id": "ze0kd",
+      "x": 16200,
+      "y": -280,
+      "name": "Task recovery · v1 · Before",
+      "clip": true,
+      "width": 900,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 28,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "YeiD0",
+          "name": "Concept label",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "TASK RECOVERY · v1 · Before · EXAMPLE SNAPSHOT",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "gP2P8",
+          "name": "Navigation and view selector",
+          "width": "fill_container",
+          "gap": 20,
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "CkyZ7",
+              "name": "Back to tasks",
+              "fill": "$ux-muted",
+              "content": "←  Tasks",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "id": "Qt93X",
+              "type": "ref",
+              "ref": "U4mP8P"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "l4dg3d",
+          "name": "Task identity",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "X301q",
+              "name": "Task reference",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "T-14 · Commercial properties",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "u2zWj",
+              "name": "Task title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Payments due on the contract start day",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 30,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "ji06o",
+              "name": "Request summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Use the contract start day for payment due dates, clamped to the end of each month.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "id": "mi0Kv",
+          "type": "ref",
+          "ref": "iC3nD",
+          "descendants": {
+            "fdp4f": {
+              "content": "Three orchestration steps left no work running. The implementation was accepted, but the task could not continue."
+            },
+            "MFfAl": {
+              "content": "No agent is running · Remaining allowance is available"
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "Msvzo",
+          "name": "Existing operator action",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "JIsTn",
+              "name": "Next step title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "What needs to happen next",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "mpg9d",
+              "name": "Operator instruction",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Check the original reason and current evidence in Advanced before retrying.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "Cy87X",
+              "name": "Open advanced action",
+              "fill": "$surface-2",
+              "cornerRadius": 8,
+              "stroke": "$border",
+              "strokeWidth": 1,
+              "padding": [
+                12,
+                18
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "zLOd7",
+                  "name": "Open advanced label",
+                  "fill": "$text",
+                  "content": "Open advanced details",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "r9535m",
+          "name": "Divider",
+          "width": "fill_container",
+          "height": 1,
+          "fill": "$border"
+        },
+        {
+          "type": "frame",
+          "id": "ETN8k",
+          "name": "Meaningful progress",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "children": [
+            {
+              "type": "text",
+              "id": "DpTCo",
+              "name": "Progress title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Latest progress",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "RCbsN",
+              "name": "Progress summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The corrections were accepted in review. Integration and final checks are still required.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "w3iUC",
+              "name": "Freshness",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Status checked just now · Refresh",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "AMTeH",
+      "x": 17240,
+      "y": -280,
+      "name": "Task recovery · v1 · After",
+      "clip": true,
+      "width": 900,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 28,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "hAJmc",
+          "name": "Concept label",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "TASK RECOVERY · v1 · After · EXAMPLE SNAPSHOT",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "vJ98f",
+          "name": "Navigation and view selector",
+          "width": "fill_container",
+          "gap": 20,
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "zD34a",
+              "name": "Back to tasks",
+              "fill": "$ux-muted",
+              "content": "←  Tasks",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "id": "sqyeY",
+              "type": "ref",
+              "ref": "U4mP8P"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "ZseMq",
+          "name": "Task identity",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "NIUMA",
+              "name": "Task reference",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "T-14 · Commercial properties",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "aEFhs",
+              "name": "Task title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Payments due on the contract start day",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 30,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "fQFfj",
+              "name": "Request summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Use the contract start day for payment due dates, clamped to the end of each month.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "id": "C35Ewi",
+          "type": "ref",
+          "ref": "iC3nD",
+          "descendants": {
+            "fdp4f": {
+              "content": "Three orchestration steps left no work running. The implementation was accepted, but the task could not continue."
+            },
+            "MFfAl": {
+              "content": "Hermes can check the blockage · Your accepted work is saved"
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "E3Zi6",
+          "name": "Hermes recovery action",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "qSULl",
+              "name": "Next step title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Let Hermes resolve the blockage",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "of10Q",
+              "name": "Recovery helper",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Hermes will check the blockage and try to continue using the remaining allowance.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "YT4Lw",
+              "name": "Resolve with Hermes button",
+              "fill": "$accent",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                12,
+                18
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "bbeAv",
+                  "name": "Recovery icon",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "wrench",
+                  "library": "lucide",
+                  "fill": "$ux-on-accent"
+                },
+                {
+                  "type": "text",
+                  "id": "S3JTqU",
+                  "name": "Recovery label",
+                  "fill": "$ux-on-accent",
+                  "content": "Resolve with Hermes",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "DJ44L",
+              "name": "Existing permissions",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Approvals and allowance limits still apply. Hermes will ask when it needs your help.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "dqxot",
+          "name": "Divider",
+          "width": "fill_container",
+          "height": 1,
+          "fill": "$border"
+        },
+        {
+          "type": "frame",
+          "id": "d8PCo",
+          "name": "Meaningful progress",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "children": [
+            {
+              "type": "text",
+              "id": "nfWfg",
+              "name": "Progress title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Latest progress",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "oM9UQ",
+              "name": "Progress summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The corrections were accepted in review. Integration and final checks are still required.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "ojrHK",
+              "name": "Freshness",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Status checked just now · Refresh",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "g30ib",
+      "x": 18280,
+      "y": -280,
+      "name": "Task recovery · v1 · Changes",
+      "clip": true,
+      "width": 900,
+      "height": 1100,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 28,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "NPaGI",
+          "name": "Concept label",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "TASK RECOVERY · v1 · Changes · REVIEW THESE TWO CHANGES",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 11,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "yN3Im",
+          "name": "Navigation and view selector",
+          "width": "fill_container",
+          "gap": 20,
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "hAxpb",
+              "name": "Back to tasks",
+              "fill": "$ux-muted",
+              "content": "←  Tasks",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "id": "C4sM9",
+              "type": "ref",
+              "ref": "U4mP8P"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "nE4Bg",
+          "name": "Task identity",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "ptYqy",
+              "name": "Task reference",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "T-14 · Commercial properties",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "NQUnC",
+              "name": "Task title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Payments due on the contract start day",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 30,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "ZBUzF",
+              "name": "Request summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Use the contract start day for payment due dates, clamped to the end of each month.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "id": "URiyY",
+          "type": "ref",
+          "ref": "iC3nD",
+          "stroke": "#E5007E",
+          "strokeWidth": 3,
+          "descendants": {
+            "fdp4f": {
+              "content": "Three orchestration steps left no work running. The implementation was accepted, but the task could not continue."
+            },
+            "MFfAl": {
+              "content": "Hermes can check the blockage · Your accepted work is saved"
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "bDwaq",
+          "name": "Hermes recovery action",
+          "width": "fill_container",
+          "stroke": "#E5007E",
+          "strokeWidth": 3,
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "ZPvQx",
+              "name": "Next step title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Let Hermes resolve the blockage",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 20,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "pD8wp",
+              "name": "Recovery helper",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Hermes will check the blockage and try to continue using the remaining allowance.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "ySyvV",
+              "name": "Resolve with Hermes button",
+              "fill": "$accent",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                12,
+                18
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "vXCGJ",
+                  "name": "Recovery icon",
+                  "width": 18,
+                  "height": 18,
+                  "icon": "wrench",
+                  "library": "lucide",
+                  "fill": "$ux-on-accent"
+                },
+                {
+                  "type": "text",
+                  "id": "VXZDF",
+                  "name": "Recovery label",
+                  "fill": "$ux-on-accent",
+                  "content": "Resolve with Hermes",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "600"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "u50awG",
+              "name": "Existing permissions",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Approvals and allowance limits still apply. Hermes will ask when it needs your help.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "o0YHZ6",
+          "name": "Divider",
+          "width": "fill_container",
+          "height": 1,
+          "fill": "$border"
+        },
+        {
+          "type": "frame",
+          "id": "nWMtr",
+          "name": "Meaningful progress",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 10,
+          "children": [
+            {
+              "type": "text",
+              "id": "OQjm9",
+              "name": "Progress title",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Latest progress",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "LkWoe",
+              "name": "Progress summary",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "The corrections were accepted in review. Integration and final checks are still required.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "E2tEuK",
+              "name": "Freshness",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Status checked just now · Refresh",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "aCttt",
+          "layoutPosition": "absolute",
+          "x": 18,
+          "y": 490,
+          "name": "Change 1 marker",
+          "width": 28,
+          "height": 28,
+          "fill": "#E5007E",
+          "cornerRadius": 14,
+          "layout": "none",
+          "children": [
+            {
+              "type": "text",
+              "id": "DDI8I",
+              "x": 0,
+              "y": 0,
+              "name": "Change 1 number",
+              "fill": "#FFFFFF",
+              "textGrowth": "fixed-width-height",
+              "width": 28,
+              "height": 28,
+              "content": "1",
+              "lineHeight": 1,
+              "textAlign": "center",
+              "textAlignVertical": "middle",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "700"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "gdJLL",
+          "layoutPosition": "absolute",
+          "x": 18,
+          "y": 300,
+          "name": "Change 2 marker",
+          "width": 28,
+          "height": 28,
+          "fill": "#E5007E",
+          "cornerRadius": 14,
+          "layout": "none",
+          "children": [
+            {
+              "type": "text",
+              "id": "A30QS",
+              "x": 0,
+              "y": 0,
+              "name": "Change 2 number",
+              "fill": "#FFFFFF",
+              "textGrowth": "fixed-width-height",
+              "width": 28,
+              "height": 28,
+              "content": "2",
+              "lineHeight": 1,
+              "textAlign": "center",
+              "textAlignVertical": "middle",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "700"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "H9M0j",
+          "name": "Numbered changes legend",
+          "width": "fill_container",
+          "height": 120,
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            20,
+            0
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "Q82czr",
+              "name": "1  Resolve with Hermes: diagnose",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "1  Resolve with Hermes: diagnose the blockage and try to continue with the remaining allowance.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "N1BuC1",
+              "name": "2  Clear ownership: Hermes can i",
+              "fill": "$ux-heading",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "2  Clear ownership: Hermes can investigate; accepted work is preserved.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "b5NBhn",
+      "x": 17240,
+      "y": 842,
+      "name": "Task recovery · v1 · State specification",
+      "width": 900,
+      "fill": "$bg",
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 40,
+      "children": [
+        {
+          "type": "text",
+          "id": "qdGG5",
+          "name": "State specification title",
+          "fill": "$ux-heading",
+          "content": "Recovery action · Interaction states",
+          "fontFamily": "Inter",
+          "fontSize": 22,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "CLUUp",
+          "name": "Recovery feedback states",
+          "width": "fill_container",
+          "stroke": "$border",
+          "strokeWidth": {
+            "top": 1
+          },
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            16,
+            0
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "tWBlw",
+              "name": "Submitting",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Requesting recovery…  ·  Button disabled",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "bHyQ7",
+              "name": "Requested",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Recovery requested. Check the refreshed task status.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "sgBqi",
+              "name": "Error",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Could not request recovery. [Reason returned by Hermes]",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "D930vs",
+              "name": "Allowance exhausted",
+              "fill": "$ux-muted",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "No allowance left: show the existing request for more runs.",
+              "lineHeight": 1.5,
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "U4mP8P",
+      "name": "View selector component",
+      "reusable": true,
+      "fill": "$surface-2",
+      "cornerRadius": 10,
+      "gap": 4,
+      "padding": 4,
+      "children": [
+        {
+          "type": "frame",
+          "id": "o81X3r",
+          "name": "Simple tab",
+          "fill": "$text",
+          "cornerRadius": 7,
+          "padding": [
+            10,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "iQsZA",
+              "name": "Simple label",
+              "fill": "$bg",
+              "content": "Simple",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "hCNWL",
+          "name": "Advanced tab",
+          "fill": "$surface-2",
+          "cornerRadius": 7,
+          "padding": [
+            10,
+            18
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "GF2UI",
+              "name": "Advanced label",
+              "fill": "$ux-muted",
+              "content": "Advanced",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "iC3nD",
+      "name": "Primary issue component",
+      "reusable": true,
+      "width": "fill_container",
+      "fill": "$ux-warning-bg",
+      "cornerRadius": 12,
+      "layout": "vertical",
+      "gap": 14,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "BBamU",
+          "name": "Status",
+          "fill": "$ux-warning-text",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Ⅱ  Work is on hold",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 23,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "fdp4f",
+          "name": "Issue summary",
+          "fill": "$ux-heading",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "The agent is missing the review details needed to make the fix. The task has also used all its approved runs.",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 17,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "MFfAl",
+          "name": "Responsibility",
+          "fill": "$ux-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Needs an operator · Your existing work is saved",
+          "lineHeight": 1.5,
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500"
+        }
+      ]
+    }
+  ]
+}

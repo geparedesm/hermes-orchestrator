@@ -70,6 +70,7 @@ AUDIT_EVENTS = frozenset(
         "APPROVAL_CONSUMED",
         "POLICY_DECISION",
         "TASK_CANCELLED",
+        "TASK_REPAIR_REQUESTED",
         "GRANT_ISSUED",
         "GRANT_REVOKED",
         "WORKER_CREATED",

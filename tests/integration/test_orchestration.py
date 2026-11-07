@@ -1175,3 +1175,86 @@ def test_an_idle_in_progress_subtask_can_be_requested_again(api, services, agent
     assert actions(services, task)[-1][:2] == ("REQUEST_EXECUTION", "ACCEPTED")
     [fix] = active(services, task, "DEVELOPER")
     assert fix["subtask_id"] == subtasks(services, task)["b"]["id"]
+
+
+# Regression: T-14/T-15 accepted their corrections while the task remained FIX_REQUIRED.
+def test_accepted_corrections_reintegrate_from_fix_required(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    develop(services, agents, repo, active(services, task, 'DEVELOPER')[0], {'a.py': "print('hello')\n"})
+    # Stand-in for an earlier gate failure while its correction is being reviewed.
+    q(services, "UPDATE tasks SET state = 'FIX_REQUIRED' WHERE key = %s", task)
+    review_verdict(services, agents, active(services, task, 'REVIEWER')[0])
+    assert subtasks(services, task)['a']['state'] == 'ACCEPTED'
+    assert state(api, task) in ('TESTING', 'REVIEW')
+    assert latest_verification(services, task)['purpose'] == 'INTEGRATION'
+    assert not any(outcome == 'REJECTED' for _, outcome, _ in actions(services, task))
+
+
+def test_repair_carries_the_blockage_into_a_fresh_bounded_step(api, services, agents, task):
+    for _ in range(3):
+        step(services, agents, task, {'type': 'WAIT'})
+    assert state(api, task) == 'BLOCKED'
+    result = api.post(f'/v1/tasks/{task}/repair', key='repair-once')
+    assert result.status_code == 200, result.text
+    repeated = api.post(f'/v1/tasks/{task}/repair', key='repair-once')
+    assert repeated.status_code == 200 and repeated.json() == result.json()
+    assert len(q(services, "SELECT 1 FROM events WHERE type = 'TASK_REPAIR_REQUESTED'")) == 1
+    assert result.json()['key'] == task
+    services.scheduler.run_once()
+    [execution] = active(services, task, 'ORCHESTRATOR')
+    prompt = agents.specs[str(execution['id'])]['inputs']['prompt.md']
+    assert 'Recovery requested by the person' in prompt
+    assert '3 orchestrator steps' in prompt
+    assert 'Quality Gate contract' in prompt
+    assert q(services, 'SELECT orchestrator_failures FROM tasks WHERE key = %s', task)[0]['orchestrator_failures'] == 0
+    assert api.post(f'/v1/tasks/{task}/repair').status_code == 409
+
+
+def test_repair_does_not_bypass_active_work_or_budget(api, services, agents, task):
+    with services.ctx.unit_of_work() as uow:
+        services.tasks.transition(uow, services.tasks.get(uow, task, lock=True), S.BLOCKED,
+                                  trigger=Trigger.SYSTEM, actor='test', reason='needs diagnosis')
+    assert api.post(f'/v1/tasks/{task}/repair').status_code == 409  # active orchestrator
+    q(services, "UPDATE executions SET state = 'CANCELLED' WHERE state = 'RUNNING'")  # fixture: no work remains
+    q(services, "UPDATE budgets SET consumed = jsonb_set(consumed, '{agent_launches}', to_jsonb((limits->>'agent_launches')::int))")
+    result = api.post(f'/v1/tasks/{task}/repair')
+    assert result.status_code == 409 and 'budget' in result.text
+    assert state(api, task) == 'BLOCKED'
+    assert not q(services, "SELECT 1 FROM events WHERE type = 'TASK_REPAIR_REQUESTED'")
+
+
+def test_every_pipeline_agent_receives_the_gate_contract(api, services, agents, repo, task):
+    [leader] = active(services, task, 'ORCHESTRATOR')
+    assert 'Quality Gate contract' in agents.specs[str(leader['id'])]['inputs']['prompt.md']
+    plan_and_start(services, agents, task)
+    [developer] = active(services, task, 'DEVELOPER')
+    assert agents.specs[str(developer['id'])]['inputs']['prompt.md'].count('Quality Gate contract') == 1
+    assert 'Quality Gate contract' not in developer['spec']['assignment']['prompt']  # regenerate on resume/retry
+    develop(services, agents, repo, developer, {'a.py': "print('hello')\n"})
+    [reviewer] = active(services, task, 'REVIEWER')
+    assert 'Quality Gate contract' in agents.specs[str(reviewer['id'])]['inputs']['prompt.md']
+
+
+def test_an_unchanged_fix_is_not_reviewed_again_and_the_fix_gets_the_review_findings(api, services, agents, repo, task):
+    """T-15: fixes started by the orchestrator saw only stale gate findings, changed nothing, and the same commit was
+    reviewed again and again (each review finding something new) until a person cancelled the task."""
+    plan_and_start(services, agents, task)
+    develop(services, agents, repo, active(services, task, "DEVELOPER")[0], {"a.py": "x = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0], CHANGES)
+    [fix] = active(services, task, "DEVELOPER")
+    answer(services, agents, fix["id"], DONE)  # "already fixed": no new commit
+    assert not active(services, task, "REVIEWER")  # the reviewed commit is not reviewed again
+    assert subtasks(services, task)["a"]["state"] == "BLOCKED"
+    assert len(q(services, "SELECT 1 FROM events WHERE type = 'FIX_WITHOUT_CHANGES'")) == 1
+    [leader] = active(services, task, "ORCHESTRATOR")
+    prompt = agents.specs[str(leader["id"])]["inputs"]["prompt.md"]
+    assert "Latest review of a" in prompt and "No test covers the greeting" in prompt
+    step(services, agents, task, {"type": "REJECT_SUBTASK", "subtask": "a", "text": "Add the missing test."},
+         {"type": "REQUEST_EXECUTION", "role": "DEVELOPER", "subtask": "a", "prompt": "Fix what the review asked for."})
+    [again] = active(services, task, "DEVELOPER")
+    assert "No test covers the greeting" in agents.specs[str(again["id"])]["inputs"]["prompt.md"]
+    answer(services, agents, again["id"], DONE)  # unchanged a second time: the person decides
+    assert not active(services, task, "REVIEWER")
+    assert state(api, task) == "BLOCKED"
+    assert len(q(services, "SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id WHERE t.key = %s "
+                 "AND e.role = 'REVIEWER'", task)) == 1
