@@ -27,7 +27,7 @@ children:
 CHILD_YAML = """\
 version: 1
 project: {name: "{{name}}"}
-commands: {test: "python -m unittest"}
+commands: {build: "true", test: "python -m unittest", lint: "true", typecheck: "true", security: "true"}
 """
 
 

@@ -74,7 +74,13 @@ def test_without_github_nothing_is_created_on_github(api, services, projects_roo
     assert config["source"] == "REPOSITORY"  # use the shipped template, not a generated fallback
     effective = config["effective_config"]
     assert effective["toolchain"]["profiles"] == ["generic"]
-    assert not any(effective["quality_gate"][check] for check in ("build", "tests", "full_suite", "lint"))
+    # Ready without commands only as a template project: its first task sets them up, and it is the only open task.
+    from ho_core.verification import missing_commands
+    assert missing_commands(effective) == ["build", "test", "lint", "typecheck", "security"]
+    setup = api.post("/v1/tasks", {"project": "rent-portal", "request": "Set up the toolchain and its commands"})
+    assert setup.status_code == 201, setup.text
+    second = api.post("/v1/tasks", {"project": "rent-portal", "request": "Add a landing page"})
+    assert second.status_code == 409 and "still being set up" in second.text
     assert effective["quality_gate"]["block_on_findings"] == ["HIGH", "CRITICAL"]
     assert effective["git"]["protected_branches"] == ["main", "master"]
 

@@ -42,27 +42,29 @@ def names(plan):
     return {r.name for r in plan.requirements}
 
 
-def test_requirements_grow_with_risk():
+def test_every_change_gets_every_command_check_whatever_its_risk():
+    every = {"tests", "build", "lint", "typecheck", "security", "cross_review", "requirements", "no_conflicts"}
     low = plan_verification(config(), ["src/a.py", "tests/test_a.py"], insertions=10)
-    assert low.risk.risk == Risk.LOW and {"tests", "build", "cross_review", "requirements", "no_conflicts"} <= names(low)
-    assert "lint" not in names(low) and "security" not in names(low)
-    assert [s[0] for s in low.steps] == ["install", "build", "test"]
-
-    medium = plan_verification(config(), [f"src/m{i}.py" for i in range(9)] + ["tests/t.py"], insertions=500)
-    assert {"lint", "typecheck"} <= names(medium) and "security" not in names(medium)
+    assert low.risk.risk == Risk.LOW and every <= names(low)
+    assert [s[0] for s in low.steps] == ["install", "build", "lint", "typecheck", "test", "security"]
     high = plan_verification(config(), ["src/auth/login.py", "tests/test_login.py"])
-    assert {"lint", "typecheck", "security"} <= names(high)
-    assert [s[0] for s in high.steps] == ["install", "build", "lint", "typecheck", "test", "security"]
-    assert not high.needs_approval
+    assert every <= names(high) and not high.needs_approval
     critical = plan_verification({**config(), "verification": {"critical_paths": ["src/core/*"]}}, ["src/core/x.py", "tests/t.py"])
     assert critical.needs_approval == ["critical change (section 57)"]
 
 
 def test_hard_policy_requirements_cannot_be_disabled():
-    plan = plan_verification({"commands": COMMANDS, "quality_gate": {"tests": False, "full_suite": False, "build": False,
-                                                                      "lint": False}}, ["README.md"])
-    assert {"cross_review", "requirements", "no_blocking_findings", "no_conflicts", "no_policy_violations"} <= names(plan)
-    assert "tests" not in names(plan)
+    off = {"tests": False, "full_suite": False, "build": False, "lint": False, "typecheck": False, "security_checks": False}
+    plan = plan_verification({"commands": COMMANDS, "quality_gate": off}, ["README.md"])
+    assert {"cross_review", "requirements", "no_blocking_findings", "no_conflicts", "no_policy_violations",
+            "tests", "build", "lint", "typecheck", "security"} <= names(plan)
+
+
+def test_missing_commands_lists_the_mandatory_ones_a_project_lacks():
+    from ho_core.verification import missing_commands
+    assert missing_commands({"commands": {"build": "b", "test": "t", "lint": "l", "typecheck": "", "security": "s"}}) \
+        == ["typecheck"]
+    assert missing_commands({}) == ["build", "test", "lint", "typecheck", "security"]
 
 
 def test_test_gaps():
@@ -91,7 +93,7 @@ def test_post_merge_steps():
 def test_code_change_without_any_test_run_needs_an_approval():
     untested = plan_verification({"commands": {}, "quality_gate": {"tests": False, "full_suite": False, "build": False, "lint": False}},
                                  ["shop/__init__.py"], insertions=5)
-    assert {g["kind"] for g in untested.gaps} == {"no_tests_ran", "no_test_changes"}
+    assert {g["kind"] for g in untested.gaps} >= {"no_test_command", "no_test_changes", "no_typecheck_command"}
     assert any("without running any test" in n for n in untested.needs_approval)
     docs_only = plan_verification({"commands": {}, "quality_gate": {"tests": False}}, ["README.md"], insertions=5)
     assert docs_only.needs_approval == []  # documentation needs no test run

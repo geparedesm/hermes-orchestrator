@@ -44,10 +44,10 @@ RUN test -n "$ODOO_QUALITY_PYTHON" \
  && /opt/ho/quality/bin/pip install --no-cache-dir --disable-pip-version-check $ODOO_QUALITY_PYTHON \
  && for tool in ruff pylint bandit mypy; do ln -s /opt/ho/quality/bin/$tool /usr/local/bin/$tool; done
 COPY quality/ /opt/ho/share/odoo-quality/
-COPY --chmod=755 ho-odoo-test ho-odoo-lint ho-odoo-security ho-odoo-access-check /opt/ho/bin/
+COPY --chmod=755 ho-odoo-test ho-odoo-lint ho-odoo-typecheck ho-odoo-security ho-odoo-access-check /opt/ho/bin/
 # Login shells reset PATH (agent-base's /etc/ho-path brings these back); the test runner is also on the default PATH.
 RUN printf '%s\n' /opt/odoo/venv/bin >> /etc/ho-path \
- && for tool in ho-odoo-test ho-odoo-lint ho-odoo-security ho-odoo-access-check; do ln -s /opt/ho/bin/$tool /usr/local/bin/$tool; done
+ && for tool in ho-odoo-test ho-odoo-lint ho-odoo-typecheck ho-odoo-security ho-odoo-access-check; do ln -s /opt/ho/bin/$tool /usr/local/bin/$tool; done
 # Test runs never write bytecode into the workspace.
 ENV PYTHONDONTWRITEBYTECODE=1 HO_ODOO_HOME=/opt/odoo HO_ODOO_SERIES=${ODOO_SERIES} PATH=/opt/odoo/venv/bin:/opt/ho/bin:$PATH
 LABEL org.hermes-orchestrator.toolchain.odoo="${ODOO_SERIES}.${ODOO_RELEASE}"

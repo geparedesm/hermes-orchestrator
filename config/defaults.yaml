@@ -93,8 +93,8 @@ project_defaults:
     full_suite: true
     build: true
     lint: true
-    typecheck: false
-    security_checks: false
+    typecheck: true
+    security_checks: true
     browser_tests: false
     docs_updated: false
     block_on_findings: [HIGH, CRITICAL]

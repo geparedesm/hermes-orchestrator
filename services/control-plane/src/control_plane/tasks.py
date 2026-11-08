@@ -20,6 +20,7 @@ from ho_core.enums import ApprovalAction, BudgetProfile, ProjectStatus, Risk, Ta
 from ho_core.hashing import hash_value
 from ho_core.ids import uuid7
 from ho_core.statemachine import WAITING_STATES, InvalidTransition, Trigger, transition
+from ho_core.verification import missing_commands
 
 from . import budgets
 from .approvals import Approvals
@@ -120,6 +121,14 @@ class Tasks:
             raise Conflict(f"project {project['slug']} is {project['status']}")
         config = self.projects.active_config(uow, project["id"])
         effective = config["effective_config"] if config else self.ctx.platform["project_defaults"]
+        if config and missing_commands(effective) and self.projects.template_setup(uow, project):
+            # A template project starts with one setup task, which defines the mandatory commands; then the rest.
+            uow.cur.execute("SELECT key FROM tasks WHERE project_id = %s AND state NOT IN ('DONE', 'CANCELLED', 'FAILED') "
+                            "ORDER BY created_at LIMIT 1", (project["id"],))
+            open_ = uow.cur.fetchone()
+            if open_:
+                raise Conflict(f"{project['slug']} is still being set up by {open_['key']}: it has no "
+                               f"{', '.join(missing_commands(effective))} command yet")
 
         platform_delivery = self.ctx.platform["project_defaults"].get("delivery") or {}
         delivery = {**platform_delivery, **(effective.get("delivery") or {})}

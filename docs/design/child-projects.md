@@ -99,14 +99,15 @@ never mix with Odoo's dependencies. Like `ho-odoo-test`, they run offline in the
     in `security/ir.model.access.csv`; without one, only the superuser can use it, and Odoo merely logs a warning;
   - a route uses `auth="none"`;
   - a public route sets `csrf=False`.
-- `mypy` is on the PATH for a module's `typecheck` command. Point it at code that does not import Odoo, since mypy
-  cannot follow the ORM.
+- `ho-odoo-typecheck <module>`: mypy over the module as a package, with Odoo treated as `Any` (it is not installed
+  beside the quality tools), leaving out `tests/` and `migrations/`. It checks the module's own Python, not the ORM.
 
 The rules live in the image (`/opt/ho/share/odoo-quality`), never in the module's repository, so a change cannot
 relax its own gate. A justified exception is written inline, with its reason, and is visible in the diff:
 `# noqa: <code>`, `# pylint: disable=<message>`, or `# nosec <test id>` (on the `@http.route(` line for the access
 check). A module enables the checks in `.hermes/project.yaml`: `commands.lint: "ho-odoo-lint <module>"`,
-`commands.security: "ho-odoo-security <module>"`, and `quality_gate.lint`/`security_checks`.
+`commands.typecheck: "ho-odoo-typecheck <module>"` and `commands.security: "ho-odoo-security <module>"`. Every project
+needs all of them (with build and test): see docs/design/fewer-blocked-tasks.md.
 
 ## Tests
 

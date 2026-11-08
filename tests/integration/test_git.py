@@ -239,7 +239,7 @@ def test_integration_keeps_human_changes_and_retests(api, services, repo, agents
     result = integrate_and_pass(api, services, agents, task)
     assert result["target_sha"] == user and result["files_changed"] == 1
     verification = latest_verification(services, task)
-    assert verification["plan"]["steps"] == ["test"] and verification["plan"]["risk"]["risk"] == "LOW"
+    assert verification["plan"]["steps"] == ["build", "lint", "typecheck", "test", "security"] and verification["plan"]["risk"]["risk"] == "LOW"
     assert sh(repo, "rev-parse", "main") == user  # integration never touches the user's branch
     assert "INTEGRATION_COMPLETED" in events(api, task) and "TEST_PASSED" in events(api, task)
 

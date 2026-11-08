@@ -393,7 +393,8 @@ def create_app(services: Services) -> FastAPI:
             result = services.projects.scan(uow, slug=slug, principal=who)
             return 200, {"project": project_view(result["project"]), "config": config_view(result["config"]),
                          "approval": approval_view(result["approval"]) if result["approval"] else None,
-                         "changed": result["changed"], "notes": result["notes"]}
+                         "changed": result["changed"], "notes": result["notes"],
+                         "missing_commands": result.get("missing_commands", [])}
         return idempotent(idempotency_key, who, {"op": "scan", "slug": slug}, command)
 
     @app.delete("/v1/projects/{slug}")

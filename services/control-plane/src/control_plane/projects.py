@@ -23,6 +23,7 @@ from ho_core.hashing import hash_value
 from ho_core.ids import uuid7
 from ho_core.paths import PathOutsideRoot, host_to_relative, is_slug, slugify
 from ho_core.schemas import SchemaValidationError
+from ho_core.verification import missing_commands
 
 from .approvals import Approvals
 from .auth import Principal
@@ -230,6 +231,19 @@ class Projects:
         assert config is not None
 
         new_status = ProjectStatus.DRIFT_DETECTED if active else ProjectStatus.PROPOSED
+        missing = missing_commands(effective.data)
+        if missing and not self.template_setup(uow, project):
+            # Not offered for approval: every project verifies every change with all mandatory commands.
+            notes.append(f"not ready: no {', '.join(missing)} command; every project needs build, test, lint, typecheck "
+                         "and security commands in .hermes/project.yaml")
+            record_event(uow.cur, "CONFIG_INCOMPLETE", actor="control-plane", project_id=project["id"],
+                         summary=f"{slug} configuration lacks mandatory commands: {', '.join(missing)}",
+                         data={"config_id": str(config_id), "missing": missing}, pending=uow.events)
+            uow.cur.execute("UPDATE projects SET status = %s, updated_at = now(), version = version + 1 WHERE id = %s",
+                            (new_status.value, project["id"]))
+            self.link_family(uow, self.get(uow, slug))
+            return {"project": self.get(uow, slug), "config": config, "approval": None, "notes": notes, "changed": True,
+                    "missing_commands": missing}
         if active:
             record_event(
                 uow.cur, "CONFIG_DRIFT_DETECTED", actor="control-plane", project_id=project["id"],
@@ -248,6 +262,12 @@ class Projects:
         )
         self.link_family(uow, self.get(uow, slug))  # its children path may be new: link modules registered before
         return {"project": self.get(uow, slug), "config": config, "approval": approval, "notes": notes, "changed": True}
+
+    def template_setup(self, uow: UnitOfWork, project: Row) -> bool:
+        """A project created from a platform template: its first task defines the commands the template lacks."""
+        uow.cur.execute("SELECT 1 FROM child_creations WHERE kind = 'PROJECT' AND (child_project_id = %s "
+                        "OR (state = 'RUNNING' AND name = %s)) LIMIT 1", (project["id"], project["slug"]))
+        return uow.cur.fetchone() is not None
 
     def unregister(self, uow: UnitOfWork, *, slug: str, principal: Principal) -> Row:
         project = self.get(uow, slug, lock=True)
