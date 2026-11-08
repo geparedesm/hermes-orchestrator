@@ -19,6 +19,7 @@ Mandatory for every project: `build`, `tests`, `full_suite`, `lint`, `typecheck`
 - Onboarding: a scan proposes a command for every mandatory check. A project without a command for one of them cannot reach PROJECT_READY; the person approves the proposed commands.
 - Odoo toolchain: new `ho-odoo-typecheck <module>` next to `ho-odoo-lint`. It runs mypy over the module, treats `odoo` as `Any` (`--ignore-missing-imports`, `follow_imports=silent`), and pins its version in `workers/versions.env`. job_finder moves from its file list to the wrapper. commercial-properties gets the command through a config change that the person approves.
 - A project created from a platform template (`child_creations` kind PROJECT) may become PROJECT_READY without commands; until it has them it accepts one open task, which sets them up (the contract tells its agents). Child modules get no exception: their template must carry every command.
+- Toolchains must ship the tools: the python toolchain carries pinned ruff, mypy and bandit (`PYTHON_QUALITY_PYTHON`, the odoo toolchain's versions), so a Python project such as odoo-base can define lint, typecheck and security commands. node projects use their own scripts (`npm run lint`, `tsc`); the generic toolchain has none, so its projects define commands their image can run or move to a toolchain that has them.
 - Existing tasks keep their pinned configuration. T-14 needs either the gate exception or a recreation after the config change.
 
 ## 3. Agents know the full gate from the start
