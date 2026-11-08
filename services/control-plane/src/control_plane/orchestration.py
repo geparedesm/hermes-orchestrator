@@ -52,6 +52,7 @@ MAX_STEP_FAILURES = 3
 MAX_ACTIONS = 30
 FAILBACK_HOLD = timedelta(minutes=10)
 MAX_REVIEW_RETRIES = 2
+MAX_PREFLIGHT_FIXES = 2  # preflight fixes in a row before a review sees the change anyway
 # Only these events make the orchestrator think again (design change 2).
 RESOLVE_ATTEMPTS = 5  # agent-assisted conflict resolutions per task
 UI_DESIGN_MAX_TURNS = 120  # desktop and mobile frames built, checked and exported: T-12's design ran out at the default 60
@@ -1558,7 +1559,7 @@ class Orchestration:
         if services:
             capabilities["test_services"] = True  # the project's tests may need them (an Odoo module's PostgreSQL)
         request = {"role": "DEVELOPER", "provider": provider, "prompt": prompt, "workspace": workspace["path"],
-                   "capabilities": capabilities,
+                   "capabilities": capabilities, "inputs": self._preflight_inputs(uow, task, subtask),
                    "subtask_id": str(subtask["id"]), "lease_epoch": epoch,
                    "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry,
                                **({"test_environment": services} if services else {})}}
@@ -1580,6 +1581,14 @@ class Orchestration:
         uow.cur.execute("UPDATE subtasks SET developer_provider = %s, state = 'IN_PROGRESS', updated_at = now() WHERE id = %s",
                         (provider, subtask["id"]))
         return self.launch(uow, task, kind, request, subtask=subtask)
+
+    def _preflight_inputs(self, uow: UnitOfWork, task: Row, subtask: Row) -> dict[str, str]:
+        """The integration verification's steps, for the developer's preflight (`ho-verify` in its workspace)."""
+        from ho_core.verification import plan_verification
+        config = self._config(uow, task)
+        plan = plan_verification(config, list((subtask["estimated_scope"] or {}).get("files") or []))
+        steps = {f"step-{i * 10 + 10:02d}-{name}.sh": command for i, (name, command) in enumerate(plan.steps)}
+        return {**steps, "retries": "1"} if steps else {}
 
     def _dependency_base(self, uow: UnitOfWork, task: Row, subtask: Row) -> tuple[str | None, str | None, list[str]]:
         """Where a dependent subtask starts: the accepted work it depends on, merged. When that work conflicts, the base
@@ -1746,9 +1755,72 @@ class Orchestration:
                 if last is not None and last["commit_sha"] == result["head_sha"]:
                     self._fix_without_changes(uow, task, subtask, last)
                     return
+                if self._preflight_sent_back(uow, task, subtask, developer):
+                    return
                 self._request_subtask_review(uow, task, subtask, developer, workspace, result["head_sha"])
         except ApiError as exc:
             log.warning("review of %s not started: %s", task_key, exc)
+
+    def _preflight_failures(self, uow: UnitOfWork, subtask: Row) -> list[str]:
+        """What the developer's last run left failing in its preflight (`ho-verify` with the gate's steps); empty when
+        it passed or none was asked for."""
+        uow.cur.execute("SELECT * FROM executions WHERE subtask_id = %s AND role = 'DEVELOPER' AND state = 'SUCCEEDED' "
+                        "ORDER BY ended_at DESC NULLS LAST LIMIT 1", (subtask["id"],))
+        execution = uow.cur.fetchone()
+        expected = sorted(k for k in ((execution or {}).get("spec") or {}).get("inputs", {}) if k.startswith("step-"))
+        if execution is None or not expected:
+            return []
+        artifacts = self.verifications._artifacts(uow, execution)
+        report = artifacts.get("test_results.json")
+        if report is None:
+            return ["no preflight results: run `cd /workspace && ho-verify` and fix every failing step before reporting completed"]
+        try:
+            steps = json.loads(self.ctx.artifacts.read(report["path"]))["steps"]
+        except (ValueError, KeyError, OSError):
+            return ["unreadable /output/test_results.json: run `cd /workspace && ho-verify` again"]
+        names = {str(s.get("name")) for s in steps}
+        failures = []
+        for step in steps[:20]:
+            if step.get("status") == "PASSED":
+                continue
+            name = str(step.get("name"))[:40]
+            line = f"- {name}: {step.get('status')} (exit {step.get('exit_code')})"
+            log = artifacts.get(f"steps__{name}.log")
+            if log is not None:
+                try:
+                    tail = self.ctx.artifacts.read(log["path"]).decode("utf-8", "replace").splitlines()[-30:]
+                    line += "\n  " + "\n  ".join(t[:300] for t in tail)
+                except OSError:
+                    pass
+            failures.append(line)
+        for name in expected:
+            step = name.removesuffix(".sh").split("-", 2)[-1]
+            if step not in names:
+                failures.append(f"- {step}: not run")
+        return failures
+
+    def _preflight_sent_back(self, uow: UnitOfWork, task: Row, subtask: Row, developer: str) -> bool:
+        """A run whose preflight failed goes back to its developer before any review, without a review cycle, at most
+        MAX_PREFLIGHT_FIXES times in a row; after that the reviewer sees the change anyway (no new loop)."""
+        failures = self._preflight_failures(uow, subtask)
+        if not failures:
+            return False
+        uow.cur.execute("SELECT count(*) AS n FROM events WHERE task_id = %s AND type = 'PREFLIGHT_FAILED' "
+                        "AND data->>'subtask' = %s AND occurred_at > coalesce((SELECT max(created_at) FROM reviews "
+                        "WHERE subtask_id = %s), '-infinity')", (task["id"], subtask["key"], subtask["id"]))
+        earlier = int(uow.cur.fetchone()["n"])  # type: ignore[index]
+        self._event(uow, task, "PREFLIGHT_FAILED", f"{subtask['key']}: the developer's preflight did not pass "
+                    f"({len(failures)} problem(s))" + ("; reviewing it anyway" if earlier >= MAX_PREFLIGHT_FIXES else
+                                                       "; back to the developer before review"),
+                    {"subtask": subtask["key"], "failures": [f.splitlines()[0][:200] for f in failures]})
+        if earlier >= MAX_PREFLIGHT_FIXES:
+            return False
+        feedback = "\n".join(["## Preflight failed (fix before review)", "Your run ended with these Quality Gate steps failing "
+                              "or missing. Fix them, run `cd /workspace && ho-verify` until every step passes, and commit.",
+                              *failures])
+        self._set_subtask(uow, subtask, "FIX_REQUIRED", "preflight failed")
+        self._develop(uow, task, {**subtask, "state": "FIX_REQUIRED"}, developer, extra=feedback, epoch=None, kind="FIX")
+        return True
 
     def _fix_without_changes(self, uow: UnitOfWork, task: Row, subtask: Row, review: Row) -> None:
         """The developer left the reviewed commit unchanged. Reviewing it again only draws new findings from the

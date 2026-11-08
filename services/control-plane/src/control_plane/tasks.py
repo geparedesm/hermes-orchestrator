@@ -172,6 +172,7 @@ class Tasks:
             uow.cur.execute("UPDATE tasks SET ui_design_required = true WHERE id = %s", (task_id,))
             task["ui_design_required"] = True
         self._create_budget(uow, task_id, budget_profile)
+        self.waiting_for_commands(uow, task)  # warn at creation, not at the gate hours later
         attached: list[Row] = []
         if files:
             attached = self._attach(uow, task, files, principal)
@@ -285,6 +286,26 @@ class Tasks:
         for hook in self.on_cancel:
             hook(uow, task, "task cancelled")
         return self.transition(uow, task, S.CANCELLED, trigger=Trigger.USER, actor=principal.value, reason="cancelled by user")
+
+    def waiting_for_commands(self, uow: UnitOfWork, task: Row) -> bool:
+        """A BACKLOG task of a project that lacks a mandatory command waits, with the reason on it, until the
+        project's active configuration has every one (a template project's setup task excepted)."""
+        uow.cur.execute("SELECT * FROM projects WHERE id = %s", (task["project_id"],))
+        project = uow.cur.fetchone()
+        assert project is not None
+        config = self.projects.active_config(uow, project["id"])
+        missing = missing_commands(config["effective_config"]) if config else []
+        if not missing or self.projects.template_setup(uow, project):
+            return False
+        reason = (f"waiting for {project['slug']}'s configuration: it has no {', '.join(missing)} command; add it to "
+                  ".hermes/project.yaml and approve the configuration, then the task starts")
+        if task.get("state_reason") != reason:
+            uow.cur.execute("UPDATE tasks SET state_reason = %s, updated_at = now() WHERE id = %s", (reason, task["id"]))
+            task["state_reason"] = reason
+            record_event(uow.cur, "TASK_WAITING_FOR_CONFIG", actor="control-plane", project_id=project["id"],
+                         task_id=task["id"], summary=f"{task['key']} {reason}"[:300], data={"missing": missing},
+                         pending=uow.events)
+        return True
 
     def retry(self, uow: UnitOfWork, key: str, *, principal: Principal, idempotency_key: str) -> Row:
         task = self.get(uow, key, lock=True)

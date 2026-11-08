@@ -149,7 +149,11 @@ class Scheduler:
             FOR UPDATE OF t SKIP LOCKED
             """
         )
-        rows = uow.cur.fetchall()
+        rows = []
+        for task in uow.cur.fetchall():
+            if self.tasks.waiting_for_commands(uow, task):
+                continue  # promoted once its project has every mandatory command (the reason is on the task)
+            rows.append(task)
         for task in rows:
             # Pin the configuration the task will run under.
             uow.cur.execute(
