@@ -128,8 +128,8 @@ class VerificationPlan:
 _STEP_COMMAND = {"build": "build", "lint": "lint", "typecheck": "typecheck", "test": "test", "security": "security"}
 
 
-def plan_verification(config: dict[str, Any], paths: list[str], *, insertions: int = 0, deletions: int = 0,
-                      github: bool = False) -> VerificationPlan:
+def plan_verification(config: dict[str, Any], paths: list[str], *, insertions: int = 0,
+                      deletions: int = 0) -> VerificationPlan:
     """Which checks an integrated change needs and how the runners execute them (sections 56-58)."""
     commands = config.get("commands") or {}
     gate = config.get("quality_gate") or {}
@@ -165,8 +165,6 @@ def plan_verification(config: dict[str, Any], paths: list[str], *, insertions: i
     # Always required; a project cannot switch these off (section 58, hard policy).
     for name in ("cross_review", "requirements", "no_blocking_findings", "no_conflicts", "no_policy_violations"):
         need(name, "hard policy")
-    if gate.get("ci_checks", True) and github:
-        need("ci_checks", "project")
     if gate.get("docs_updated"):
         need("docs_updated", "project")
 

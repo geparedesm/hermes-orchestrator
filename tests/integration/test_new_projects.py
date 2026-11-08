@@ -74,7 +74,7 @@ def test_without_github_nothing_is_created_on_github(api, services, projects_roo
     assert config["source"] == "REPOSITORY"  # use the shipped template, not a generated fallback
     effective = config["effective_config"]
     assert effective["toolchain"]["profiles"] == ["generic"]
-    assert not any(effective["quality_gate"][check] for check in ("build", "tests", "full_suite", "lint", "ci_checks"))
+    assert not any(effective["quality_gate"][check] for check in ("build", "tests", "full_suite", "lint"))
     assert effective["quality_gate"]["block_on_findings"] == ["HIGH", "CRITICAL"]
     assert effective["git"]["protected_branches"] == ["main", "master"]
 

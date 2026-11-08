@@ -400,7 +400,7 @@ flowchart LR
 
 - The change's risk (§57) comes from its files: sensitive areas (authentication, authorization, payments, migrations, Docker, infrastructure, CI/CD, secrets, permissions, dependencies, network configuration), the project's `sensitive_paths` (HIGH) and `critical_paths` (CRITICAL), and its size. Risk adds requirements: MEDIUM lint and typecheck, HIGH security checks, CRITICAL an explicit approval. The project's `quality_gate` adds its own; cross-review, requirements, no blocking findings, no conflicts, and no policy violations are always required.
 - Test gaps (§56): no test command, code changed without any test changing, or a required check without a command. Gaps are recorded with the alternative evidence that ran; on HIGH or CRITICAL changes they need an explicit approval.
-- The Quality Gate evaluation stores each requirement's status and evidence, the gaps, and the residual risk. It is the only path from `QUALITY_GATE` to `READY_FOR_MERGE`; a merge approval binds the evaluation it was requested on. A pending verification or CI run leaves the task in `QUALITY_GATE` for re-evaluation.
+- The Quality Gate evaluation stores each requirement's status and evidence, the gaps, and the residual risk. It is the only path from `QUALITY_GATE` to `READY_FOR_MERGE`; a merge approval binds the evaluation it was requested on. A pending verification leaves the task in `QUALITY_GATE` for re-evaluation. CI status on the pull request is informational (`ho git checks`); the gate does not require it.
 
 ## 11. Persistent Volumes
 

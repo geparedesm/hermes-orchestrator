@@ -85,9 +85,8 @@ class Verifications:
             raise Conflict(f"{ref} does not exist")
         if purpose == "INTEGRATION":
             diff = self.ctx.git.changes(project["relative_path"], changes["base_sha"], commit)
-            remote = self.ctx.git.refs(project["relative_path"], [changes["target_branch"]])["remote"]
             plan = plan_verification(config, [f["path"] for f in diff["files"]], insertions=diff["insertions"],
-                                     deletions=diff["deletions"], github=remote["kind"] == "github")
+                                     deletions=diff["deletions"])
             plan_json = {**plan.as_json(), "step_commands": plan.steps, "changed_files": [f["path"] for f in diff["files"]][:2000]}
         else:
             steps = post_merge_steps(config)
@@ -587,14 +586,6 @@ class QualityGate:
             elif name == "no_policy_violations":
                 add(name, "FAIL" if violations else "PASS",
                     f"{len(violations)} policy violation(s): {'; '.join(violations[:3])}" if violations else "none")
-            elif name == "ci_checks":
-                if not changes["pr_number"]:
-                    add(name, "FAIL", "no pull request yet")
-                else:
-                    checks = self.ctx.git.pr_checks(project["relative_path"], changes["pr_number"])
-                    summary = checks["summary"]
-                    add(name, {"PASS": "PASS", "NONE": "UNAVAILABLE", "PENDING": "PENDING"}.get(summary, "FAIL"),
-                        f"CI {summary.lower()}")
             elif name == "docs_updated":
                 docs = [p for p in changed if is_doc_file(p)]
                 add(name, "PASS" if docs else "FAIL", f"{len(docs)} documentation file(s) changed" if docs

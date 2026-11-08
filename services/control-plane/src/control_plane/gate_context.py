@@ -40,8 +40,6 @@ def contract(config: dict[str, Any], paths: list[str]) -> str:
     for setting in ('sensitive_paths', 'critical_paths'):
         if verification.get(setting):
             lines.append(f"Project {setting}: {', '.join(verification[setting])}")
-    if (config.get('quality_gate') or {}).get('ci_checks', True):
-        lines.append('For GitHub projects, required CI checks on the pull request must pass; the platform creates the PR.')
     if plan.gaps:
         lines += ['Potential gaps in the declared scope:'] + [f'- {g["detail"]}' for g in plan.gaps]
     return '\n'.join(lines)

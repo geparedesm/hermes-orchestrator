@@ -129,7 +129,6 @@ TIGHTEN_ONLY: dict[tuple[str, ...], Callable[[Any, Any], Any]] = {
     ("quality_gate", "typecheck"): _any_true,
     ("quality_gate", "security_checks"): _any_true,
     ("quality_gate", "browser_tests"): _any_true,
-    ("quality_gate", "ci_checks"): _any_true,
     ("quality_gate", "docs_updated"): _any_true,
     ("quality_gate", "block_on_findings"): _union,
     ("budget", "profile"): _stricter(_BUDGET),

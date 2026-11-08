@@ -242,7 +242,6 @@ def propose_project_config(name: str, report: DetectionReport | dict[str, Any]) 
             "lint": has("lint"),
             "typecheck": has("typecheck"),
             "browser_tests": "playwright" in data.get("frameworks", []),
-            "ci_checks": bool(data.get("ci")),
         },
         "budget": {"profile": "NORMAL"},
         "git": {"protected_branches": ["main"]},
