@@ -26,7 +26,8 @@ Project repositories: odoo-commercial_properties #21 and odoo-job_finder #29 (`h
 - Classifier replay of the 76 recorded CMD-H07/CMD-H09 alerts (T-12 to T-15): 75 no longer fire. The remaining one is a stored command cut short before its closing quote, which the full runtime command would not trigger.
 - Python toolchain test build: odoo-base's lint, typecheck, security and unittest commands pass in it.
 - Deployed: the control plane and images of #102 to #109 are verified live (code markers, `ho-odoo-typecheck` in the odoo image, ruff 0.17.3, mypy 2.4.1 and bandit 1.9.4 in the python image); `ho health` reports every dependency ok.
-- The #109 deploy left the control plane created but not started: the agent-manager, slow on a host busy after `make images`, was marked unhealthy within its 5-second start period, and `make up` failed. A second `make up` started it. The agent-manager healthcheck now has a 60-second start period. commercial-properties, job_finder and odoo-base were rescanned, offered for approval with every mandatory command, and approved by the person (PROJECT_READY).
+- The #109 deploy left the control plane created but not started: the agent-manager, slow on a host busy after `make images`, was marked unhealthy within its 5-second start period, and `make up` failed. A second `make up` started it. The agent-manager healthcheck now has a 60-second start period.
+- commercial-properties, job_finder and odoo-base were rescanned, offered for approval with every mandatory command, and approved by the person (PROJECT_READY).
 
 ## Not yet exercised
 
