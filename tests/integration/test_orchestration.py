@@ -1275,3 +1275,50 @@ def test_an_unchanged_fix_is_not_reviewed_again_and_the_fix_gets_the_review_find
     assert state(api, task) == "BLOCKED"
     assert len(q(services, "SELECT 1 FROM executions e JOIN tasks t ON t.id = e.task_id WHERE t.key = %s "
                  "AND e.role = 'REVIEWER'", task)) == 1
+
+
+def test_a_failing_preflight_goes_back_to_the_developer_before_review(api, services, agents, repo, task):
+    """The developer runs the gate's steps (ho-verify) first; a run whose preflight fails is fixed before any review,
+    without a review cycle, at most twice in a row (docs/design/fewer-blocked-tasks.md)."""
+    plan_and_start(services, agents, task)
+    [dev] = active(services, task, "DEVELOPER")
+    spec = agents.specs[str(dev["id"])]
+    assert {"step-10-build.sh", "step-20-lint.sh", "step-30-typecheck.sh", "step-40-test.sh", "step-50-security.sh"} \
+        <= set(spec["inputs"]) and "ho-verify" in spec["inputs"]["prompt.md"]
+    agents.preflight_passes = False
+    commit(repo.parent / dev["workspace"], "work", {"a.py": "x = 1\n"})
+    answer(services, agents, dev["id"], DONE)  # no test_results.json: the preflight was not run
+    assert not active(services, task, "REVIEWER")
+    [fix] = active(services, task, "DEVELOPER")
+    assert "Preflight failed" in agents.specs[str(fix["id"])]["inputs"]["prompt.md"]
+    assert subtasks(services, task)["a"]["review_cycles"] == 0
+    agents.preflight_passes = True
+    develop(services, agents, repo, fix, {"a.py": "x = 2\n"})
+    assert len(active(services, task, "REVIEWER")) == 1  # passing now: reviewed
+
+
+def test_preflight_fixes_are_bounded(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    agents.preflight_passes = False
+    for n in range(3):
+        [dev] = active(services, task, "DEVELOPER")
+        develop(services, agents, repo, dev, {"a.py": f"x = {n}\n"})
+    assert len(active(services, task, "REVIEWER")) == 1  # after two preflight fixes the reviewer sees it anyway
+    assert len(q(services, "SELECT 1 FROM events WHERE type = 'PREFLIGHT_FAILED'")) == 3
+
+
+def test_a_task_waits_in_backlog_while_its_project_lacks_a_mandatory_command(api, services, agents, repo):
+    assert api.post("/v1/projects", {"path": "demo"}).status_code == 201
+    approval = api.post("/v1/projects/demo/scan").json()["approval"]["id"]
+    api.post(f"/v1/approvals/{approval}/decision", {"decision": "APPROVE"})
+    # Stand-in: a configuration approved before every command was mandatory (commercial-properties had no typecheck).
+    q(services, "UPDATE project_configs SET effective_config = effective_config #- '{commands,typecheck}' WHERE status = 'ACTIVE'")
+    created = api.post("/v1/tasks", {"project": "demo", "request": "Add a greeting endpoint"}).json()
+    assert "no typecheck command" in (created.get("state_reason") or "")
+    services.scheduler.run_once()
+    assert state(api, created["key"]) == "BACKLOG"
+    assert len(q(services, "SELECT 1 FROM events WHERE type = 'TASK_WAITING_FOR_CONFIG'")) == 1  # said once
+    q(services, "UPDATE project_configs SET effective_config = jsonb_set(effective_config, '{commands,typecheck}', '\"true\"') "
+      "WHERE status = 'ACTIVE'")
+    services.scheduler.run_once()
+    assert state(api, created["key"]) == "PLANNING"

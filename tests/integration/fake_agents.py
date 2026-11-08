@@ -26,6 +26,7 @@ class FakeAgentManager:
         self.environment_error: AgentManagerError | None = None
         self.volumes: set[tuple[str, str]] = {("claude", "default"), ("codex", "default")}
         self.networks: list[dict[str, Any]] = []  # managed networks left behind (orphan tests)
+        self.preflight_passes = True  # developer runs report a passing preflight (ho-verify) unless a test sets False
 
     def ensure_image(self, name: str) -> dict[str, Any]:
         if getattr(self, "image_error", None):
@@ -50,6 +51,13 @@ class FakeAgentManager:
         """Simulate the in-container runner's output files (see workers/providers/*/ho-agent-run)."""
         files = {"ho/events.jsonl": events,
                  "ho/runner.json": f'{{"exit_code": {exit_code}, "reason": "{reason}"}}'.encode(), **(extra or {})}
+        steps = sorted(n for n in (self.specs.get(execution) or {}).get("inputs", {}) if n.startswith("step-"))
+        if steps and self.specs[execution].get("role") == "DEVELOPER" and "test_results.json" not in files \
+                and self.preflight_passes:
+            # The developer's preflight (`ho-verify` with the gate's steps) passed, unless a test says otherwise.
+            import json
+            files["test_results.json"] = json.dumps({"steps": [
+                {"name": n.removesuffix(".sh").split("-", 2)[-1], "status": "PASSED", "exit_code": 0} for n in steps]}).encode()
         lines = [line for line in events.splitlines() if line.strip()]
         if lines:
             files["ho/final.json"] = lines[-1]

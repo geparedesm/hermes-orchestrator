@@ -17,7 +17,9 @@ def test_contract_tracks_the_effective_planner_and_commands():
 def test_contract_explains_unknown_scope_risk_and_unavailable_commands():
     text = contract({'commands': {}, 'quality_gate': {}}, [])
     assert 'build, tests, lint, typecheck and security' in text
-    assert 'no build, test, lint, typecheck, security command yet' in text  # a project still being set up
+    assert 'Do not edit .hermes/project.yaml' in text and 'sets the project up' not in text
+    setup = contract({'commands': {}, 'quality_gate': {}}, [], setup=True)  # a template project's setup task
+    assert 'no build, test, lint, typecheck, security command yet' in setup and 'sets the project up' in setup
     assert 'test gaps' in text and 'human exception' in text
     assert 'CI checks' not in text and 'other provider' in text
     assert 'approval bypasses' in text

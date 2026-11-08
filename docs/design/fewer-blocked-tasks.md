@@ -1,6 +1,6 @@
 # Fewer blocked tasks
 
-Status: plan agreed with the person on 2026-11-08. Sections 1 and 2 implemented; sections 3 and 4 pending.
+Status: plan agreed with the person on 2026-11-08. Sections 1, 2 and 3 (except the Dashboard view) implemented; section 4 pending.
 
 Evidence: 77 BLOCKED, PAUSED_BUDGET, CANCELLED or FAILED transitions across 12 of 18 tasks (T-1 to T-18). Infrastructure, post-merge, design-flow and review-loop causes are already fixed (PRs up to #104). The changes below address the causes that remain. Each change ships with tests in its own PR, in this order.
 
@@ -26,8 +26,8 @@ Mandatory for every project: `build`, `tests`, `full_suite`, `lint`, `typecheck`
 The assignment contract (`gate_context.py`, since #102) already goes to the orchestrator, developers and reviewers.
 
 - Worst-case contract: risk can only rise when the integrated diff is evaluated (T-14 became HIGH and then required typecheck). The contract states the requirements of the highest risk the declared and configured sensitive paths can reach, and marks which ones apply only at that risk.
-- Developer preflight: before reporting `completed`, the developer runs every required command in its workspace (`ho-verify --preflight`, the same planner the gate uses) and fixes failures. The result carries the preflight outcome, and a run that reports failing checks goes back as a fix without a review cycle.
-- Creation check: when a task is created, the control plane computes the worst-case requirements. If the project lacks a command one of them needs, the task is created BLOCKED with that reason and the exact missing command, instead of failing at the gate hours later.
+- Developer preflight: every developer run receives the gate's steps as `step-NN-<name>.sh` inputs (the same planner the gate uses) and is told to run `cd /workspace && ho-verify` before reporting `completed`. When its `/output/test_results.json` is missing or has a failing step, the run goes back to its developer with the failing steps and their log tails (PREFLIGHT_FAILED), without a review cycle, at most twice in a row; then the reviewer sees the change anyway, so the preflight cannot loop.
+- Creation check: when a task is created, and on every backlog pass, a project whose active configuration lacks a mandatory command keeps the task in BACKLOG with the reason and the exact missing command (TASK_WAITING_FOR_CONFIG, once). It is not BLOCKED: leaving BLOCKED needs a retry and would keep the old pinned configuration, while a waiting BACKLOG task starts by itself, under the new configuration, once the person approves it.
 - Dashboard: the new-task form and the task view show the checks that will apply. This is UI work: it is designed in `ui/*.pen` first (Before, After and Changes frames) and built only after the person approves the design.
 
 ## 4. Other causes of blocks

@@ -316,7 +316,8 @@ class Executions:
                                "structural or behavioral deviations.")
         if req.prompt:
             from .gate_context import assignment_contract
-            gate_prompt = assignment_contract(uow, task, config)
+            gate_prompt = assignment_contract(uow, task, config,
+                                              preflight=req.role == "DEVELOPER" and any(k.startswith("step-") for k in req.inputs))
             assert provider is not None
             caps_granted = grant["capabilities"]
             plan = adapter_for(provider).build_execution(AgentAssignment(
