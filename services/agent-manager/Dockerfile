@@ -28,6 +28,8 @@ COPY config /app/config
 # Non-root; access to the Docker socket comes from the socket's group (group_add in compose.yaml).
 USER 10003:10003
 EXPOSE 8082
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
+# A generous start period: right after `make images` the host is busy and startup can take over a minute, and a
+# dependency marked unhealthy left the control plane created but not started (2026-11-08 deploy).
+HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=5 \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health/live', timeout=2)"]
 CMD ["agent-manager"]

@@ -1,6 +1,6 @@
 # Fewer blocked tasks
 
-Status: plan agreed with the person on 2026-11-08. Sections 1 to 4 implemented, except the Dashboard view of section 3 (it needs a pen.dev design first).
+Status: plan agreed with the person on 2026-11-08. Sections 1 to 4 implemented and deployed, except the Dashboard view of section 3 (it needs a pen.dev design first). Evidence: [docs/validation/fewer-blocked-tasks.md](../validation/fewer-blocked-tasks.md).
 
 Evidence: 77 BLOCKED, PAUSED_BUDGET, CANCELLED or FAILED transitions across 12 of 18 tasks (T-1 to T-18). Infrastructure, post-merge, design-flow and review-loop causes are already fixed (PRs up to #104). The changes below address the causes that remain. Each change ships with tests in its own PR, in this order.
 
