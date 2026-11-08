@@ -355,6 +355,23 @@ def test_scope_conflicts_queue_the_launch(api, services, agents, repo, task):
     assert row["n"] == 1
 
 
+
+def test_a_cancelled_task_s_subtasks_hold_no_scope(api, services, agents, repo, task):
+    """T-15 was cancelled with a subtask IN_REVIEW; its files kept T-18's developer waiting."""
+    plan_and_start(services, agents, task, plan_item("a", files=["shared.py"]), plan_item("b", files=["shared.py"]))
+    q(services, "UPDATE tasks SET step_requested = true")
+    services.scheduler.run_once()
+    step(services, agents, task, {"type": "REQUEST_EXECUTION", "subtask": "b", "provider": "codex"})
+    assert q(services, "SELECT 1 FROM pending_launches")
+    other = api.post("/v1/tasks", {"project": "demo", "request": "Something else"}).json()["key"]
+    assert api.post(f"/v1/tasks/{other}/cancel").status_code == 200
+    # Stand-in: the cancelled task kept a subtask in review over the same file, as T-15 did.
+    q(services, "UPDATE subtasks SET task_id = (SELECT id FROM tasks WHERE key = %s) WHERE local_key = 'a'", other)
+    q(services, "UPDATE executions SET state = 'CANCELLED' WHERE role = 'DEVELOPER'")
+    services.orchestration.process_pending()
+    assert not q(services, "SELECT 1 FROM pending_launches")
+    assert subtasks(services, task)["b"]["state"] == "IN_PROGRESS"
+
 # ------------------------------------------------------------------ relationships and knowledge
 
 
