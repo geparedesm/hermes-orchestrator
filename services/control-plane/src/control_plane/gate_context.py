@@ -10,7 +10,7 @@ from .context import UnitOfWork
 from .db import Row
 
 
-def contract(config: dict[str, Any], paths: list[str]) -> str:
+def contract(config: dict[str, Any], paths: list[str], *, setup: bool = False) -> str:
     # A preview from declared scope, never a promise about the eventual integrated diff.
     plan = plan_verification(config, paths)
     commands = config.get('commands') or {}
@@ -37,10 +37,13 @@ def contract(config: dict[str, Any], paths: list[str]) -> str:
               'UI changes require the current approved design before implementation; backend-only scope must not silently edit UI files.',
               'Only humans can grant exceptions, increase budgets, approve designs/plans, or approve merge. Report concrete missing inputs; never fabricate evidence.']
     missing = missing_commands(config)
-    if missing:
+    if missing and setup:  # a template project's setup task (docs/design/fewer-blocked-tasks.md)
         lines.append(f"This project has no {', '.join(missing)} command yet. This task sets the project up: add every missing "
                      "command to .hermes/project.yaml (commands:) so that each runs and passes on the integrated commit; "
                      "the person approves that configuration change.")
+    elif missing:
+        lines.append(f"This project has no {', '.join(missing)} command: report it as a missing input for the person. "
+                     "Do not edit .hermes/project.yaml; its configuration changes only with the person's approval.")
     verification = config.get('verification') or {}
     for setting in ('sensitive_paths', 'critical_paths'):
         if verification.get(setting):
@@ -53,7 +56,9 @@ def contract(config: dict[str, Any], paths: list[str]) -> str:
 def assignment_contract(uow: UnitOfWork, task: Row, config: dict[str, Any]) -> str:
     uow.cur.execute("SELECT estimated_scope FROM subtasks WHERE task_id = %s AND state <> 'CANCELLED'", (task['id'],))
     paths = sorted({p for row in uow.cur.fetchall() for p in (row['estimated_scope'] or {}).get('files', [])})
-    text = contract(config, paths)
+    uow.cur.execute('SELECT 1 FROM child_creations WHERE kind = %s AND child_project_id = %s LIMIT 1',
+                    ('PROJECT', task['project_id']))
+    text = contract(config, paths, setup=uow.cur.fetchone() is not None)
     uow.cur.execute('SELECT commit_sha, outcome, requirements FROM quality_gate_evaluations WHERE task_id = %s '
                     'ORDER BY evaluated_at DESC LIMIT 1', (task['id'],))
     gate = uow.cur.fetchone()
