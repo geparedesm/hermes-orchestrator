@@ -105,7 +105,8 @@ def test_verification_runs_in_isolated_test_environment(api, services, repo, age
     assert agents.environments[task]["compose_files"] == ["compose.yaml"] and agents.environments[task]["services"] == ["db", "app"]
     tester, browser = (agents.specs[str(e)] for e in verification["execution_ids"])
     assert [n for n in sorted(tester["inputs"]) if n.endswith(".sh")] == [
-        "step-10-install.sh", "step-20-build.sh", "step-30-lint.sh", "step-40-test.sh"]  # security only from HIGH risk
+        "step-10-install.sh", "step-20-build.sh", "step-30-lint.sh", "step-40-typecheck.sh", "step-50-test.sh",
+        "step-60-security.sh"]  # every command check, whatever the risk
     network = tester["grant"]["capabilities"]["network"]
     assert network["test_services"] and network["egress"] == "ALLOWLIST"
     assert network["allowed_domains"] == ["files.pythonhosted.org", "pypi.org"]  # test allowlist only, no research presets
@@ -194,8 +195,8 @@ def test_sensitive_change_with_test_gaps_needs_an_explicit_approval(api, service
     verification = latest_verification(services, task)
     plan = verification["plan"]
     assert plan["risk"]["risk"] == "HIGH" and "security" in plan["steps"]
-    # No test file changed, and HIGH risk requires typecheck, for which the project has no command.
-    assert {g["kind"] for g in plan["gaps"]} == {"no_test_changes", "no_typecheck_command"}
+    # No test file changed on a HIGH-risk change.
+    assert {g["kind"] for g in plan["gaps"]} == {"no_test_changes"}
     finish_verification(services, agents, task)
     review(api, services, agents, task)
     evaluation = gate(api, services, task)

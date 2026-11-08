@@ -88,13 +88,23 @@ def test_registration_is_idempotent_and_unique(api, projects_root):
 # ------------------------------------------------------------------- onboarding
 
 
+def test_a_project_without_every_mandatory_command_is_not_offered_for_approval(api, projects_root):
+    git_repo(projects_root / "demo", {"package.json": '{"scripts": {"test": "vitest"}}', "src/a.test.ts": ""}, commands=False)
+    assert api.post("/v1/projects", {"path": "demo"}).status_code == 201
+    scan = api.post("/v1/projects/demo/scan").json()
+    assert scan["config"]["source"] == "PROPOSAL" and scan["approval"] is None
+    assert scan["project"]["status"] == "PROPOSED"
+    assert scan["missing_commands"] == ["build", "lint", "typecheck", "security"]
+    assert any("not ready" in note for note in scan["notes"])
+    assert not api.get("/v1/approvals").json()["approvals"]
+
+
 def test_onboarding_requires_an_allowed_approver(api, projects_root):
     register(api, projects_root, files={"package.json": '{"scripts": {"test": "vitest"}}', "src/a.test.ts": ""})
     scan = api.post("/v1/projects/demo/scan").json()
     assert scan["project"]["status"] == "PROPOSED"
-    assert scan["config"]["source"] == "PROPOSAL"
+    assert scan["config"]["source"] == "REPOSITORY"
     effective = scan["config"]["effective_config"]
-    assert effective["toolchain"]["profiles"] == ["node"]
     assert {"main", "master"} <= set(effective["git"]["protected_branches"])
 
     approval_id = scan["approval"]["id"]
@@ -155,7 +165,9 @@ def test_rescan_detects_drift(api, projects_root):
     make_ready(api)
     unchanged = api.post("/v1/projects/demo/scan").json()
     assert unchanged["changed"] is False and unchanged["approval"] is None
-    git_repo(projects_root / "demo", {"package.json": '{"scripts": {"test": "jest"}}'})
+    config = yaml.safe_load((projects_root / "demo" / ".hermes/project.yaml").read_text())
+    config["commands"]["test"] = "jest"
+    git_repo(projects_root / "demo", {".hermes/project.yaml": yaml.safe_dump(config)})
     drift = api.post("/v1/projects/demo/scan").json()
     assert drift["changed"] is True
     assert drift["project"]["status"] == "DRIFT_DETECTED"

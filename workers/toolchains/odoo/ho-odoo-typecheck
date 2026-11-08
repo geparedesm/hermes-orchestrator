@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Typecheck an Odoo module in /workspace for the Quality Gate's `typecheck` (docs/design/fewer-blocked-tasks.md).
+#
+#   ho-odoo-typecheck <module>
+#
+# mypy checks the module as a package. Odoo is not importable from the quality tools' virtualenv, so `odoo` and its
+# ORM are Any: the check covers the module's own Python (types, calls, None handling), not Odoo's field magic.
+# tests/ and migrations/ are left out (dynamic imports; version-named folders). The rules are the image's
+# (/opt/ho/share/odoo-quality/mypy.ini), never the repository's, so a change cannot relax its own gate; a justified
+# exception is inline (`# type: ignore[<code>]`) and visible in the diff.
+set -euo pipefail
+
+module="${1:-}"
+if [[ ! "$module" =~ ^[a-z][a-z0-9_]{1,40}$ ]]; then
+  echo "usage: ho-odoo-typecheck <module> (lowercase letters, digits, underscores)" >&2
+  exit 2
+fi
+workspace="${HO_ODOO_WORKSPACE:-/workspace}"
+if [[ ! -f "$workspace/__manifest__.py" ]]; then
+  echo "ho-odoo-typecheck: $workspace has no __manifest__.py; the module must be at the repository root" >&2
+  exit 2
+fi
+share="${HO_ODOO_QUALITY_SHARE:-/opt/ho/share/odoo-quality}"
+
+# The module is checked as the package <module>, as Odoo imports it.
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+ln -s "$workspace" "$work/$module"
+
+echo "ho-odoo-typecheck: mypy" >&2
+if ! (cd "$work" && mypy --config-file "$share/mypy.ini" --no-incremental --cache-dir=/dev/null -p "$module"); then
+  echo "ho-odoo-typecheck: FAILED: fix the errors above or justify one inline" >&2
+  exit 1
+fi
+echo "ho-odoo-typecheck: $module passed mypy" >&2

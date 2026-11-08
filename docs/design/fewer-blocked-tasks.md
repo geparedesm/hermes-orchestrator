@@ -1,6 +1,6 @@
 # Fewer blocked tasks
 
-Status: plan agreed with the person on 2026-11-08. Section 1 implemented; sections 2 to 4 pending.
+Status: plan agreed with the person on 2026-11-08. Sections 1 and 2 implemented; sections 3 and 4 pending.
 
 Evidence: 77 BLOCKED, PAUSED_BUDGET, CANCELLED or FAILED transitions across 12 of 18 tasks (T-1 to T-18). Infrastructure, post-merge, design-flow and review-loop causes are already fixed (PRs up to #104). The changes below address the causes that remain. Each change ships with tests in its own PR, in this order.
 
@@ -18,6 +18,7 @@ Mandatory for every project: `build`, `tests`, `full_suite`, `lint`, `typecheck`
 - Defaults become `true` for all six, and project layers can no longer turn them off (they are already tighten-only upward).
 - Onboarding: a scan proposes a command for every mandatory check. A project without a command for one of them cannot reach PROJECT_READY; the person approves the proposed commands.
 - Odoo toolchain: new `ho-odoo-typecheck <module>` next to `ho-odoo-lint`. It runs mypy over the module, treats `odoo` as `Any` (`--ignore-missing-imports`, `follow_imports=silent`), and pins its version in `workers/versions.env`. job_finder moves from its file list to the wrapper. commercial-properties gets the command through a config change that the person approves.
+- A project created from a platform template (`child_creations` kind PROJECT) may become PROJECT_READY without commands; until it has them it accepts one open task, which sets them up (the contract tells its agents). Child modules get no exception: their template must carry every command.
 - Existing tasks keep their pinned configuration. T-14 needs either the gate exception or a recreation after the config change.
 
 ## 3. Agents know the full gate from the start

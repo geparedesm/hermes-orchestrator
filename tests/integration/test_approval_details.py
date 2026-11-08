@@ -35,7 +35,9 @@ def test_a_first_configuration_lists_what_the_project_sets(api, projects_root):
 
 
 def test_an_updated_configuration_lists_only_what_changed(api, parent):  # noqa: F811 (fixture)
-    yaml = PARENT_YAML.replace('commands: {test: "python -m unittest"}', 'commands: {test: "ho-odoo-test odoo_base"}')
+    yaml = PARENT_YAML.replace('commands: {test: "python -m unittest"}',
+                               'commands: {build: "true", test: "ho-odoo-test odoo_base", lint: "true", typecheck: "true", '
+                               'security: "true"}')
     yaml = yaml.replace("project: {name: odoo-base}", "project: {name: odoo-base}\ntoolchain: {profiles: [odoo]}")
     (parent / ".hermes/project.yaml").write_text(yaml)
     sh(parent, "commit", "-qam", "odoo toolchain")

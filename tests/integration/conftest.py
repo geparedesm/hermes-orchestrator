@@ -79,9 +79,28 @@ def database() -> Iterator[str]:
         admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
 
 
-def git_repo(path: Path, files: dict[str, str] | None = None) -> Path:
+# Every project needs these (docs/design/fewer-blocked-tasks.md); test repositories get a no-op for each one missing.
+MANDATORY = {"build": "true", "test": "true", "lint": "true", "typecheck": "true", "security": "true"}
+
+
+def with_mandatory_commands(files: dict[str, str]) -> dict[str, str]:
+    import yaml
+    files = dict(files)
+    raw = files.get(".hermes/project.yaml")
+    data = yaml.safe_load(raw) if raw else {"version": 1, "project": {"name": "demo"}}
+    if not isinstance(data, dict) or data.get("commands") is False:
+        return files
+    data["commands"] = {**MANDATORY, **(data.get("commands") or {})}
+    files[".hermes/project.yaml"] = yaml.safe_dump(data, sort_keys=False)
+    return files
+
+
+def git_repo(path: Path, files: dict[str, str] | None = None, *, commands: bool = True) -> Path:
     path.mkdir(parents=True, exist_ok=True)
-    for rel, content in (files or {"README.md": "# demo\n"}).items():
+    files = files or {"README.md": "# demo\n"}
+    if commands and not (path / ".git").exists():
+        files = with_mandatory_commands(files)
+    for rel, content in files.items():
         target = path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)

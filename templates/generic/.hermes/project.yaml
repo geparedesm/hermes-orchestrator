@@ -3,4 +3,5 @@
 version: 1
 project: {name: "{{name}}"}
 toolchain: {profiles: [generic]}
-quality_gate: {build: false, tests: false, full_suite: false, lint: false, typecheck: false, docs_updated: false}
+# Until then the project accepts only that setup task: build, test, lint, typecheck and security commands are mandatory.
+quality_gate: {docs_updated: false}

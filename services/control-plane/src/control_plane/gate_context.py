@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ho_core.verification import plan_verification
+from ho_core.verification import missing_commands, plan_verification
 
 from .context import UnitOfWork
 from .db import Row
@@ -26,7 +26,7 @@ def contract(config: dict[str, Any], paths: list[str]) -> str:
     lines += ['Configured verification commands (execute in the prepared workspace when applicable):']
     lines += [f'- {name}: {command}' for name, command in commands.items()
               if name in ('install', 'build', 'lint', 'typecheck', 'test', 'security', 'post_merge') and command]
-    lines += ['At MEDIUM risk or above, lint and typecheck are required; HIGH or above also requires security checks.',
+    lines += ['Every change requires build, tests, lint, typecheck and security checks, whatever its risk.',
               'HIGH risk includes authentication, permissions, payments, migrations, infrastructure, dependencies and configured sensitive paths.',
               'Write and run relevant tests with code changes. Missing required commands are test gaps, not successful checks. '
               'Code without a test run, CRITICAL changes, and sensitive changes with test gaps need an explicit human exception.',
@@ -36,6 +36,11 @@ def contract(config: dict[str, Any], paths: list[str]) -> str:
               'No policy violations: stay within granted capabilities; do not attempt sudo, Docker, ungranted credential access, protected-branch writes or approval bypasses.',
               'UI changes require the current approved design before implementation; backend-only scope must not silently edit UI files.',
               'Only humans can grant exceptions, increase budgets, approve designs/plans, or approve merge. Report concrete missing inputs; never fabricate evidence.']
+    missing = missing_commands(config)
+    if missing:
+        lines.append(f"This project has no {', '.join(missing)} command yet. This task sets the project up: add every missing "
+                     "command to .hermes/project.yaml (commands:) so that each runs and passes on the integrated commit; "
+                     "the person approves that configuration change.")
     verification = config.get('verification') or {}
     for setting in ('sensitive_paths', 'critical_paths'):
         if verification.get(setting):

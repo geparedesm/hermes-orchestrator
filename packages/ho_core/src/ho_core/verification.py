@@ -126,6 +126,16 @@ class VerificationPlan:
 
 
 _STEP_COMMAND = {"build": "build", "lint": "lint", "typecheck": "typecheck", "test": "test", "security": "security"}
+# Every project verifies every change with these (docs/design/fewer-blocked-tasks.md): a project cannot switch them
+# off, and it is not PROJECT_READY without a command for each (except a template project's setup task).
+MANDATORY_CHECKS = ("tests", "build", "lint", "typecheck", "security")
+MANDATORY_COMMANDS = ("build", "test", "lint", "typecheck", "security")
+
+
+def missing_commands(config: dict[str, Any]) -> list[str]:
+    """The mandatory verification commands a project configuration does not define."""
+    commands = config.get("commands") or {}
+    return [name for name in MANDATORY_COMMANDS if not str(commands.get(name) or "").strip()]
 
 
 def plan_verification(config: dict[str, Any], paths: list[str], *, insertions: int = 0,
@@ -143,21 +153,8 @@ def plan_verification(config: dict[str, Any], paths: list[str], *, insertions: i
     def need(name: str, source: str) -> None:
         wanted.setdefault(name, source)
 
-    if gate.get("tests", True) or gate.get("full_suite", True):
-        need("tests", "project")
-    if gate.get("build", True):
-        need("build", "project")
-    if gate.get("lint", True):
-        need("lint", "project")
-    if gate.get("typecheck"):
-        need("typecheck", "project")
-    if gate.get("security_checks"):
-        need("security", "project")
-    if _at_least(level, Risk.MEDIUM):
-        for name in ("lint", "typecheck"):
-            need(name, "risk")
-    if _at_least(level, Risk.HIGH):
-        need("security", "risk")
+    for name in MANDATORY_CHECKS:  # whatever quality_gate says: every change gets every command check
+        need(name, "hard policy")
     browser_config = config.get("browser_tests") or {}
     browser = bool(gate.get("browser_tests") and browser_config.get("enabled") and browser_config.get("base_url"))
     if browser:

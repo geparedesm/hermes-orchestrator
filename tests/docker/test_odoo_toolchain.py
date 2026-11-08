@@ -1,5 +1,5 @@
 """The odoo toolchain: `ho-odoo-test` installs a module from the real /workspace mount into a throwaway database
-on a PostgreSQL service and runs its tests; `ho-odoo-lint` and `ho-odoo-security` are its Quality Gate checks
+on a PostgreSQL service and runs its tests; `ho-odoo-lint`, `ho-odoo-typecheck` and `ho-odoo-security` are its Quality Gate checks
 (docs/design/child-projects.md)."""
 
 from __future__ import annotations
@@ -133,6 +133,25 @@ def test_a_clean_module_passes_lint_and_security(tmp_path):
     assert status == 0 and "ho_sample passed" in logs, logs[-3000:]
 
 
+def test_a_clean_module_passes_typecheck(tmp_path):
+    workspace = tmp_path / "ho_sample"
+    shutil.copytree(MODULE, workspace)
+    status, logs = check(workspace, ["ho-odoo-typecheck", "ho_sample"])
+    assert status == 0 and "ho_sample passed mypy" in logs, logs[-3000:]
+
+
+def test_typecheck_fails_on_a_type_error_but_not_on_odoo_or_tests(tmp_path):
+    workspace = tmp_path / "ho_sample"
+    shutil.copytree(MODULE, workspace)
+    (workspace / "tests").mkdir(exist_ok=True)
+    (workspace / "tests" / "test_loose.py").write_text("x: int = 'not checked'\n")  # tests/ are left out
+    (workspace / "models" / "__init__.py").write_text(
+        "from odoo import models\n\n\nclass Lease(models.Model):\n    _name = \"ho.lease\"\n\n"
+        "    def days(self) -> int:\n        return \"thirty\"\n")
+    status, logs = check(workspace, ["ho-odoo-typecheck", "ho_sample"])
+    assert status == 1 and "Incompatible return value" in logs and "test_loose" not in logs, logs[-3000:]
+
+
 def test_lint_fails_on_a_likely_bug_and_on_an_odoo_rule(tmp_path):
     workspace = tmp_path / "ho_sample"
     shutil.copytree(MODULE, workspace)
@@ -155,7 +174,7 @@ def test_security_fails_on_unsafe_code_and_a_model_without_access_rules(tmp_path
 def test_login_shells_find_the_quality_tools():
     client = docker.from_env()
     container = client.containers.run(
-        _image(), ["bash", "-lc", "for t in ho-odoo-lint ho-odoo-security ruff pylint bandit mypy; do command -v $t; done"
+        _image(), ["bash", "-lc", "for t in ho-odoo-lint ho-odoo-typecheck ho-odoo-security ruff pylint bandit mypy; do command -v $t; done"
                    " && mypy --version"], detach=True, user="10001:10001")
     try:
         assert container.wait(timeout=120)["StatusCode"] == 0, container.logs().decode()
