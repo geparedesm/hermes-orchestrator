@@ -144,6 +144,16 @@ class UIDesigns:
             and design['config_id'] == task['config_id']
 
     def required(self, uow, task, text='', files=()):
+        # The gate found UI files in the integrated diff of a backend-only scope (T-18): a design is now required, or
+        # REQUEST_UI_DESIGN would be refused and nothing could satisfy the gate.
+        uow.cur.execute('SELECT requirements FROM quality_gate_evaluations WHERE task_id = %s '
+                        'ORDER BY evaluated_at DESC LIMIT 1', (task['id'],))
+        evaluation = uow.cur.fetchone()
+        if evaluation and any(r.get('name') == 'ui_design' and r.get('status') == 'FAIL' for r in evaluation['requirements']):
+            if not task.get('ui_design_required'):
+                uow.cur.execute('UPDATE tasks SET ui_design_required = true WHERE id = %s', (task['id'],))
+                task['ui_design_required'] = True
+            return True
         uow.cur.execute('SELECT title, description, estimated_scope FROM subtasks WHERE task_id = %s '
                         "AND plan_version = %s AND state <> 'CANCELLED'",
                         (task['id'], task['current_plan_version'] or 0))
