@@ -18,5 +18,5 @@ def test_contract_explains_unknown_scope_risk_and_unavailable_commands():
     text = contract({'commands': {}, 'quality_gate': {}}, [])
     assert 'lint and typecheck' in text and 'security checks' in text
     assert 'test gaps' in text and 'human exception' in text
-    assert 'For GitHub projects' in text and 'other provider' in text
+    assert 'CI checks' not in text and 'other provider' in text
     assert 'approval bypasses' in text

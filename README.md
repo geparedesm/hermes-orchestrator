@@ -116,7 +116,7 @@ Logins live in dedicated Docker volumes (`cred-claude-default`, `cred-codex-defa
 make auth-github                          # gh auth login, stored only for Git Service
 ```
 
-With it, approved merges of GitHub projects go through a pull request (push, PR, CI checks, merge with the approved head).
+With it, approved merges of GitHub projects go through a pull request (push, PR, merge with the approved head).
 
 ## 8. Registering the first project
 

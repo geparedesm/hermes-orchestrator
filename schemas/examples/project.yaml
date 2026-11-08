@@ -81,7 +81,6 @@ quality_gate:
   typecheck: true
   security_checks: true
   browser_tests: true
-  ci_checks: true
   docs_updated: false
   block_on_findings: [HIGH, CRITICAL]
 

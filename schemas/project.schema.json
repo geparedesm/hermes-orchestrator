@@ -194,7 +194,7 @@
         "typecheck": { "type": "boolean", "default": false },
         "security_checks": { "type": "boolean", "default": false },
         "browser_tests": { "type": "boolean", "default": false },
-        "ci_checks": { "type": "boolean", "default": true },
+        "ci_checks": { "type": "boolean", "deprecated": true, "description": "Ignored: the Quality Gate no longer checks CI. Accepted so existing project files stay valid." },
         "docs_updated": { "type": "boolean", "default": false },
         "block_on_findings": {
           "type": "array",

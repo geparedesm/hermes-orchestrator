@@ -60,7 +60,7 @@ def test_requirements_grow_with_risk():
 
 def test_hard_policy_requirements_cannot_be_disabled():
     plan = plan_verification({"commands": COMMANDS, "quality_gate": {"tests": False, "full_suite": False, "build": False,
-                                                                      "lint": False, "ci_checks": False}}, ["README.md"])
+                                                                      "lint": False}}, ["README.md"])
     assert {"cross_review", "requirements", "no_blocking_findings", "no_conflicts", "no_policy_violations"} <= names(plan)
     assert "tests" not in names(plan)
 
@@ -74,10 +74,11 @@ def test_test_gaps():
     assert docs.gaps == []  # documentation-only changes need no tests
 
 
-def test_ci_and_browser_requirements():
-    browser = plan_verification({**config(browser_tests=True), "browser_tests": {"enabled": True, "base_url": "http://app:3000"}},
-                                ["src/a.py", "tests/a.py"], github=True)
-    assert browser.browser and {"browser", "ci_checks"} <= names(browser)
+def test_browser_requirements_and_no_ci_check():
+    browser = plan_verification({**config(browser_tests=True, ci_checks=True),
+                                 "browser_tests": {"enabled": True, "base_url": "http://app:3000"}}, ["src/a.py", "tests/a.py"])
+    assert browser.browser and "browser" in names(browser)
+    assert "ci_checks" not in names(browser)  # removed: a project's leftover ci_checks setting is ignored
     assert not plan_verification(config(browser_tests=True), ["src/a.py"]).browser  # needs browser_tests.enabled + base_url
 
 

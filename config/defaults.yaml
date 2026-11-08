@@ -96,7 +96,6 @@ project_defaults:
     typecheck: false
     security_checks: false
     browser_tests: false
-    ci_checks: true
     docs_updated: false
     block_on_findings: [HIGH, CRITICAL]
   budget: {profile: NORMAL}
