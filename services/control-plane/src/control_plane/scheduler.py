@@ -137,6 +137,18 @@ class Scheduler:
         return stats
 
     def _promote_backlog(self, uow: UnitOfWork) -> int:
+        # A dependency that will never be DONE: the task says so instead of waiting in BACKLOG forever (T-16 on T-15).
+        uow.cur.execute(
+            "SELECT t.*, (SELECT string_agg(d.key || ' is ' || d.state, ', ' ORDER BY d.key) FROM task_relationships r "
+            "JOIN tasks d ON d.id = r.to_task_id WHERE r.from_task_id = t.id AND r.kind = 'DEPENDENCY' "
+            "AND d.state IN ('CANCELLED', 'FAILED')) AS dead FROM tasks t WHERE t.state = 'BACKLOG' AND EXISTS ("
+            "SELECT 1 FROM task_relationships r JOIN tasks d ON d.id = r.to_task_id WHERE r.from_task_id = t.id "
+            "AND r.kind = 'DEPENDENCY' AND d.state IN ('CANCELLED', 'FAILED')) FOR UPDATE OF t SKIP LOCKED")
+        for task in uow.cur.fetchall():
+            dead = task.pop("dead")
+            self.tasks.transition(uow, task, TaskState.BLOCKED, trigger=Trigger.SCHEDULER, actor="scheduler",
+                                  reason=f"its dependency can never finish ({dead}): retry this task to start it "
+                                         "without that dependency, or cancel it")
         uow.cur.execute(
             """
             SELECT t.* FROM tasks t

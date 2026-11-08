@@ -292,6 +292,8 @@ Enforcement happens in layers (AD-14):
 | Provider CLI permission settings | Tool and command allowlists and approval modes of Claude Code and Codex, configured per role. | Partially: they are best-effort inside the sandbox. |
 | Advisory classification | The in-container runner and adapters classify observed commands and record `COMMAND_STARTED` / `COMMAND_FINISHED` events. HIGH RISK patterns raise an alert and can stop the execution. | Yes: it detects, it does not prevent. |
 
+The container and privilege rules (CMD-H07, CMD-H09) judge program words only. They do not see the data a command passes along: quoted strings, a heredoc written to a file, Python given to `python -c`. What a shell runs (`sh -c '…'`, `eval`, a heredoc fed to a shell) is still checked. `sudo` and `su` count as programs only, not Odoo's `.sudo()` or the Spanish word "su". These rules caused 76 advisory alerts in T-12 to T-15, and each alert required a Quality Gate exception; with them, 75 of the 76 no longer fire (the last one is a stored command that was cut short). The other rules (credential paths, destructive SQL, mass deletion) still see quoted text.
+
 Classification (§24):
 
 | Class | Examples | Default decision |

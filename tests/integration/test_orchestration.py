@@ -1322,3 +1322,31 @@ def test_a_task_waits_in_backlog_while_its_project_lacks_a_mandatory_command(api
       "WHERE status = 'ACTIVE'")
     services.scheduler.run_once()
     assert state(api, created["key"]) == "PLANNING"
+
+
+MEDIUM_ONLY = {"verdict": "changes_requested", "summary": "Works; small things.", "requirements_met": True, "unmet_requirements": [],
+               "findings": [{"severity": "MEDIUM", "category": "style", "path": "a.py", "line": 1, "description": "Name it better."},
+                            {"severity": "LOW", "category": "docs", "path": "a.py", "line": 1, "description": "Add a docstring."}]}
+
+
+def test_a_review_with_only_medium_or_low_findings_accepts_and_keeps_them_as_follow_ups(api, services, agents, repo, task):
+    plan_and_start(services, agents, task)
+    develop(services, agents, repo, active(services, task, "DEVELOPER")[0], {"a.py": "x = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0], MEDIUM_ONLY)
+    assert subtasks(services, task)["a"]["state"] in ("ACCEPTED", "INTEGRATED")
+    [follow] = q(services, "SELECT data FROM events WHERE type = 'REVIEW_FOLLOW_UPS'")
+    assert len(follow["data"]["findings"]) == 2
+    assert not active(services, task, "DEVELOPER")  # no fix cycle for follow-ups
+
+
+def test_a_dependency_that_can_never_finish_blocks_the_task_until_the_person_decides(api, services, agents, repo, task):
+    dependent = api.post("/v1/tasks", {"project": "demo", "request": "Build on the greeting",
+                                       "related_tasks": [{"task": task, "kind": "DEPENDENCY"}]}).json()["key"]
+    assert api.post(f"/v1/tasks/{task}/cancel").status_code == 200
+    services.scheduler.run_once()
+    blocked = api.get(f"/v1/tasks/{dependent}").json()
+    assert blocked["state"] == "BLOCKED" and f"{task} is CANCELLED" in blocked["state_reason"]
+    assert api.post(f"/v1/tasks/{dependent}/retry").status_code == 200  # go on without it
+    assert q(services, "SELECT 1 FROM events WHERE type = 'DEPENDENCY_DROPPED'")
+    services.scheduler.run_once()
+    assert state(api, dependent) == "PLANNING"

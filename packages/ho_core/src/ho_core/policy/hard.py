@@ -53,7 +53,9 @@ def clamp_project_config(config: Json, *, platform: Json, default_branch: str | 
     findings = set(gate.get("block_on_findings", []))
     if not ALWAYS_BLOCKING_FINDINGS <= findings:
         notes.append("quality_gate.block_on_findings: HIGH and CRITICAL always block (hard policy)")
-    gate["block_on_findings"] = sorted(findings | ALWAYS_BLOCKING_FINDINGS, key=["MEDIUM", "HIGH", "CRITICAL"].index)
+    if "MEDIUM" in findings:  # follow-ups, never blockers (docs/design/fewer-blocked-tasks.md)
+        notes.append("quality_gate.block_on_findings: MEDIUM findings are follow-ups and do not block (hard policy)")
+    gate["block_on_findings"] = sorted(ALWAYS_BLOCKING_FINDINGS, key=["HIGH", "CRITICAL"].index)
 
     resources = config.setdefault("resources", {})
     machine_cap = int(platform["machine"]["max_agent_workers"])

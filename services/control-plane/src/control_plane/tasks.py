@@ -313,6 +313,17 @@ class Tasks:
             resumed = hook(uow, task, principal)
             if resumed is not None:
                 return resumed
+        if task["state"] == S.BLOCKED and task.get("resume_state") == S.BACKLOG:
+            # Blocked before it started, by a dependency that can never finish: retrying is the person's decision to
+            # go on without it. The dead dependencies are dropped and the task waits in BACKLOG as usual.
+            uow.cur.execute("DELETE FROM task_relationships r USING tasks d WHERE r.from_task_id = %s AND r.kind = 'DEPENDENCY' "
+                            "AND d.id = r.to_task_id AND d.state IN ('CANCELLED', 'FAILED') RETURNING d.key", (task["id"],))
+            dropped = [r["key"] for r in uow.cur.fetchall()]
+            if dropped:
+                record_event(uow.cur, "DEPENDENCY_DROPPED", actor=principal.value, project_id=task["project_id"],
+                             task_id=task["id"], summary=f"{key} no longer waits for {', '.join(dropped)}",
+                             data={"dropped": dropped}, pending=uow.events)
+            return self.transition(uow, task, S.BACKLOG, trigger=Trigger.USER, actor=principal.value, reason="retried by user")
         if task["state"] == S.BLOCKED:
             # A fresh start for the orchestrator too: earlier idle steps do not count against the retry.
             uow.cur.execute("UPDATE tasks SET orchestrator_failures = 0 WHERE id = %s", (task["id"],))
