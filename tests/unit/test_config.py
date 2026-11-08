@@ -53,7 +53,7 @@ def test_hard_policy_clamps_protected_branches_and_findings(platform):
     cfg = project(git={"protected_branches": ["develop"]}, quality_gate={"block_on_findings": ["MEDIUM"]})
     result = build_project_config(platform, cfg, default_branch="trunk")
     assert set(result.data["git"]["protected_branches"]) == {"develop", "main", "master", "trunk"}
-    assert result.data["quality_gate"]["block_on_findings"] == ["MEDIUM", "HIGH", "CRITICAL"]
+    assert result.data["quality_gate"]["block_on_findings"] == ["HIGH", "CRITICAL"]  # MEDIUM is a follow-up (hard policy)
     assert result.clamped
 
 

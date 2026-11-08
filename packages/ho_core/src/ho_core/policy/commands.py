@@ -50,9 +50,13 @@ _RULES: tuple[_Rule, ...] = (
     _rule("CMD-H06", H, r"\b(drop\s+(database|schema|table)|truncate\s+table|delete\s+from\s+\w+\s*;?\s*$)", "Destructive database statement"),
     # Container tools anywhere in the line (wrappers, shell scripts), or their socket; except in a line that only
     # searches or reads (`git log | grep -i docker`, `find -iname "docker-compose*"`: T-55), see `_search_only`.
-    _rule("CMD-H07", H, r"\b(docker|podman|nerdctl|kubectl|helm)\b", "Container or cluster control"),
+    # A tool name as a word of its own (`/usr/bin/docker` counts; `build-docker-image.yaml` in a URL does not).
+    _rule("CMD-H07", H, r"(?<![\w.-])(docker(-compose)?|podman|nerdctl|kubectl|helm)(?![\w.-])|docker\.sock",
+          "Container or cluster control"),
     _rule("CMD-H08", H, r"\b(terraform\s+(apply|destroy)|pulumi\s+(up|destroy)|cdk\s+deploy|serverless\s+deploy)\b", "Infrastructure change"),
-    _rule("CMD-H09", H, r"\b(sudo|su\s|chmod\s+(-R\s+)?[0-7]*7[0-7]{2}\b|chown\s+-R|setcap|mount\s)", "Privilege or permission change"),
+    # sudo and su as programs only: not Odoo's `.sudo()` nor the Spanish word "su" (T-12 to T-15).
+    _rule("CMD-H09", H, r"((?<![\w.])sudo\b(?!\s*\()|(?:^|[;&|(]\s*)su(?:\s|$)|\bchmod\s+(-R\s+)?[0-7]*7[0-7]{2}\b|\bchown\s+-R|"
+                        r"\bsetcap\b|\bmount\s+(?!\d?>|[|;&])\S)", "Privilege or permission change"),
     _rule("CMD-H10", H, r"\b(aws|gcloud|az)\s+\S*\s*(delete|remove|rm|destroy|deploy)\b", "Cloud destructive or deploy operation"),
     _rule("CMD-H11", H, r"(/run/secrets|/run/ho-credentials|/run/ho/secrets|\.ssh/|\.aws/credentials|\.config/gh|\.codex/auth|\.claude/\.credentials)", "Credential material access"),
     _rule("CMD-C01", C, r"\b(npm|pnpm|yarn|bun)\s+(i|install|add|ci|update|upgrade)\b", "Package install"),
@@ -68,6 +72,38 @@ _RULES: tuple[_Rule, ...] = (
     _rule("CMD-S03", S, r"^(npm|pnpm|yarn|bun)\s+(test|run\s+(test|lint|build|typecheck|format|check)\S*)\b", "Build, test, or lint"),
     _rule("CMD-S04", S, r"^(pytest|python3?\s+-m\s+(pytest|unittest|mypy|ruff)|ruff|mypy|tox|nox|go\s+(test|build|vet)|cargo\s+(test|build|check|clippy|fmt)|mvn\s+(test|verify|package)|gradle\w*\s+(test|build|check)|flutter\s+(test|analyze)|dart\s+(test|analyze)|phpunit|composer\s+test|tsc|eslint|prettier\s+--check|make\s+(test|lint|build|check))\b", "Build, test, or lint"),
 )
+
+# Rules that judge program words, so the data a command only passes along (a quoted string, a heredoc written to a
+# file, Python source given to `python -c`) cannot trigger them: test strings like "Docker skills a bonus" did (T-15).
+# What a shell runs (`sh -c '...'`, `eval '...'`, a heredoc fed to a shell) is still checked.
+_PROGRAM_RULES = frozenset({"CMD-H07", "CMD-H09"})
+_RUNS_SHELL = re.compile(r"(\b(ba|z|da)?sh\s+(-\w*\s+)*-\w*c\w*\s*|\beval\s+)$")
+_QUOTED = re.compile(r"'[^']*'|\"(?:\\.|[^\"\\])*\"")
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1([^\n]*)\n(.*?)\n[ \t]*\2[ \t]*(?=\n|$)", re.DOTALL)
+
+
+def _without_data(text: str) -> str:
+    """The line with the data it only passes along blanked out (see _PROGRAM_RULES)."""
+    def heredoc(found: re.Match[str]) -> str:
+        line_start = text.rfind("\n", 0, found.start()) + 1
+        head = text[line_start:found.start()]
+        if re.search(r"(^|[;&|(]\s*)(\S*/)?(ba|z|da)?sh\b", head):  # fed to a shell: those are commands
+            return found.group(0)
+        return f"<<{found.group(2)}{found.group(3)}\n{found.group(2)}"
+    text = _HEREDOC.sub(heredoc, text)
+    out, last = [], 0
+    for found in _QUOTED.finditer(text):
+        out.append(text[last:found.start()])
+        quoted = found.group(0)
+        if _RUNS_SHELL.search(text[:found.start()]):
+            # A script: its own commands stay, the data inside it is blanked too (`bash -lc "rg 'sudo\\('"`).
+            inner = quoted[1:-1].replace('\\"', '"') if quoted[0] == '"' else quoted[1:-1]
+            out.append(quoted[0] + _without_data(inner) + quoted[0])
+        else:
+            out.append("''")
+        last = found.end()
+    return "".join(out) + text[last:]
+
 
 _SEPARATORS = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
 _ORDER = {S: 0, C: 1, H: 2}
@@ -127,14 +163,17 @@ def _context(text: str, found: re.Match[str], around: int = 40) -> str:
     return ("…" if start else "") + excerpt + ("…" if end < len(text) else "")
 
 
-def _classify_segment(segment: str) -> Classification:
+def _classify_segment(segment: str, *, rules: frozenset[str] | None = None,
+                      skip: frozenset[str] = frozenset()) -> Classification | None:
     for rule in _RULES:
+        if rule.rule_id in skip or (rules is not None and rule.rule_id not in rules):
+            continue
         if rule.rule_id == "CMD-H07" and _search_only(segment):
             continue
         found = rule.pattern.search(segment)
         if found:
             return Classification(rule.command_class, rule.rule_id, rule.summary, _context(segment, found))
-    return Classification(C, "CMD-C99", "Unrecognized command")
+    return None if rules is not None else Classification(C, "CMD-C99", "Unrecognized command")
 
 
 def classify(command: str) -> Classification:
@@ -143,8 +182,12 @@ def classify(command: str) -> Classification:
     if not text:
         return Classification(C, "CMD-C99", "Empty command")
     # The whole line is checked too, for patterns that span separators.
-    results = [_classify_segment(_strip_prefix(text))]
-    results += [_classify_segment(_strip_prefix(s)) for s in _SEPARATORS.split(text) if s]
+    results = [_classify_segment(_strip_prefix(s), skip=_PROGRAM_RULES)
+               for s in [text, *(s for s in _SEPARATORS.split(text) if s)]]
+    # Program rules see the line without the data it only passes along.
+    code = _without_data(text)
+    results += [r for s in [code, *(s for s in _SEPARATORS.split(code) if s)]
+                if (r := _classify_segment(_strip_prefix(s), rules=_PROGRAM_RULES)) is not None]
     # Every segment must be SAFE for the line to be SAFE; the riskiest one decides.
     worst = max(results, key=lambda r: _ORDER[r.command_class])
     # Command substitution and eval can hide anything.

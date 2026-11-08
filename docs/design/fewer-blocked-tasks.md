@@ -1,6 +1,6 @@
 # Fewer blocked tasks
 
-Status: plan agreed with the person on 2026-11-08. Sections 1, 2 and 3 (except the Dashboard view) implemented; section 4 pending.
+Status: plan agreed with the person on 2026-11-08. Sections 1 to 4 implemented, except the Dashboard view of section 3 (it needs a pen.dev design first).
 
 Evidence: 77 BLOCKED, PAUSED_BUDGET, CANCELLED or FAILED transitions across 12 of 18 tasks (T-1 to T-18). Infrastructure, post-merge, design-flow and review-loop causes are already fixed (PRs up to #104). The changes below address the causes that remain. Each change ships with tests in its own PR, in this order.
 
@@ -33,9 +33,9 @@ The assignment contract (`gate_context.py`, since #102) already goes to the orch
 ## 4. Other causes of blocks
 
 - Command classifier false positives (`ho_core.policy.commands`). CMD-H09 matched Odoo's `.sudo()` and the Spanish word "su"; CMD-H07 matched "Docker" inside test strings. Together they produced 76 advisory violations in 8 tasks, and each one required a gate exception. Rules match command words only: not inside quoted strings, heredoc bodies or Python source passed with `-c`, not method calls (`.sudo(`), and `su` only as a command word. Each rule gets regression tables taken from the recorded events.
-- MEDIUM findings do not block. Only HIGH and CRITICAL block, as hard policy already requires. MEDIUM findings become follow-ups listed on the PR and the task. commercial-properties drops MEDIUM from `block_on_findings` through a config change the person approves.
+- MEDIUM findings do not block. Only HIGH and CRITICAL block: hard policy drops MEDIUM from `block_on_findings`, and the gate ignores it in configurations pinned earlier. A subtask review that requests changes with its requirements met and only MEDIUM or LOW findings accepts the work and records them as follow-ups on the task (REVIEW_FOLLOW_UPS). No change to commercial-properties' file is needed.
 - Closed acceptance criteria. When a requirement admits unbounded wording or behaviour (T-15 eligibility, T-8 exact behaviour), the planning instructions require the orchestrator to write a table of cases or to ask the person (ASK_QUESTIONS). Reviewers judge against that table; findings outside it are not blocking.
-- Dependencies on cancelled tasks. A task whose dependency is CANCELLED or FAILED becomes BLOCKED with the reason and the dependency's key, instead of staying in BACKLOG (T-16). The person can re-point the dependency or drop it.
+- Dependencies on cancelled tasks. A BACKLOG task whose dependency is CANCELLED or FAILED becomes BLOCKED with the reason and the dependency's key, instead of staying in BACKLOG (T-16). Retrying it is the person's decision to go on without that dependency: the dead dependencies are dropped (DEPENDENCY_DROPPED) and the task returns to BACKLOG. Cancelling it is the other choice.
 
 ## Validation
 

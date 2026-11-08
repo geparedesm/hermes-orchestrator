@@ -628,6 +628,14 @@ class Orchestration:
             lines += ["## Plan approval", "", "The current plan is not approved for the current requirements: submit SET_PLAN (the same "
                       "plan if it still fits) to ask the person; no subtask starts before they approve it.", ""]
         if task["state"] == S.PLANNING:
+            # T-15: "discard only when the offer actually requires it, in any wording" never converged; T-18's closed
+            # list with tables of cases passed its first review.
+            lines += ["## Closed acceptance criteria", "",
+                      "Every acceptance criterion must be checkable by a finite set of cases. When a requirement admits "
+                      "unbounded inputs or wording (text matching, heuristics, 'any phrasing', 'exact behaviour'), write "
+                      "into SET_REQUIREMENTS an explicit list of what is in scope and a table of cases that must and must "
+                      "not pass, or ask the person with ASK_QUESTIONS. Reviews judge the work against those tables: a "
+                      "case outside them is a follow-up, not a defect.", ""]
             left = self._rounds_left(uow, task)
             lines += ["## Questions for the person", "",
                       ("Before SET_PLAN you may ask ONE round of ASK_QUESTIONS (1 to 5 questions), and only when an answer would "
@@ -1500,7 +1508,7 @@ class Orchestration:
         if evaluation is None or evaluation["outcome"] != "FAIL" or not any(
                 r["name"] == "no_blocking_findings" and r.get("status") == "FAIL" for r in evaluation["requirements"]):
             return []
-        blocking = sorted(BLOCKING_ALWAYS | set((self._config(uow, task).get("quality_gate") or {}).get("block_on_findings", [])))
+        blocking = sorted(BLOCKING_ALWAYS)
         uow.cur.execute("SELECT r.reviewer_provider, f.severity, f.path, f.line, f.description FROM review_findings f "
                         "JOIN (SELECT DISTINCT ON (reviewer_provider) * FROM reviews WHERE task_id = %s AND commit_sha = %s "
                         "AND subtask_id IS NULL ORDER BY reviewer_provider, created_at DESC) r ON r.id = f.review_id "
@@ -1995,8 +2003,19 @@ class Orchestration:
             uow.cur.execute("UPDATE tasks SET step_requested = true WHERE id = %s", (task["id"],))
             return
         config = self._config(uow, task)
-        if review["outcome"] == "APPROVED" and review["requirements_met"]:
-            self._set_subtask(uow, subtask, "ACCEPTED", f"approved by {review['reviewer_provider']}")
+        uow.cur.execute("SELECT severity, path, line, description FROM review_findings WHERE review_id = %s", (review["id"],))
+        found = uow.cur.fetchall()
+        blocking = [f for f in found if f["severity"] in BLOCKING_ALWAYS]
+        follow_ups = review["outcome"] == "CHANGES_REQUESTED" and review["requirements_met"] and not blocking
+        if follow_ups:
+            # Only MEDIUM or LOW findings with the requirements met: accepted, the findings kept as follow-ups.
+            self._event(uow, task, "REVIEW_FOLLOW_UPS", f"{subtask['key']}: {len(found)} non-blocking finding(s) by "
+                        f"{review['reviewer_provider']} kept as follow-ups",
+                        {"subtask": subtask["key"], "review": str(review["id"]),
+                         "findings": [f"[{f['severity']}] {f['path'] or ''} {f['description'][:200]}" for f in found[:20]]})
+        if (review["outcome"] == "APPROVED" and review["requirements_met"]) or follow_ups:
+            self._set_subtask(uow, subtask, "ACCEPTED", f"approved by {review['reviewer_provider']}"
+                              + (" (MEDIUM/LOW findings kept as follow-ups)" if follow_ups else ""))
             files = list((subtask["estimated_scope"] or {}).get("files") or [])
             if files:  # knowledge anchored to code this subtask changed must be re-confirmed
                 uow.cur.execute("UPDATE knowledge_items SET trust = 'STALE', updated_at = now() WHERE project_id = %s "

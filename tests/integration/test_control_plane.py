@@ -148,7 +148,7 @@ def test_repository_config_is_used_and_clamped(api, projects_root):
     assert config["source"] == "REPOSITORY"
     effective = config["effective_config"]
     assert effective["autonomy"] == "SUPERVISED"  # the local file cannot weaken it
-    assert effective["quality_gate"]["block_on_findings"] == ["MEDIUM", "HIGH", "CRITICAL"]
+    assert effective["quality_gate"]["block_on_findings"] == ["HIGH", "CRITICAL"]  # MEDIUM is a follow-up (hard policy)
     assert set(effective["git"]["protected_branches"]) == {"main", "master", "release"}
     assert config["rejected_layers"] and config["clamped"]
 

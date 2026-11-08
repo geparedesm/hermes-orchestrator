@@ -14,7 +14,7 @@ def contract(config: dict[str, Any], paths: list[str], *, setup: bool = False) -
     # A preview from declared scope, never a promise about the eventual integrated diff.
     plan = plan_verification(config, paths)
     commands = config.get('commands') or {}
-    severities = sorted({'HIGH', 'CRITICAL'} | set((config.get('quality_gate') or {}).get('block_on_findings', [])))
+    severities = ['CRITICAL', 'HIGH']  # MEDIUM and LOW are follow-ups
     lines = ['## Quality Gate contract (pinned effective configuration)',
              'Meet the task requirements and acceptance criteria, including the person’s answers and approved UI design.',
              'These checks are computed by the same planner as integration verification. Declared scope is only a preview; '
@@ -30,7 +30,9 @@ def contract(config: dict[str, Any], paths: list[str], *, setup: bool = False) -
               'HIGH risk includes authentication, permissions, payments, migrations, infrastructure, dependencies and configured sensitive paths.',
               'Write and run relevant tests with code changes. Missing required commands are test gaps, not successful checks. '
               'Code without a test run, CRITICAL changes, and sensitive changes with test gaps need an explicit human exception.',
-              f'No open review findings of these severities: {", ".join(severities)}.',
+              f'No open review findings of these severities: {", ".join(severities)}. MEDIUM and LOW findings are '
+              'follow-ups: they never block, and a review whose requirements are met with only such findings accepts the work. '
+              'When the requirements give a list or a table of cases, judge against it: a case outside it is a follow-up.',
               'Cross-review must cover the integrated commit: the other provider reviews single-provider work; both review mixed-provider work.',
               'Integration must be conflict-free on the current target. The platform runs verification, integration review and the gate on that exact commit.',
               'No policy violations: stay within granted capabilities; do not attempt sudo, Docker, ungranted credential access, protected-branch writes or approval bypasses.',
@@ -83,8 +85,7 @@ def assignment_contract(uow: UnitOfWork, task: Row, config: dict[str, Any], *, p
                         "WHERE task_id = %s AND commit_sha = %s AND subtask_id IS NULL "
                         "ORDER BY reviewer_provider, created_at DESC) r ON r.id = f.review_id "
                         "WHERE f.status = 'OPEN' AND f.severity = ANY(%s) ORDER BY r.reviewer_provider, f.severity, f.path, f.line",
-                        (task['id'], gate['commit_sha'], sorted({'HIGH', 'CRITICAL'} |
-                         set((config.get('quality_gate') or {}).get('block_on_findings', [])))))
+                        (task['id'], gate['commit_sha'], ['CRITICAL', 'HIGH']))
         findings = uow.cur.fetchall()
         if findings:
             text += '\nFindings from that evaluated commit (historical until checked against the corrections):\n'

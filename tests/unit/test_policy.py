@@ -243,9 +243,42 @@ def test_ui_designer_read_exception_refuses_other_projects_and_writes(platform, 
 
 
 def test_a_high_risk_classification_keeps_the_text_it_matched():
-    """T-13 (#138): a stored command is cut short, so the person deciding needs the matched text itself to tell a real
-    `su` from the Spanish word in a message the agent wrote."""
-    script = "cat > models/notice.py <<'PY'\n" + "x = 1\n" * 60 + "body = 'Recordatorio: su pago vence mañana'\nPY"
+    """T-13 (#138): a stored command is cut short, so the person deciding needs the matched text itself."""
+    script = "cat > run.sh <<'SH'\n" + "x=1\n" * 60 + "SH\nchmod 777 run.sh; echo 'done with the permissions'"
     result = classify(script)
     assert result.rule_id == "CMD-H09"
-    assert "Recordatorio: su pago vence" in result.match and len(result.match) <= 100
+    assert "chmod 777 run.sh" in result.match and len(result.match) <= 100
+
+
+# Recorded false positives (COMMAND_HIGH_RISK events of T-12 to T-15): words in data, not programs.
+DATA_NOT_PROGRAMS = [
+    "cat > models/notice.py <<'PY'\nbody = 'Recordatorio: su pago vence mañana'\nPY",
+    "grep -n score_breakdown=json models/job_offer.py",
+    "python3 -c \"params = self.env['ir.config_parameter'].sudo(); print(params)\"",
+    "grep -rn 'sudo().search' models/",
+    "echo 'El área de la oferta debe coincidir con su búsqueda.'",
+    "cat > /tmp/probe.py <<'EOF'\nfor t in ['You must be an Australian citizen, Docker skills a bonus']:\n    print(t)\nEOF",
+    "python3 - <<'EOF'\nreq = ['NV1 required', 'Experience with Docker is a bonus']\nEOF",
+    "cd /workspace/models && python3 -c 'from offer_scoring import e; print(e(\"Docker experience preferred\"))'",
+    "sed -i 's/self.env.user/self.env.user.sudo()/' models/a.py",
+]
+STILL_PROGRAMS = [
+    "sudo apt-get install x", "su - postgres", "ls; su root", "sudo -u postgres psql", "docker ps",
+    "sh -c 'docker ps'", 'bash -lc "sudo ls"', "eval 'docker ps'", "bash <<'EOF'\ndocker ps\nEOF",
+    "chmod 777 x", "chown -R root /workspace", "cat > x.sh <<'EOF'\necho hi\nEOF\nsudo sh x.sh",
+]
+
+
+@pytest.mark.parametrize("command", DATA_NOT_PROGRAMS)
+def test_words_in_data_are_not_container_or_privilege_commands(command):
+    assert classify(command).rule_id not in ("CMD-H07", "CMD-H09"), command
+
+
+@pytest.mark.parametrize("command", STILL_PROGRAMS)
+def test_programs_are_still_high_risk(command):
+    assert classify(command).command_class == CommandClass.HIGH_RISK, command
+
+
+def test_other_rules_still_see_quoted_text():
+    assert classify("psql -c 'DROP TABLE x'").command_class == CommandClass.HIGH_RISK
+    assert classify('rm -rf "/"').command_class != CommandClass.SAFE

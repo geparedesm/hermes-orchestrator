@@ -10,7 +10,7 @@ def test_contract_tracks_the_effective_planner_and_commands():
     for requirement in plan_verification(config, paths).requirements:
         assert requirement.name in text
     assert 'ho-odoo-test' in text and 'mypy .' in text
-    assert 'CRITICAL, HIGH, MEDIUM' in text
+    assert 'CRITICAL, HIGH.' in text and 'MEDIUM and LOW findings are follow-ups' in text
     assert 'docs_updated' in text and 'actual integrated diff' in text
 
 

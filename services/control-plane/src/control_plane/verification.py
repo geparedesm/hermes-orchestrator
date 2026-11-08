@@ -504,7 +504,7 @@ class QualityGate:
         for item in relevant:
             uow.cur.execute("SELECT * FROM review_findings WHERE review_id = %s AND status = 'OPEN'", (item["id"],))
             findings += uow.cur.fetchall()
-        blocking = BLOCKING_ALWAYS | set((config.get("quality_gate") or {}).get("block_on_findings", []))
+        blocking = BLOCKING_ALWAYS  # MEDIUM is a follow-up, also under a configuration pinned before that rule
         # The target as integration saw it: for a GitHub project, origin's branch (Git Service integrates onto it, so
         # its pull request stays mergeable); the local branch may hold the user's unpushed commits.
         branch = changes["target_branch"]
