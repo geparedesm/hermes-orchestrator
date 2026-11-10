@@ -79,7 +79,7 @@ def _refresh(ops, provider: str, identity: str) -> dict:
                 nano_cpus=500_000_000, mem_limit=PROBE_MEMORY, memswap_limit=PROBE_MEMORY, pids_limit=128,
                 network_mode=plan.execution_network, dns=["127.0.0.1"], ipc_mode="private",
                 read_only=True, cap_drop=["ALL"], security_opt=["no-new-privileges:true"], privileged=False,
-                log_config=LogConfig(type="local", config={"max-size": "16k", "max-file": "1"}),
+                log_config=LogConfig(type="local", config={"max-size": "16k", "max-file": "1", "compress": "false"}),
             )
             container.start()
         try:
