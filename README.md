@@ -206,6 +206,13 @@ flowchart TD
 
 Orange nodes run an agent; purple nodes wait for you; the rest is the platform. Each agent role uses the model chosen for it: per task (task creation form), per project (`agents.models` in `.hermes/project.yaml`), or by default (Dashboard → Agents: Planning, Implementation, Review). The UI designer runs in the DEVELOPER role of the planning provider. The preview environment and the human-test decision are described in [Feature delivery](docs/design/feature-delivery.md).
 
+New developer assignments prefer the agent with the most remaining quota, using the more restrictive of its session
+and weekly windows. Both agents need complete observations from the last 15 minutes; otherwise selection falls back
+to the existing preferences and load scores. Queued new assignments recheck before execution; running work and fixes
+keep their developer. `agents.routing` configures enforcement, observation mode, or rollback to scored selection.
+Older pinned configurations retain their previous behavior. See [quota-aware routing](docs/design/quota-aware-routing.md)
+for configuration, audit events, and measurement limits.
+
 ## 11. Monitoring
 
 - Dashboard → **Orchestration**: required actions, queue, running work, provider usage by model, a board, and each task's plan, reviews, tests, budget, timeline, and manifests.

@@ -80,6 +80,7 @@ project_defaults:
   agents:
     allowed_providers: [claude, codex]
     preferred: {planning: claude, implementation: codex, debugging: claude, tests: codex}
+    routing: {policy: MOST_REMAINING_QUOTA, mode: ENFORCE, max_age_seconds: 900}
     orchestrator_may_develop: true
   review: {cycle_limit: 2, on_limit: ALTERNATE_DEVELOPER}
   retries: {transient: 2, fix_attempts: 2, alternate_developer: true}

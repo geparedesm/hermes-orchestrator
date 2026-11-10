@@ -993,6 +993,163 @@ def test_a_kept_accepted_subtask_still_counts_for_dependency_cycles(api, service
 QUOTA_RESULT = b'{"type":"result","subtype":"error","is_error":true,"result":"You have hit your usage limit"}'
 
 
+def quota_usage(services, provider, session, week, *, identity=None, age=0, reset=3600):
+    """Stand-in for the numeric observations collected by the provider adapters at execution end."""
+    for kind, used in (("session", session), ("week", week)):
+        q(services, "INSERT INTO provider_usage (provider, identity, window_kind, used_percent, observed_at, resets_at) "
+          "VALUES (%s, %s, %s, %s, now() - %s * interval '1 second', now() + %s * interval '1 second') "
+          "ON CONFLICT (provider, identity, window_kind) DO UPDATE SET used_percent = EXCLUDED.used_percent, "
+          "observed_at = EXCLUDED.observed_at, resets_at = EXCLUDED.resets_at",
+          provider, identity or services.ctx.provider_identity, kind, used, age, reset)
+
+
+@pytest.mark.parametrize("claude,codex,expected", [((25, 85), (55, 40), "codex"), ((20, 30), (10, 90), "claude")])
+def test_new_developer_uses_the_most_remaining_quota_and_other_provider_reviews(api, services, agents, repo, task,
+                                                                            claude, codex, expected):
+    quota_usage(services, "claude", *claude)
+    quota_usage(services, "codex", *codex)
+    plan_and_start(services, agents, task, provider="codex" if expected == "claude" else "claude")
+    [dev] = active(services, task, "DEVELOPER")
+    assert dev["provider"] == expected
+    [event] = q(services, "SELECT data FROM events WHERE type = 'AGENT_ROUTED' AND data->>'policy' = 'MOST_REMAINING_QUOTA'")
+    assert event["data"]["provider"] == expected
+    assert event["data"]["quota"][expected]["status"] == "RECENT"
+    assert event["data"]["identity"] == services.ctx.provider_identity
+    develop(services, agents, repo, dev, {"a.py": "print('hello')\n"})
+    [review] = active(services, task, "REVIEWER")
+    assert review["provider"] != expected
+    # A better allowance at the other agent does not move the developer of an existing attempt.
+    quota_usage(services, expected, 95, 95)
+    quota_usage(services, review["provider"], 1, 1)
+    review_verdict(services, agents, review, CHANGES)
+    [fix] = active(services, task, "DEVELOPER")
+    assert fix["provider"] == expected and fix["workspace"] == dev["workspace"]
+
+
+@pytest.mark.parametrize("unreliable,expected_status", [
+    ("missing", "MISSING"), ("stale", "STALE"), ("reset", "RESET_UNCONFIRMED"), ("other_identity", "MISSING"),
+])
+def test_unknown_quota_uses_scored_fallback_without_inventing_credit(api, services, agents, task, unreliable, expected_status):
+    quota_usage(services, "claude", 0, 0)
+    if unreliable != "missing":
+        quota_usage(services, "codex", 90, 90, age=1000 if unreliable == "stale" else 0,
+                    reset=-1 if unreliable == "reset" else 3600,
+                    identity="another-account" if unreliable == "other_identity" else None)
+    plan_and_start(services, agents, task)
+    assert active(services, task, "DEVELOPER")[0]["provider"] == "codex"
+    [event] = q(services, "SELECT data FROM events WHERE type = 'AGENT_ROUTED' AND data->>'policy' = 'MOST_REMAINING_QUOTA'")
+    assert "not comparable" in event["data"]["reason"]
+    assert event["data"]["quota"]["codex"]["status"] == expected_status
+    assert event["data"]["quota"]["codex"]["remaining_percent"] is None
+
+
+@pytest.mark.parametrize("setting", ["OBSERVE", "SCORED", "LEGACY"])
+def test_quota_policy_can_be_observed_disabled_or_absent_from_old_pinned_config(api, services, agents, task, setting):
+    # Stand-in for the configuration pinned when the task was created.
+    if setting == "LEGACY":
+        q(services, "UPDATE project_configs SET effective_config = effective_config #- '{agents,routing}'")
+    else:
+        path = "mode" if setting == "OBSERVE" else "policy"
+        q(services, "UPDATE project_configs SET effective_config = jsonb_set(effective_config, %s, %s::jsonb)",
+          ["agents", "routing", path], json.dumps(setting))
+    quota_usage(services, "claude", 0, 0)
+    quota_usage(services, "codex", 90, 90)
+    plan_and_start(services, agents, task)
+    assert active(services, task, "DEVELOPER")[0]["provider"] == "codex"
+    [event] = q(services, "SELECT data FROM events WHERE type = 'AGENT_ROUTED' ORDER BY seq DESC LIMIT 1")
+    assert event["data"]["candidate_provider"] == ("claude" if setting == "OBSERVE" else "codex")
+
+
+@pytest.mark.parametrize("blocked", ["paused", "auth"])
+def test_better_quota_does_not_override_unavailability(api, services, agents, task, blocked):
+    quota_usage(services, "claude", 90, 90)
+    quota_usage(services, "codex", 0, 0)
+    # The planning run is Claude: its successful completion must not renew the blocked agent's login.
+    if blocked == "paused":
+        q(services, "INSERT INTO provider_settings (provider, identity, enabled, updated_by) VALUES ('codex', %s, false, 'test')",
+          services.ctx.provider_identity)
+    else:
+        q(services, "INSERT INTO credential_refs (provider, identity, status) VALUES ('codex', %s, 'AUTH_REQUIRED') "
+          "ON CONFLICT (provider, identity) DO UPDATE SET status = EXCLUDED.status",
+          services.ctx.provider_identity)
+    plan_and_start(services, agents, task)
+    assert active(services, task, "DEVELOPER")[0]["provider"] == "claude"
+    [event] = q(services, "SELECT data FROM events WHERE type = 'AGENT_ROUTED' AND data->>'policy' = 'MOST_REMAINING_QUOTA'")
+    assert "codex" in event["data"]["excluded_providers"]
+
+
+def test_queued_new_developer_rechecks_quota_and_clears_old_provider_settings(api, services, agents, task):
+    from control_plane.agentmgr import AgentManagerError
+
+    quota_usage(services, "claude", 1, 1)
+    quota_usage(services, "codex", 90, 90)
+    agents.image_error = AgentManagerError(409, "image_unavailable", "restoring pinned worker image")
+    plan_and_start(services, agents, task)
+    assert not active(services, task, "DEVELOPER")
+    [pending] = q(services, "SELECT * FROM pending_launches WHERE kind = 'DEVELOP'")
+    assert pending["request"]["provider"] == "claude"
+    workspace = pending["request"]["workspace"]
+    before_routes = len(q(services, "SELECT * FROM events WHERE type = 'AGENT_ROUTED'"))
+    for _ in range(2):  # an unchanged image wait must not produce one routing event per scheduler poll
+        services.orchestration.process_pending()
+    assert len(q(services, "SELECT * FROM events WHERE type = 'AGENT_ROUTED'")) == before_routes
+    # Stand-in for a queued request that carries a prior provider's session/model/image.
+    q(services, "UPDATE pending_launches SET request = request || %s::jsonb WHERE id = %s",
+      json.dumps({"resume": "00000000-0000-0000-0000-000000000000", "model": "claude-only", "image": "claude-only"}), pending["id"])
+    q(services, "UPDATE tasks SET model_overrides = %s::jsonb WHERE key = %s",
+      json.dumps({"codex": {"DEVELOPER": "codex-routing-test"}}), task)
+    quota_usage(services, "claude", 95, 95)
+    quota_usage(services, "codex", 5, 5)
+    agents.image_error = None
+    services.orchestration.process_pending()
+    [dev] = active(services, task, "DEVELOPER")
+    assert dev["provider"] == "codex" and dev["workspace"] == f"demo/{workspace}"
+    assert "codex-routing-test" in agents.specs[str(dev["id"])]["command"]
+    assert subtasks(services, task)["a"]["developer_provider"] == "codex"
+    assert subtasks(services, task)["a"]["attempts"] == 1
+    assert not q(services, "SELECT * FROM pending_launches WHERE kind = 'DEVELOP'")
+    # Repeated queue passes cannot create a second execution or move the running one.
+    quota_usage(services, "claude", 0, 0)
+    services.orchestration.process_pending()
+    assert len(executions(services, task, "DEVELOPER")) == 1
+
+
+def test_observe_mode_keeps_the_queued_assignment_when_load_scores_change(api, services, agents, task):
+    from control_plane.agentmgr import AgentManagerError
+
+    q(services, "UPDATE project_configs SET effective_config = jsonb_set(effective_config, '{agents,routing,mode}', '\"OBSERVE\"')")
+    quota_usage(services, "claude", 0, 0)
+    quota_usage(services, "codex", 90, 90)
+    agents.image_error = AgentManagerError(409, "image_unavailable", "restoring pinned worker image")
+    plan_and_start(services, agents, task, provider="claude")
+    [pending] = q(services, "SELECT * FROM pending_launches WHERE kind = 'DEVELOP'")
+    assert pending["request"]["provider"] == "codex"
+    # A changed machine mix makes the scored router prefer Claude now. Observation preserves
+    # the original queued assignment while still recording Claude as the quota candidate.
+    services.ctx.platform["machine"]["starting_mix"]["codex"] = 0
+    agents.image_error = None
+    services.orchestration.process_pending()
+    assert active(services, task, "DEVELOPER")[0]["provider"] == "codex"
+    [event] = q(services, "SELECT data FROM events WHERE type = 'AGENT_ROUTED' ORDER BY seq DESC LIMIT 1")
+    assert event["data"]["provider"] == "codex" and event["data"]["candidate_provider"] == "claude"
+
+
+def test_new_work_waits_when_both_quotas_are_exhausted_then_chooses_the_available_agent(api, services, agents, task):
+    quota_usage(services, "claude", 100, 100)
+    quota_usage(services, "codex", 100, 100)
+    before = q(services, "SELECT consumed FROM budgets")[0]["consumed"]["agent_launches"]
+    plan_and_start(services, agents, task)
+    assert actions(services, task)[-1][1] == "ACCEPTED"
+    assert not executions(services, task, "DEVELOPER")
+    assert q(services, "SELECT consumed FROM budgets")[0]["consumed"]["agent_launches"] == before
+    assert len(q(services, "SELECT * FROM pending_launches WHERE kind = 'DEVELOP'")) == 1
+    for _ in range(2):
+        services.orchestration.process_pending()
+    quota_usage(services, "codex", 1, 1)
+    services.orchestration.process_pending()
+    assert active(services, task, "DEVELOPER")[0]["provider"] == "codex"
+
+
 def out_of_credit(services, provider, hours=2):
     """Stand-in for the usage an execution of `provider` reported: its session window is used up."""
     q(services, "INSERT INTO provider_usage (provider, identity, window_kind, used_percent, resets_at, observed_at) "

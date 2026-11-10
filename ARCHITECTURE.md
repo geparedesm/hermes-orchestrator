@@ -182,6 +182,11 @@ Claude cannot grant capabilities, change budgets, approve, merge, or mark a task
 
 ### 6.2 Leadership and failover
 
+New developer assignments can use [quota-aware routing](docs/design/quota-aware-routing.md), comparing the remaining
+session/week allowance from recent provider observations before scored preferences. Unknown quota falls back to
+scored selection. The control plane records the decision and rechecks queued new assignments before execution;
+running work, existing fixes, orchestrator leadership, and cross-review keep their existing ownership rules.
+
 - A task has at most one lease row: `(task_id, holder, provider, epoch, expires_at)`. Acquiring or renewing it is a single-row PostgreSQL transaction.
 - Every accepted action and every Agent Manager or Git Service request carries the epoch. Requests with a stale epoch are rejected.
 - The lease holder is the control-plane supervisor acting for a provider (`claude` preferred, `codex` fallback). Failover to Codex happens only at a checkpoint when the Claude provider is `UNAVAILABLE` (auth, quota, outage, or repeated failure beyond the configured limit). Failback happens at the next checkpoint after Claude recovers, if policy allows.

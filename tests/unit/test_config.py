@@ -49,6 +49,16 @@ def test_example_project_builds(platform):
     assert len(result.hash) == 64
 
 
+def test_quota_routing_defaults_and_project_override(platform):
+    default = build_project_config(platform, project()).data["agents"]["routing"]
+    assert default == {"policy": "MOST_REMAINING_QUOTA", "mode": "ENFORCE", "max_age_seconds": 900}
+    override = build_project_config(platform, project(agents={"routing": {"mode": "OBSERVE"}}))
+    assert override.data["agents"]["routing"] == {**default, "mode": "OBSERVE"}
+    for routing in ({"policy": "MAGIC"}, {"mode": "AUTO"}, {"max_age_seconds": 0}):
+        with pytest.raises(SchemaValidationError):
+            build_project_config(platform, project(agents={"routing": routing}))
+
+
 def test_hard_policy_clamps_protected_branches_and_findings(platform):
     cfg = project(git={"protected_branches": ["develop"]}, quality_gate={"block_on_findings": ["MEDIUM"]})
     result = build_project_config(platform, cfg, default_branch="trunk")
