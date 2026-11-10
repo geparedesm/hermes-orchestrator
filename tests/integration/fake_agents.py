@@ -27,6 +27,15 @@ class FakeAgentManager:
         self.volumes: set[tuple[str, str]] = {("claude", "default"), ("codex", "default")}
         self.networks: list[dict[str, Any]] = []  # managed networks left behind (orphan tests)
         self.preflight_passes = True  # developer runs report a passing preflight (ho-verify) unless a test sets False
+        self.quota_calls: list[tuple[str, str]] = []
+        self.quota_results: dict[str, Any] = {}
+
+    def quota(self, provider: str, identity: str) -> dict[str, Any]:
+        self.quota_calls.append((provider, identity))
+        result = self.quota_results.get(provider, {"status": "UNAVAILABLE", "windows": []})
+        if isinstance(result, Exception):
+            raise result
+        return result() if callable(result) else result
 
     def ensure_image(self, name: str) -> dict[str, Any]:
         if getattr(self, "image_error", None):

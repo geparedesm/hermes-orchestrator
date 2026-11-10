@@ -24,7 +24,7 @@ COPY --from=cli /usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude
 COPY --chmod=755 ho-agent-run ho-auth-login /opt/ho/bin/
 RUN ln -s /opt/ho/claude/bin/claude /usr/local/bin/claude \
  && { [ "$CLI_SELF_CHECK" = 0 ] || { HOME=/tmp CLAUDE_CONFIG_DIR=/tmp/claude claude --version && rm -rf /tmp/claude; }; }
-# The configuration directory is per execution (tmpfs); the subscription token comes
+# The configuration directory is per execution (tmpfs); the subscription login comes
 # from the provider credential volume. No automatic updates: versions are pinned here.
 ENV CLAUDE_CONFIG_DIR=/home/agent/.claude DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 LABEL org.hermes-orchestrator.provider="claude" org.hermes-orchestrator.provider-version="${CLAUDE_CODE_VERSION}"

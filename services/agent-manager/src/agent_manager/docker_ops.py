@@ -93,6 +93,7 @@ class DockerOps:
         self.client = client or docker.from_env(timeout=60)
         self.secrets = secrets or SecretStore(None)
         self._lock = threading.Lock()  # serialize capacity checks and creation
+        self._quota_locks = {p: threading.Lock() for p in ("claude", "codex")}
         self.image_recovery = images.ImageRecovery(self.client, config_dir)
 
     # ----------------------------------------------------------------- helpers
@@ -654,6 +655,8 @@ class DockerOps:
 
     def reap_expired(self) -> list[str]:
         """Defense in depth: stop workers whose grant expired, even if the control plane is down."""
+        from .quota import reap
+        reap(self)
         now = datetime.now(timezone.utc)
         stopped = []
         for container in self._running_workers():

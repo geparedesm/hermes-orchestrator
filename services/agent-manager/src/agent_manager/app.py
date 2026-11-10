@@ -13,6 +13,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from typing import Literal
 
 from docker.errors import APIError, NotFound
 from fastapi import Depends, FastAPI, Header, Request
@@ -30,6 +31,10 @@ log = logging.getLogger(__name__)
 
 class StopRequest(BaseModel):
     grace_seconds: int = Field(default=10, ge=0, le=300)
+
+
+class QuotaRequest(BaseModel):
+    identity: str = Field(default="default", pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 
 class EnvironmentRequest(BaseModel):
@@ -166,6 +171,11 @@ def create_app(ops: DockerOps, *, token: str, projects_root: Path, projects_root
     @app.get("/v1/images", dependencies=[Depends(authorized)])
     def images_view() -> dict[str, Any]:
         return ops.images()
+
+    @app.post("/v1/providers/{provider}/quota", dependencies=[Depends(authorized)])
+    def quota_read(provider: Literal["claude", "codex"], body: QuotaRequest) -> dict[str, Any]:
+        from .quota import refresh
+        return refresh(ops, provider, body.identity)
 
     @app.post("/v1/images/{name}/ensure", dependencies=[Depends(authorized)])
     def ensure_image(name: str) -> dict[str, Any]:

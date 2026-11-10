@@ -75,6 +75,11 @@ class Credentials:
         if not any(v["provider"] == provider and v["identity"] == identity for v in self._volumes()):
             raise Conflict(f"no credential volume for {provider}/{identity}; run `make auth-{provider} IDENTITY={identity}` first")
         self.executions._set_credential(uow, provider, identity, "READY", None)
+        # A login can select a different account. Discard the previous account's quota and fence in-flight probes.
+        uow.cur.execute("DELETE FROM provider_usage WHERE provider = %s AND identity = %s", (provider, identity))
+        uow.cur.execute("UPDATE provider_quota_refresh SET status = 'PENDING', claim_id = NULL, lease_until = NULL, "
+                        "last_attempt_at = NULL, completed_at = NULL, failures = 0, next_attempt_at = now() "
+                        "WHERE provider = %s AND identity = %s", (provider, identity))
         record_event(uow.cur, "CREDENTIAL_READY", actor=principal.value, summary=f"{provider}/{identity} login renewed",
                      data={"provider": provider, "identity": identity}, pending=uow.events)
 

@@ -303,6 +303,13 @@ class Orchestration:
         """Start an execution now, or queue it when capacity, budget, a scope conflict, or a
         higher-priority task stands in the way (design changes 3 and 6)."""
         blocker = self._blocker(uow, task, kind, subtask)
+        if blocker is None and kind == "DEVELOP" and (request.get("purpose") or {}).get("new_assignment_routing"):
+            from .quota_refresh import before_assignment
+            config = self._config(uow, task).get("agents") or {}
+            routing = config.get("routing") or {}
+            if routing.get("policy") == "MOST_REMAINING_QUOTA" and routing.get("mode", "ENFORCE") == "ENFORCE":
+                providers = [p for p in self._available(uow) if p in config.get("allowed_providers", ("claude", "codex"))]
+                blocker = before_assignment(self.ctx, uow, providers=providers, max_age_seconds=routing.get("max_age_seconds", 900))
         agent = request.get("provider") or request.get("reviewer")
         if blocker is None:
             # Held before any Git work (a review would otherwise prepare a workspace on every retry).

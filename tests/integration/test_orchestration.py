@@ -1114,6 +1114,50 @@ def test_queued_new_developer_rechecks_quota_and_clears_old_provider_settings(ap
     assert len(executions(services, task, "DEVELOPER")) == 1
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_new_assignment_waits_for_independent_refresh_then_routes_or_falls_back(api, services, agents, task, failed):
+    from test_quota_refresh import result
+    services.ctx.platform["scheduler"]["quota_refresh"]["enabled"] = True
+    agents.quota_results = ({p: {"status": "UNAVAILABLE", "windows": []} for p in ("claude", "codex")} if failed else {
+        "claude": lambda: result(10, 20), "codex": lambda: result(80, 90)})
+    # Finalization queues the plan's development request; the refresh hook then runs outside that transaction.
+    plan_and_start(services, agents, task, provider="codex")
+    [dev] = active(services, task, "DEVELOPER")
+    assert dev["provider"] == ("codex" if failed else "claude")
+    assert sorted(agents.quota_calls) == [("claude", "default"), ("codex", "default")]
+    assert not q(services, "SELECT * FROM pending_launches WHERE kind = 'DEVELOP'")
+    assert len(executions(services, task, "DEVELOPER")) == 1
+    assert q(services, "SELECT * FROM events WHERE type = 'LAUNCH_WAITING' AND summary LIKE %s", "%refreshing provider quotas%")
+    services.scheduler.run_once()
+    assert len(agents.quota_calls) == 2 and len(executions(services, task, "DEVELOPER")) == 1
+
+
+def test_refresh_in_progress_preserves_queued_workspace_and_attempt(api, services, agents, task):
+    from control_plane.agentmgr import AgentManagerError
+    from control_plane.quota_refresh import QuotaRefresh
+    from test_quota_refresh import result
+    agents.image_error = AgentManagerError(409, "image_unavailable", "restoring pinned worker image")
+    plan_and_start(services, agents, task)
+    [pending] = q(services, "SELECT * FROM pending_launches WHERE kind = 'DEVELOP'")
+    services.ctx.platform["scheduler"]["quota_refresh"]["enabled"] = True
+    agents.image_error = None
+    q(services, "INSERT INTO provider_quota_refresh (provider, identity, status, lease_until) "
+      "VALUES ('claude', 'default', 'RUNNING', now() + interval '120 seconds')")
+    for _ in range(2):
+        services.orchestration.process_pending()
+    assert not active(services, task, "DEVELOPER")
+    [waiting] = q(services, "SELECT * FROM pending_launches WHERE kind = 'DEVELOP'")
+    assert waiting["request"]["workspace"] == pending["request"]["workspace"]
+    assert subtasks(services, task)["a"]["attempts"] == 1
+    agents.quota_results = {"claude": lambda: result(5, 5), "codex": lambda: result(90, 90)}
+    q(services, "UPDATE provider_quota_refresh SET lease_until = now() - interval '1 second' WHERE provider = 'claude'")
+    QuotaRefresh(services.ctx).tick()
+    services.orchestration.process_pending()
+    [dev] = active(services, task, "DEVELOPER")
+    assert dev["provider"] == "claude" and dev["workspace"] == "demo/" + pending["request"]["workspace"]
+    assert subtasks(services, task)["a"]["attempts"] == 1
+
+
 def test_observe_mode_keeps_the_queued_assignment_when_load_scores_change(api, services, agents, task):
     from control_plane.agentmgr import AgentManagerError
 

@@ -187,6 +187,11 @@ session/week allowance from recent provider observations before scored preferenc
 scored selection. The control plane records the decision and rechecks queued new assignments before execution;
 running work, existing fixes, orchestrator leadership, and cross-review keep their existing ownership rules.
 
+[Independent refresh](docs/design/quota-refresh.md) reads the pinned CLIs' account usage through Agent Manager's
+isolated provider-only probes. PostgreSQL fences expiring claims and failure backoff; external reads hold no database
+locks. New quota-aware assignments wait for a due bounded attempt, then proceed with fresh observations or scored
+fallback. Probes are operational helpers, not task executions, and spend no task launch or provider-token budget.
+
 - A task has at most one lease row: `(task_id, holder, provider, epoch, expires_at)`. Acquiring or renewing it is a single-row PostgreSQL transaction.
 - Every accepted action and every Agent Manager or Git Service request carries the epoch. Requests with a stale epoch are rejected.
 - The lease holder is the control-plane supervisor acting for a provider (`claude` preferred, `codex` fallback). Failover to Codex happens only at a checkpoint when the Claude provider is `UNAVAILABLE` (auth, quota, outage, or repeated failure beyond the configured limit). Failback happens at the next checkpoint after Claude recovers, if policy allows.

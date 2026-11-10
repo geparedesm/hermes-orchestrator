@@ -179,10 +179,16 @@ No autonomy profile, project configuration, or task override can remove these (Â
 
 | Aspect | Claude Code | Codex CLI |
 | --- | --- | --- |
-| Bootstrap | `make auth-claude IDENTITY=<id>` runs the documented `claude setup-token` (subscription token for scripts); the operator pastes the printed token, which is saved as `oauth_token` (mode 0600) and verified with a one-turn request. | `make auth-codex IDENTITY=<id>` runs the documented `codex login --device-auth` with file storage and ChatGPT login forced; `auth.json` (mode 0600) is saved. |
-| Mount | `/run/ho-credentials/claude`, read-only | `/run/ho-credentials/codex`, read-write |
-| Use | The runner exports `CLAUDE_CODE_OAUTH_TOKEN`; the configuration directory is a fresh in-memory directory per execution. | The runner copies `auth.json` into a fresh in-memory `CODEX_HOME`; a refreshed login is written back under a file lock only if the stored copy is unchanged. |
-| Expiry | Token lifetime one year (documented). A 401 is classified `AUTH`. | Refreshed during use. A 401 is classified `AUTH`. |
+| Bootstrap | `make auth-claude IDENTITY=<id>` runs `claude auth login --claudeai`, validates account status and profile scope, then atomically stores `.credentials.json` (mode 0600). No model request. Older `oauth_token` installations continue working until renewal. | `make auth-codex IDENTITY=<id>` runs the documented `codex login --device-auth` with file storage and ChatGPT login forced; `auth.json` (mode 0600) is saved. |
+| Mount | `/run/ho-credentials/claude`, read-write for saved OAuth refresh | `/run/ho-credentials/codex`, read-write |
+| Use | The runner copies the saved OAuth login to tmpfs and writes refreshed credentials back under a file lock only if the stored copy is unchanged. Legacy installations export `CLAUDE_CODE_OAUTH_TOKEN`. | The runner copies `auth.json` into a fresh in-memory `CODEX_HOME`; a refreshed login is written back under a file lock only if the stored copy is unchanged. |
+| Expiry | Saved logins refresh during use; legacy setup-token lifetime is one year. A 401 is classified `AUTH`. | Refreshed during use. A 401 is classified `AUTH`. |
+
+Independent quota helpers mount only the matching identity volume, use the pinned generic provider image, and have
+no project files, sessions, tools, platform network or Docker access. CLI output is filtered inside the container and
+revalidated by Agent Manager and the control plane. Only percentages, reset/observation timestamps and operational
+status escape. Probes use the same credential lock/compare-and-swap and are invalidated if credentials change while
+reading; operator login also invalidates the PostgreSQL claim. No model turn or usage-credit redemption is requested.
 
 After `AUTH`, the identity's reference is `AUTH_REQUIRED`, the task waits in `AUTH_REQUIRED` (attention notification), and `ho auth ready <provider>` (run automatically at the end of `make auth-<provider>`) marks it `READY`, resumes the waiting tasks, and continues each interrupted execution once: from its provider session when one was captured, otherwise by running the assignment again. The login containers use the pinned worker image with only the credential volume mounted and the default network (the login needs the provider's website). `HO_PROVIDER_IDENTITY` selects the identity a stack uses; the smoke tests use throwaway identities so they never touch the operator's login.
 

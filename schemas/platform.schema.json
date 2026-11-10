@@ -266,6 +266,16 @@
           "minimum": 1,
           "maximum": 10080
         },
+        "quota_refresh": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "interval_seconds", "max_backoff_seconds"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "interval_seconds": {"type": "integer", "minimum": 30, "maximum": 3600},
+            "max_backoff_seconds": {"type": "integer", "minimum": 60, "maximum": 86400}
+          }
+        },
         "orchestrator_step_minutes": {
           "type": "integer",
           "minimum": 5,

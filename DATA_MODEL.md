@@ -177,6 +177,16 @@ Unregistering sets `status = UNREGISTERED`. It never deletes files (§14).
 
 **`usage_records`**: `execution_id`, `provider`, `units` (jsonb as reported by the adapter: tokens, requests, or other provider units), `cpu_seconds`, `max_memory_bytes`, `wall_seconds`. Provider usage units are whatever the CLI reports; the platform does not invent pricing. Implemented in Phase 4 with `execution_id`, `task_id`, `project_id`, `provider`, `units`, and `wall_seconds`; Docker CPU and memory statistics are added with the metrics work in Phase 11. Claude Code reports input, output, and cache tokens, turns, and a client-side cost estimate (stored as `reported_cost_usd_estimate`, not billing); Codex reports input, cached input, output, and reasoning token counts per turn (counts only; no reasoning content). `units.model` is the model the execution actually used, as the CLI reported it: Claude Code's `system/init` event (with `units.models`, the per-model token split from `result.modelUsage`); for Codex, whose `--json` output does not name it, `ho-agent-run` copies only the model names from the session's own record (`turn_context.model`). A model that is not reported is left out, never guessed; executions from before models were recorded have none.
 
+**`provider_usage`**: latest observed session/week percentage per `(provider, identity, window_kind)`, with `resets_at`,
+`observed_at` and nullable `execution_id`. Both execution adapters and independent account probes update it only when
+the observation is at least as new. An independent probe has no execution ID. Credential renewal discards old-account
+readings; an elapsed reset alone never supplies a measured new allowance to routing.
+
+**`provider_quota_refresh`** (0025): `(provider, identity)`, allowlisted operational `status`, `claim_id`, `lease_until`,
+`last_attempt_at`, `completed_at`, `next_attempt_at`, and `failures`. A committed expiring claim owns one account read;
+only its unexpired owner may publish results. No credentials or raw provider output are stored. Probe failure leaves
+the last usage observation unchanged and allows scored routing during the persisted retry backoff.
+
 ### 3.7 Knowledge
 
 **`knowledge_items`** (§45–46): `project_id`, `category` (`DISCOVERY`, `CONVENTION`, `DECISION`, `KNOWN_ISSUE`, `ARCHITECTURE`, `LESSON_LEARNED`), `trust` (`CONFIRMED`, `OBSERVED`, `HYPOTHESIS`, `STALE`, `REJECTED`), `title`, `body` (short), `provenance` (task, execution, source URLs with versions), `anchors` (paths or symbols whose change marks the item `STALE`), `observed_at_commit`, `repo_path` (set when promoted to `.hermes/`), `superseded_by`.

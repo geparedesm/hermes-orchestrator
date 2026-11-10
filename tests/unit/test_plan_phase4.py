@@ -46,7 +46,7 @@ def test_credential_mounts_per_provider(platform, tmp_path):
     assert mount.target == "/run/ho-credentials/codex" and not mount.read_only  # Codex refreshes its login
     claude = plan(platform, request(platform, provider="claude"), tmp_path)
     mount = next(m for m in claude.mounts if m.source == "cred-claude-default")
-    assert mount.target == "/run/ho-credentials/claude" and mount.read_only
+    assert mount.target == "/run/ho-credentials/claude" and not mount.read_only  # saved OAuth logins can refresh
     assert "api.anthropic.com" in claude.allowed_domains and "chatgpt.com" not in claude.allowed_domains
     assert set(codex.allowed_domains) == {"chatgpt.com", "auth.openai.com", "api.openai.com"}
 
