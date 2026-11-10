@@ -44,7 +44,7 @@ def test_provider_images_run_their_cli_with_the_right_credential_mount(api, clie
         test -z "$(ls -A /run/ho-credentials/codex)" && echo other-provider=empty || echo other-provider=mounted
         """, provider="claude", egress="PROVIDER_ONLY", workspace="NONE", workspace_path=None)
     logs = api.run(body)["logs"]
-    for expected in ("2.1.280 (Claude Code)", "no-codex", "token=readable", "cred=read-only", "other-provider=empty"):
+    for expected in ("2.1.280 (Claude Code)", "no-codex", "token=readable", "cred=writable", "other-provider=empty"):
         assert expected in logs, logs
 
 
@@ -171,6 +171,25 @@ def test_codex_refresh_is_written_back_only_when_the_store_is_unchanged(api, cli
     check = api.request(D, "cat /run/ho-credentials/codex/auth.json", identity="refresh", egress="NONE",
                         workspace="NONE", workspace_path=None)
     assert '{"tokens": "new"}' in api.run(check)["logs"]
+
+
+@pytest.mark.parametrize("renewed", [False, True])
+def test_claude_saved_login_refresh_preserves_an_interactive_renewal(api, client, projects_root, renewed):
+    """Saved Claude logins refresh in tmpfs; a concurrent operator login must win the write-back race."""
+    credential_volume(client, "claude", "refresh", {".credentials.json": '{"token":"old"}'})
+    fake_bin = projects_root / "proj-a" / ".hermes" / "worktrees" / "w1" / "bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    change = 'printf \'{"token":"operator"}\' > /run/ho-credentials/claude/.credentials.json\n' if renewed else ""
+    (fake_bin / "claude").write_text('#!/bin/bash\nprintf \'{"token":"refreshed"}\' > "$CLAUDE_CONFIG_DIR/.credentials.json"\n' + change +
+                                   'printf \'%s\\n\' \'{"type":"result","is_error":false}\'\n')
+    (fake_bin / "claude").chmod(0o755)
+    body = agent_body(api, ClaudeAdapter(), identity="refresh", egress="NONE")
+    body["env"] = {"PATH": "/workspace/bin:/usr/local/bin:/usr/bin:/bin"}
+    output = api.run(body)
+    assert base64.b64decode(output["files"]["ho/credential.txt"]).strip() == (b"stale" if renewed else b"refreshed")
+    check = api.request(D, "cat /run/ho-credentials/claude/.credentials.json", provider="claude", identity="refresh", egress="NONE",
+                        workspace="NONE", workspace_path=None)
+    assert ('{"token":"operator"}' if renewed else '{"token":"refreshed"}') in api.run(check)["logs"]
 
 
 @pytest.mark.internet
