@@ -72,6 +72,16 @@
           "items": { "$ref": "#/$defs/provider" },
           "description": "Cross-review requires two distinct providers."
         },
+        "routing": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "New developer assignments only. Missing settings in a pinned configuration retain scored routing. Quota needs recent session and week observations.",
+          "properties": {
+            "policy": { "enum": ["SCORED", "MOST_REMAINING_QUOTA"] },
+            "mode": { "enum": ["ENFORCE", "OBSERVE"] },
+            "max_age_seconds": { "type": "integer", "minimum": 1, "maximum": 86400 }
+          }
+        },
         "preferred": {
           "type": "object",
           "additionalProperties": false,

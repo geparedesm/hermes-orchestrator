@@ -30,7 +30,7 @@ from ho_core.routing import ProviderStats, route
 from ho_core.statemachine import ACTIVE_STATES, TERMINAL_STATES, WAITING_STATES, Trigger
 
 from . import budgets, manifests, recovery, testenv
-from .agents import out_of_credit, paused
+from .agents import out_of_credit, paused, routing_quota
 from .approvals import Approvals
 from .auth import Principal
 from .budgets import BudgetExhausted
@@ -236,7 +236,8 @@ class Orchestration:
 
     def _available(self, uow: UnitOfWork) -> list[str]:
         uow.cur.execute("SELECT provider, status FROM credential_refs WHERE identity = %s", (self.ctx.provider_identity,))
-        blocked = {r["provider"] for r in uow.cur.fetchall() if r["status"] == "AUTH_REQUIRED"}
+        blocked = {r["provider"] for r in uow.cur.fetchall()
+                   if r["status"] not in ("READY", "UNKNOWN")}
         blocked |= set(out_of_credit(uow, self.ctx.provider_identity))  # until its plan resets
         blocked |= paused(uow, self.ctx.provider_identity)  # a person paused it in the Dashboard
         return [p for p in ("claude", "codex") if p not in blocked]
@@ -256,8 +257,22 @@ class Orchestration:
     def _held_agents(self, uow: UnitOfWork) -> set[str]:
         return paused(uow, self.ctx.provider_identity) | set(out_of_credit(uow, self.ctx.provider_identity))
 
-    def _route(self, uow: UnitOfWork, task: Row, kind: str, *, suggested: str | None = None, exclude: tuple[str, ...] = ()) -> str | None:
+    def _route(self, uow: UnitOfWork, task: Row, kind: str, *, suggested: str | None = None,
+               exclude: tuple[str, ...] = (), quota_aware: bool = False) -> str | None:
+        decision = self._routing_decision(uow, task, kind, suggested=suggested, exclude=exclude, quota_aware=quota_aware)
+        self._record_routing(uow, task, kind, decision)
+        return decision["provider"]
+
+    def _record_routing(self, uow: UnitOfWork, task: Row, kind: str, decision: dict[str, Any]) -> None:
+        self._event(uow, task, "AGENT_ROUTED", f"{kind.lower()} -> {decision['provider'] or 'no provider available'} "
+                    f"[{decision['policy']}/{decision['mode']}] {decision['scores']}: {decision['reason']}", decision)
+
+    def _routing_decision(self, uow: UnitOfWork, task: Row, kind: str, *, suggested: str | None = None,
+                          exclude: tuple[str, ...] = (), quota_aware: bool = False) -> dict[str, Any]:
         config = self._config(uow, task)
+        agents = config.get("agents") or {}
+        settings = (agents.get("routing") or {}) if quota_aware else {}
+        policy = settings.get("policy", "SCORED")
         uow.cur.execute("SELECT provider, count(*) AS n FROM executions WHERE state = ANY(%s) AND role IN ('DEVELOPER', 'REVIEWER') "
                         "GROUP BY provider",
                         (list(ACTIVE),))
@@ -268,12 +283,18 @@ class Orchestration:
             "FROM executions e WHERE e.role = 'DEVELOPER' AND e.agent_run AND e.ended_at > now() - interval '30 days' "
             "GROUP BY e.provider")
         stats = {r["provider"]: ProviderStats(int(r["runs"]), int(r["ok"]), float(r["minutes"] or 0)) for r in uow.cur.fetchall()}
-        decision = route(kind, available=self._available(uow), project_preferred=(config.get("agents") or {}).get("preferred"),
+        allowed = agents.get("allowed_providers", ("claude", "codex"))
+        available = [p for p in self._available(uow) if p in allowed]
+        quota = routing_quota(uow, self.ctx.provider_identity, now=_now(),
+                              max_age_seconds=settings.get("max_age_seconds", 900)) if policy != "SCORED" else {}
+        decision = route(kind, available=available, project_preferred=agents.get("preferred"),
                          suggested=suggested, running=running, mix=self.ctx.platform["machine"].get("starting_mix"),
-                         stats=stats, exclude=exclude)
-        self._event(uow, task, "AGENT_ROUTED", f"{kind.lower()} -> {decision.provider or 'no provider available'} "
-                    f"{decision.scores}", decision.as_json())
-        return decision.provider
+                         stats=stats, exclude=exclude, policy=policy, mode=settings.get("mode", "ENFORCE"), quota=quota)
+        return {**decision.as_json(), "identity": self.ctx.provider_identity,
+                "excluded_providers": {p: ("excluded for this assignment" if p in exclude
+                                            else "not allowed by project" if p not in allowed
+                                            else self._held(uow, p) or "authentication unavailable")
+                                       for p in ("claude", "codex") if p not in available or p in exclude}}
 
     # ------------------------------------------------------------ launches
 
@@ -401,7 +422,26 @@ class Orchestration:
                 if row["subtask_id"]:
                     uow.cur.execute("SELECT * FROM subtasks WHERE id = %s", (row["subtask_id"],))
                     subtask = uow.cur.fetchone()
-                execution = self.launch(uow, task, row["kind"], row["request"], subtask=subtask)
+                request = row["request"]
+                routing = (request.get("purpose") or {}).get("new_assignment_routing")
+                decision = None
+                # Only a never-started new assignment can change developer. No provider session or
+                # model selected for the old provider may leak into the replacement request.
+                if (row["kind"] == "DEVELOP" and routing and subtask is not None
+                        and self._blocker(uow, task, row["kind"], subtask) is None and self._available(uow)):
+                    decision = self._routing_decision(uow, task, routing["kind"], suggested=routing.get("suggested"), quota_aware=True)
+                    if decision["mode"] == "OBSERVE":
+                        # Legacy routing pins the queued provider. Shadow evaluation must not change
+                        # that assignment even if the scores/load changed while it waited.
+                        decision["provider"] = request.get("provider")
+                    provider = decision["provider"]
+                    if provider and provider != request.get("provider"):
+                        request = {**request, "provider": provider}
+                        for field in ("resume", "model", "image"):
+                            request.pop(field, None)
+                execution = self.launch(uow, task, row["kind"], request, subtask=subtask)
+                if decision and (execution is not None or request.get("provider") != row["request"].get("provider")):
+                    self._record_routing(uow, task, routing["kind"], decision)
                 if execution is not None:
                     started += 1
                     uow.cur.execute("UPDATE tasks SET launch_suspended_at = NULL WHERE id = %s AND NOT EXISTS "
@@ -1486,14 +1526,22 @@ class Orchestration:
         if task["state"] not in (S.QUEUED, S.RUNNING, S.FIX_REQUIRED):
             raise Conflict(f"{task['key']} is {task['state']}")
         provider = action.get("provider") or subtask["preferred_provider"]
+        suggested = provider
+        new_assignment = subtask["state"] != "FIX_REQUIRED"
         if subtask["state"] == "FIX_REQUIRED" and subtask["developer_provider"]:
             provider = subtask["developer_provider"]  # fixes stay with the developer of the attempt
         else:
-            provider = self._route(uow, task, subtask["kind"], suggested=provider)
+            provider = self._route(uow, task, subtask["kind"], suggested=provider, quota_aware=True)
         if provider is None:
-            raise Conflict("no provider is available")
+            # A new assignment with both agents held must wait without spending a launch or
+            # making the orchestrator retry its decision. launch() records the existing hold.
+            allowed = self._config(uow, task)["agents"]["allowed_providers"]
+            provider = next((p for p in allowed if self._held(uow, p)), None)
+            if provider is None:
+                raise Conflict("no provider is available")
         self._develop(uow, task, subtask, provider, extra=action.get("prompt") or "", epoch=epoch,
-                      kind="FIX" if subtask["state"] == "FIX_REQUIRED" else "DEVELOP")
+                      kind="FIX" if subtask["state"] == "FIX_REQUIRED" else "DEVELOP",
+                      new_assignment=new_assignment, suggested=suggested)
         return f"{subtask['key']} -> {provider}"
 
     # ------------------------------------------------------------ pipeline
@@ -1518,7 +1566,8 @@ class Orchestration:
                 f"(review by {f['reviewer_provider']})" for f in uow.cur.fetchall()[:20]]
 
     def _develop(self, uow: UnitOfWork, task: Row, subtask: Row, provider: str, *, extra: str, epoch: int | None,
-                 kind: str, fresh: bool = False, retry: bool = False) -> Row | None:
+                 kind: str, fresh: bool = False, retry: bool = False,
+                 new_assignment: bool = False, suggested: str | None = None) -> Row | None:
         """Launch a developer execution for a subtask in its workspace (a fresh one for a new attempt)."""
         self._check_plan_approved(uow, self._task(uow, task["id"]))  # no subtask starts before its supervised plan is approved
         self.ui_designs.ensure_approved(uow, self._task(uow, task["id"]),
@@ -1571,6 +1620,9 @@ class Orchestration:
                    "subtask_id": str(subtask["id"]), "lease_epoch": epoch,
                    "purpose": {"subtask": str(subtask["id"]), "kind": kind, "fenced": epoch is not None, "retry": retry,
                                **({"test_environment": services} if services else {})}}
+        routing_policy = ((self._config(uow, task).get("agents") or {}).get("routing") or {}).get("policy")
+        if new_assignment and routing_policy == "MOST_REMAINING_QUOTA":
+            request["purpose"]["new_assignment_routing"] = {"kind": subtask["kind"], "suggested": suggested}
         if task.get("delivery_mode") == "FEATURE":
             # A session is resumed once (executions_one_resume). When its continuation ended before it had a session of
             # its own (cancelled before starting, as in T-10), start fresh in the same workspace instead.

@@ -16,6 +16,7 @@ import re
 from typing import Any
 
 from ho_core.adapters import ADAPTERS
+from ho_core.routing import PROVIDERS, QuotaAvailability, QuotaWindow, quota_availability
 
 from .auth import Principal
 from .context import Context, UnitOfWork
@@ -70,6 +71,17 @@ def record_usage(uow: UnitOfWork, execution: Row, rate_limits: list[dict[str, An
 
 
 QUOTA_FALLBACK_WAIT = timedelta(minutes=30)  # when the provider's own reset time is unknown
+
+
+def routing_quota(uow: UnitOfWork, identity: str, *, now: datetime, max_age_seconds: int) -> dict[str, QuotaAvailability]:
+    """Use the stored provider observations, without the Dashboard's synthetic zero after reset."""
+    uow.cur.execute("SELECT provider, window_kind, used_percent, resets_at, observed_at FROM provider_usage WHERE identity = %s",
+                    (identity,))
+    windows: dict[str, dict[str, QuotaWindow]] = {}
+    for row in uow.cur.fetchall():
+        windows.setdefault(row["provider"], {})[row["window_kind"]] = QuotaWindow(
+            float(row["used_percent"]), row["resets_at"], row["observed_at"])
+    return {p: quota_availability(windows.get(p, {}), now=now, max_age_seconds=max_age_seconds) for p in PROVIDERS}
 
 
 def out_of_credit(uow: UnitOfWork, identity: str) -> dict[str, datetime]:
