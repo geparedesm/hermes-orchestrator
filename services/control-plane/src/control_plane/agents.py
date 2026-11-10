@@ -59,15 +59,22 @@ def record_usage(uow: UnitOfWork, execution: Row, rate_limits: list[dict[str, An
     """Keep the latest usage window a provider reported (never an older observation over a newer one). When it was
     observed: the provider's own time when it gives one (Codex), else when the execution started (Claude's events
     carry none): never later than the truth, so "as of" never overstates freshness."""
-    for window in rate_limits:
+    record_windows(uow, execution["provider"], execution["provider_identity"] or "default", rate_limits,
+                   execution_id=execution["id"], observed_at=execution.get("started_at"))
+
+
+def record_windows(uow: UnitOfWork, provider: str, identity: str, windows: list[dict[str, Any]], *,
+                   execution_id: Any = None, observed_at: datetime | None = None) -> None:
+    """Save operational observations from an execution or an independent probe, with monotonic freshness."""
+    for window in windows:
         uow.cur.execute(
             "INSERT INTO provider_usage (provider, identity, window_kind, used_percent, resets_at, observed_at, execution_id) "
             "VALUES (%s, %s, %s, %s, to_timestamp(%s), coalesce(to_timestamp(%s), %s, now()), %s) "
             "ON CONFLICT (provider, identity, window_kind) DO UPDATE SET "
             "used_percent = EXCLUDED.used_percent, resets_at = EXCLUDED.resets_at, observed_at = EXCLUDED.observed_at, "
             "execution_id = EXCLUDED.execution_id WHERE provider_usage.observed_at <= EXCLUDED.observed_at",
-            (execution["provider"], execution["provider_identity"] or "default", window["window"], window["used_percent"],
-             window["resets_at"], window.get("observed_at"), execution.get("started_at"), execution["id"]))
+            (provider, identity, window["window"], window["used_percent"],
+             window["resets_at"], window.get("observed_at"), observed_at, execution_id))
 
 
 QUOTA_FALLBACK_WAIT = timedelta(minutes=30)  # when the provider's own reset time is unknown
@@ -160,6 +167,9 @@ class Agents:
             if model and model != "unknown" and _MODEL.fullmatch(model):
                 observed_models.setdefault(row["provider"], set()).add(model)
         catalog = model_catalog()
+        uow.cur.execute("SELECT provider, status, last_attempt_at, completed_at, next_attempt_at, failures "
+                        "FROM provider_quota_refresh WHERE identity = %s", (identity,))
+        refresh = {r["provider"]: {k: v for k, v in r.items() if k != "provider"} for r in uow.cur.fetchall()}
         out = []
         for provider in sorted(ADAPTERS):
             windows = usage.get(provider, {})
@@ -175,6 +185,7 @@ class Agents:
             out.append({"provider": provider, "identity": identity, "login": login.get(provider, "UNKNOWN"),
                         "enabled": provider not in off, "status": status, "running": running.get(provider, 0),
                         "session": windows.get("session"), "week": windows.get("week"),
+                        "quota_refresh": refresh.get(provider),
                         "role_models": role_models.get(provider, {}),
                         "model": models.get(provider, {}).get("model"),
                         "model_updated_at": models.get(provider, {}).get("updated_at"),

@@ -10,11 +10,20 @@ OUT=/output/ho
 mkdir -p "$OUT" "$CLAUDE_CONFIG_DIR"
 finish() { printf '{"exit_code": %d, "reason": "%s"}\n' "$1" "$2" > "$OUT/runner.json"; exit "$1"; }
 
-# Subscription token created by `claude setup-token` (scripts/auth-login.sh), mounted read-only.
-token_file=/run/ho-credentials/claude/oauth_token
-[[ -s $token_file ]] || finish 3 credential_missing
-CLAUDE_CODE_OAUTH_TOKEN="$(cat "$token_file")"
-export CLAUDE_CODE_OAUTH_TOKEN
+# Full subscription login, copied into tmpfs. Existing setup-token installations keep working until renewed.
+cred_dir=/run/ho-credentials/claude
+stored="$cred_dir/.credentials.json"
+before=""
+if [[ -s $stored ]]; then
+  install -m 600 "$stored" "$CLAUDE_CONFIG_DIR/.credentials.json"
+  before="$(sha256sum < "$CLAUDE_CONFIG_DIR/.credentials.json")"
+  unset CLAUDE_CODE_OAUTH_TOKEN
+elif [[ -s $cred_dir/oauth_token ]]; then
+  CLAUDE_CODE_OAUTH_TOKEN="$(cat "$cred_dir/oauth_token")"
+  export CLAUDE_CODE_OAUTH_TOKEN
+else
+  finish 3 credential_missing
+fi
 
 # Per-task session store, so a later execution of the same task can resume (--resume).
 if [[ -d /run/ho-sessions ]]; then
@@ -27,4 +36,16 @@ claude "$@" < "$prompt" > "$OUT/events.jsonl"
 rc=$?
 # The result message is the last line; keep it separately so it survives output truncation.
 tail -n 1 "$OUT/events.jsonl" > "$OUT/final.json" 2>/dev/null
+if [[ -n $before && -s $CLAUDE_CONFIG_DIR/.credentials.json && "$(sha256sum < "$CLAUDE_CONFIG_DIR/.credentials.json")" != "$before" ]]; then
+  (
+    flock -w 30 9 || exit 0
+    if [[ -s $stored && "$(sha256sum < "$stored")" == "$before" ]]; then
+      install -m 600 "$CLAUDE_CONFIG_DIR/.credentials.json" "$cred_dir/.credentials.json.new.$$" &&
+        mv -f "$cred_dir/.credentials.json.new.$$" "$stored"
+      echo refreshed > "$OUT/credential.txt"
+    else
+      echo stale > "$OUT/credential.txt"
+    fi
+  ) 9>"$cred_dir/.lock"
+fi
 finish "$rc" cli_exited

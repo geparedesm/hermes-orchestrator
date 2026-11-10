@@ -211,7 +211,9 @@ and weekly windows. Both agents need complete observations from the last 15 minu
 to the existing preferences and load scores. Queued new assignments recheck before execution; running work and fixes
 keep their developer. `agents.routing` configures enforcement, observation mode, or rollback to scored selection.
 Older pinned configurations retain their previous behavior. See [quota-aware routing](docs/design/quota-aware-routing.md)
-for configuration, audit events, and measurement limits.
+for configuration, audit events, and measurement limits. [Independent quota refresh](docs/design/quota-refresh.md)
+keeps readings current every five minutes while work is pending or active; Claude needs a profile-enabled login
+(`make auth-claude`). `ho quota status` shows refresh status and `ho quota refresh` requests an account-only reading.
 
 ## 11. Monitoring
 

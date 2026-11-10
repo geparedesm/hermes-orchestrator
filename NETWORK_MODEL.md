@@ -15,6 +15,11 @@
 
 ## 2. Topology
 
+Independent quota probes use the same isolated internal-network/provider-only-proxy topology as agents. They mount
+one provider identity's credential volume, have no project or service network, and cannot reach platform services or
+the Docker socket. Their only requests are the pinned CLIs' account/usage reads. They expire after 90 seconds;
+Agent Manager removes abandoned probes and their private networks. See [quota refresh](docs/design/quota-refresh.md).
+
 ```mermaid
 flowchart TB
     INET((Internet))

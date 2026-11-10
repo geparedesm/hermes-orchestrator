@@ -80,6 +80,8 @@ def build_services(ctx: Context, auth: Authenticator, *, run_scheduler: bool = T
     tasks = Tasks(ctx, projects, approvals)
     executions = Executions(ctx, tasks)
     scheduler = Scheduler(ctx, tasks, approvals, dispatcher, executions)
+    from .quota_refresh import QuotaRefresh
+    scheduler.hooks.append(QuotaRefresh(ctx).background_tick)
     credentials = Credentials(ctx, tasks, executions)
     git = GitChanges(ctx, tasks, approvals, executions)
     verifications = Verifications(ctx, tasks, executions, git)
@@ -921,6 +923,15 @@ def create_app(services: Services) -> FastAPI:
     def agents_view(_: Identity = Depends(identity)) -> dict[str, Any]:
         with ctx.unit_of_work() as uow:
             return jsonable({"agents": services.agents.view(uow)})
+
+    @app.post("/v1/agents/quota-refresh")
+    def refresh_agent_quotas(who: Identity = Depends(identity)) -> dict[str, Any]:
+        if who.name != "operator":
+            raise Forbidden("only the operator can request quota refresh")
+        from .quota_refresh import QuotaRefresh
+        result = QuotaRefresh(ctx).tick(requested=True)
+        with ctx.unit_of_work() as uow:
+            return jsonable({**result, "agents": services.agents.view(uow)})
 
     @app.post("/v1/agents/{provider}/model")
     def agent_model(provider: str, body: AgentModelUpdate, who: Principal = Depends(principal)) -> dict[str, Any]:

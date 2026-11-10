@@ -15,6 +15,32 @@ ho health                  # control plane readiness
 
 `GET /metrics` (operator token) serves Prometheus text: tasks by state, queue length, executions, provider tokens, approvals, notifications, and component health. Nothing in v1 requires Prometheus; point a scraper at it if you run one.
 
+## Provider quota readings
+
+`ho quota status` shows the last session/week observations and independent refresh status per provider.
+`ho quota refresh` requests a bounded account-only reading, respecting an existing attempt and failure backoff.
+The scheduler refreshes every five minutes while work is runnable or an agent execution is active, including when
+the other provider is idle. `scheduler.quota_refresh.enabled: false` disables independent polling; routing then uses
+execution observations and the normal scored fallback when quota is unknown. Interval and maximum backoff are
+`interval_seconds` (default 300) and `max_backoff_seconds` (1800).
+
+Claude installations using the older setup-token need one profile-enabled subscription login:
+
+```bash
+make auth-claude IDENTITY=default
+docker compose exec -T control-plane ho quota refresh
+```
+
+Complete the provider's browser flow in your terminal; do not paste credentials into chat. The pinned CLI stores its
+saved login only in the provider credential volume. Bootstrap verification uses account status and no model request.
+Existing token-based execution continues until renewal; `PROFILE_REQUIRED` on a quota probe does not revoke inference
+access. Successful login clears old quota data and fences in-flight reads before polling resumes.
+
+Failed quota queries keep their previous timestamps and retry with bounded backoff. Check `quota_refresh.status`
+(`OK`, `PROFILE_REQUIRED`, `AUTH_REQUIRED`, `UNAVAILABLE`, `TIMEOUT`, `BUSY`, or `INVALID_RESPONSE`) in the status output.
+Quota errors leave tasks able to use scored selection after the bounded refresh attempt; fixes and cross-review
+preserve their provider. These are relative allowance percentages, not a currency balance.
+
 ## Backups
 
 `make backup` (or `scripts/backup.sh`) writes `backups/<UTC timestamp>/`:

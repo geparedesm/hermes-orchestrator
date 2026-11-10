@@ -56,6 +56,10 @@ def main(argv: list[str] | None = None) -> int:
     project.add_parser("scan", help="read-only onboarding scan and configuration proposal").add_argument("slug")
     project.add_parser("unregister", help="remove from the registry; never deletes files").add_argument("slug")
 
+    quota = sub.add_parser("quota", help="provider quota readings and independent refresh status").add_subparsers(dest="cmd", required=True)
+    quota.add_parser("status")
+    quota.add_parser("refresh", help="request account-only quota reads, respecting active claims and failure backoff")
+
     task = sub.add_parser("task").add_subparsers(dest="cmd", required=True)
     t = task.add_parser("create")
     t.add_argument("project")
@@ -315,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
         if cmd == "status":
             return _call("GET", "/v1/credentials")
         return _call("POST", f"/v1/credentials/{args.provider}/{args.identity}/ready", mutate=True)
+    if g == "quota":
+        return _call("POST", "/v1/agents/quota-refresh", mutate=True) if cmd == "refresh" else _call("GET", "/v1/agents")
     if g == "execution":
         if cmd == "run":
             body = execution_body({"command": ["bash", "-c", args.command]})

@@ -27,9 +27,10 @@ class AgentManagerClient:
         self._client = client or httpx.Client(base_url=base_url, timeout=120)
         self._headers = {"Authorization": f"Bearer {token}"}
 
-    def _call(self, method: str, path: str, body: Any = None) -> Any:
+    def _call(self, method: str, path: str, body: Any = None, *, timeout: float | None = None) -> Any:
         try:
-            response = self._client.request(method, path, json=body, headers=self._headers)
+            kwargs = {"timeout": timeout} if timeout is not None else {}
+            response = self._client.request(method, path, json=body, headers=self._headers, **kwargs)
         except httpx.HTTPError as exc:
             raise AgentManagerError(0, "unavailable", str(exc)) from exc
         if response.status_code >= 400:
@@ -90,6 +91,9 @@ class AgentManagerClient:
 
     def images(self) -> dict[str, Any]:
         return self._call("GET", "/v1/images")
+
+    def quota(self, provider: str, identity: str) -> dict[str, Any]:
+        return self._call("POST", f"/v1/providers/{provider}/quota", {"identity": identity}, timeout=60)
 
     def ping(self) -> bool:
         try:

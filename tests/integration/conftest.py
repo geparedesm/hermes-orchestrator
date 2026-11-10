@@ -140,6 +140,8 @@ def projects_root(tmp_path: Path) -> Path:
 @pytest.fixture
 def services(request, database: str, projects_root: Path, tmp_path: Path) -> Iterator[Services]:
     platform = load_platform_config(ROOT / "config", "mac-m2-pro")
+    # Existing suites exercise passive/scored fallback. Dedicated quota-refresh tests enable independent probes.
+    platform["scheduler"]["quota_refresh"]["enabled"] = False
     platform["platform"]["projects_root_host"] = str(projects_root)
     git_client = TestClient(create_git_app(projects_root, GIT_TOKEN, MERGE_KEY))
     db = Database(database, max_size=5)

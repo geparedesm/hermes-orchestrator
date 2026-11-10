@@ -29,9 +29,10 @@ operators can observe first before enabling it for their projects.
 
 ## Quota calculation and unavailable information
 
-The source is the existing `provider_usage` table, scoped to `Context.provider_identity`. Only numeric operational
-observations collected by the provider adapters are used. The router makes no external calls, starts no measurement
-executions, and never reads credential contents or raw provider output.
+The source is `provider_usage`, scoped to `Context.provider_identity`. Numeric operational observations come from
+provider adapters and [independent account-only refreshes](quota-refresh.md). The router itself makes no external
+calls, starts no measurement executions, and never reads credential contents or raw provider output. New assignments
+can briefly wait in the pending-launch queue while a due independent refresh finishes, then use its result or fallback.
 
 For each provider, both session and week observations must exist, be no older than `max_age_seconds`, not be dated
 in the future, and have reset times still in the future. Availability is:
@@ -45,9 +46,10 @@ An expired reset does not become a measured zero consumption. Missing, stale, in
 unknown availability. If either eligible provider has unknown availability, both are compared using the existing
 scored router. No partial-window comparison or invented allowance is allowed.
 
-The existing adapters currently normalize session/week windows only. Measurements arrive at execution end (Claude's
-observation conservatively uses the execution start). Long runs and usage from other clients can therefore make
-observations incomplete or stale. Model-specific quota pools are not represented: validate observation coverage for
+Execution measurements arrive at execution end (Claude's observation conservatively uses the execution start).
+Independent probes maintain observations during long runs and when a provider is idle; Claude needs a saved login
+with profile access. Probe failures and usage from other clients can still make observations incomplete or stale.
+Model-specific quota pools are not represented: validate observation coverage for
 the selected models in real executions before relying on enforcement; use OBSERVE or SCORED when the reported global
 windows do not describe those models' effective limits. This change does not invent a provider quota endpoint.
 

@@ -43,9 +43,9 @@ _INPUT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 MAX_INPUT_BYTES = 512 * 1024
 PROVIDERS = ("claude", "codex")
 # Where each provider's credential volume is mounted, and whether the runner may write
-# to it: Codex refreshes its ChatGPT login during use; Claude's setup-token does not refresh.
+# to it: both providers can refresh a saved OAuth login. Legacy Claude setup-token remains supported.
 CREDENTIAL_MOUNT = "/run/ho-credentials"
-CREDENTIAL_WRITABLE = {"claude": False, "codex": True}
+CREDENTIAL_WRITABLE = {"claude": True, "codex": True}
 SESSION_MOUNT = "/run/ho-sessions"
 CACHE_MOUNT = "/cache"
 # Toolchain profile -> (cache name, variable pointing the package manager at it) (MASTER_SPEC section 71).
