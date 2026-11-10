@@ -8,7 +8,13 @@
 # (test_environment in .hermes/project.yaml): HO_ODOO_DB_HOST (default postgres), HO_ODOO_DB_USER and
 # HO_ODOO_DB_PASSWORD (default odoo, test-only values of that throwaway service).
 #
-# Fails when the module is not discovered, is not installed afterwards, no test ran, or any test failed.
+# Browser tests (HttpCase tours): Odoo gives headless Chromium a fixed 10 s to open its DevTools port and otherwise
+# SKIPS the test. On a loaded machine (an agent, Odoo and Chromium sharing a 2 GiB worker) a cold start can take
+# longer, so Odoo runs here with that wait raised to HO_ODOO_BROWSER_WAIT_SECONDS (default 60); a browser test that is
+# still skipped because Chromium did not start fails the run instead of passing silently.
+#
+# Fails when the module is not discovered, is not installed afterwards, no test ran, any test failed, or a browser
+# test was skipped because Chromium did not start.
 set -euo pipefail
 
 module="${1:-}"
@@ -43,9 +49,25 @@ for _ in $(seq 1 60); do
 done
 pg_isready -q -h "$host" -U "$user" || { echo "ho-odoo-test: PostgreSQL at $host is not reachable" >&2; exit 1; }
 
+browser_wait="${HO_ODOO_BROWSER_WAIT_SECONDS:-60}"
+[[ "$browser_wait" =~ ^[0-9]{1,3}$ && "$browser_wait" -ge 10 ]] \
+  || { echo "ho-odoo-test: HO_ODOO_BROWSER_WAIT_SECONDS must be 10-999" >&2; exit 2; }
+
 log="$work/odoo.log"
 set +e
-"$odoo_home/venv/bin/python" "$odoo_home/odoo-bin" \
+# odoo-bin is `odoo.cli.main()`; this runs the same entry point after raising the Chromium start wait, which
+# odoo.tests.common reads when a browser test spawns Chromium (CHECK_BROWSER_SLEEP = 0.1 s per iteration).
+"$odoo_home/venv/bin/python" -c '
+import sys
+sys.path.insert(0, sys.argv.pop(1))  # where odoo-bin lives, as when it runs as a script
+wait = float(sys.argv.pop(1))
+import odoo.cli
+import odoo.tests.common as common
+common.CHECK_BROWSER_ITERATIONS = int(wait / common.CHECK_BROWSER_SLEEP)
+common.BROWSER_WAIT = common.CHECK_BROWSER_ITERATIONS * common.CHECK_BROWSER_SLEEP
+sys.argv[0] = "odoo-bin"
+odoo.cli.main()
+' "$odoo_home" "$browser_wait" \
   --addons-path="$odoo_home/odoo/addons,$work/addons" \
   --data-dir="$work/data" \
   --db_host="$host" --db_user="$user" --db_password="$PGPASSWORD" \
@@ -62,6 +84,9 @@ grep -q "invalid module names, ignored: $module\|module $module: not installable
 state="$(psql -h "$host" -U "$user" -d "$database" -tAc "SELECT state FROM ir_module_module WHERE name = '$module'" 2>/dev/null || true)"
 [[ "$state" == "installed" ]] || fail "module $module is '${state:-missing}' after the run, not installed"
 grep -Eq "(ERROR|CRITICAL) .*odoo\.(modules|tests|addons)" "$log" && fail "errors were logged while installing or testing $module"
+# Odoo turns a browser that never started into a skipped test; a skipped tour proves nothing, so the run fails.
+grep -Eq "Failed to detect chrome devtools port|Chrome executable not found" "$log" \
+  && fail "a browser test was skipped because Chromium did not start within ${browser_wait}s"
 summary="$(grep -Eo "[0-9]+ failed, [0-9]+ error\(s\) of [0-9]+ tests" "$log" | tail -1 || true)"
 [[ -n "$summary" ]] || fail "no test of $module ran"
 [[ "$summary" =~ ^([0-9]+)\ failed,\ ([0-9]+)\ error\(s\)\ of\ ([0-9]+)\ tests$ ]] || fail "unreadable test summary: $summary"

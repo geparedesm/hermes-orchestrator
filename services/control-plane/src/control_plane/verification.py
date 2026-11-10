@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -41,7 +42,7 @@ from .context import Context, UnitOfWork
 from .db import Row, jsonb
 from .errors import BadRequest, Conflict
 from .events import record_event
-from .executions import TERMINAL, ExecutionRequest, Executions
+from .executions import CAPACITY_WAIT, TERMINAL, ExecutionRequest, Executions
 from . import testenv
 from .gitops import CONTROL_PLANE, GitChanges
 from .tasks import Tasks
@@ -129,6 +130,8 @@ class Verifications:
                     "startup_timeout": int(test_env.get("startup_timeout_seconds", 180))})
             except AgentManagerError as exc:
                 with self.ctx.unit_of_work() as uow:
+                    if exc.code == "capacity_exceeded" and self._wait_for_capacity(uow, verification_id, exc.message):
+                        return
                     self._fail(uow, verification_id, f"test services did not start: {exc.message}")
                 return
         try:
@@ -151,6 +154,22 @@ class Verifications:
                         uow.after_commit.append(lambda: self._stop_services(key))
                     return
             self.executions.pause_for_budget(task["key"], str(exc))
+
+    def _wait_for_capacity(self, uow: UnitOfWork, verification_id: UUID, reason: str) -> bool:
+        """Test services that do not fit in Docker memory yet wait like an execution does (CAPACITY_WAIT, counted from
+        the verification's creation): the verification stays PREPARING and recovery launches it again. True while it
+        waits; after that the caller fails it as before."""
+        row, task, _, _ = self._load(uow, verification_id, lock=True)
+        if row["state"] != "PREPARING" or datetime.now(timezone.utc) - row["created_at"] >= CAPACITY_WAIT:
+            return False
+        uow.cur.execute("SELECT 1 FROM events WHERE task_id = %s AND type = 'LAUNCH_WAITING' AND data->>'verification_id' = %s "
+                        "LIMIT 1", (task["id"], str(verification_id)))
+        if uow.cur.fetchone() is None:
+            record_event(uow.cur, "LAUNCH_WAITING", actor="control-plane", project_id=task["project_id"], task_id=task["id"],
+                         summary=f"test services wait for Docker memory: {reason}"[:300],
+                         data={"verification_id": str(verification_id)}, pending=uow.events)
+        log.info("verification %s waits for Docker memory: %s", verification_id, reason)
+        return True
 
     def relaunch_waiting(self, uow: UnitOfWork, task: Row) -> None:
         """Launch, after this transaction, verifications of `task` left PREPARING (for example by an exhausted budget)."""

@@ -82,7 +82,12 @@ creation appears in Needs you, and the child appears under its parent.
   - the module was not discovered;
   - the module is not installed afterwards (checked in `ir_module_module`);
   - no test ran;
-  - any test failed or errored.
+  - any test failed or errored;
+  - a browser test (`HttpCase` tour) was skipped because Chromium did not start.
+- Odoo gives headless Chromium a fixed 10 s to open its DevTools port and otherwise skips the browser test. A cold
+  start in a loaded 2 GiB worker can take longer (T-21's tour was skipped three times), so `ho-odoo-test` runs Odoo's
+  own entry point with that wait raised to `HO_ODOO_BROWSER_WAIT_SECONDS` (default 60), and a tour that is still
+  skipped fails the run: a skipped tour proves nothing.
 
 ## Quality Gate checks for Odoo modules
 
