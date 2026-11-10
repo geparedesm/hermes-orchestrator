@@ -149,7 +149,7 @@ class DockerOps:
         agents = [c for c in workers if c.labels.get("ho.role") in _AGENT_ROLES]
         used = sum(int(c.attrs["HostConfig"].get("Memory") or 0) for c in self.client.containers.list(filters={"label": "ho.managed=true"}))
         total = int(self.client.info()["MemTotal"])
-        reserve = int(float(self.platform["machine"].get("docker_memory_reserve_gb", 2)) * 1024**3)
+        reserve = self._memory_reserve()
         return {
             "agent_workers": len(agents),
             "max_agent_workers": int(self.platform["machine"]["max_agent_workers"]),
@@ -158,6 +158,18 @@ class DockerOps:
             "memory_available_for_executions": max(0, total - reserve - used),
             "docker_memory_total": total,
         }
+
+    def _memory_reserve(self) -> int:
+        return int(float(self.platform["machine"].get("docker_memory_reserve_gb", 2)) * 1024**3)
+
+    def _memory_for_environment(self, compose_project: str) -> int:
+        """Docker memory a task's test services may use. Its own services, still up from an earlier agent or
+        verification, are reused or replaced by the next `up` of the same Compose project, so their memory is not
+        counted against it (T-22 blocked on its own services' 1 GiB)."""
+        own = sum(int(c.attrs["HostConfig"].get("Memory") or 0) for c in self.client.containers.list(
+            filters={"label": [f"com.docker.compose.project={compose_project}", "ho.managed=true"]}))
+        cap = self.capacity()
+        return max(0, cap["docker_memory_total"] - self._memory_reserve() - (cap["memory_limit_bytes_in_use"] - own))
 
     def _check_capacity(self, plan: ContainerPlan) -> None:
         cap = self.capacity()
@@ -578,7 +590,7 @@ class DockerOps:
                                  limits=compose.Limits(int(float(limits["memory_gb"]) * 1024**3), float(limits["cpus"])))
         needed = sum(int(s["mem_limit"]) for s in model["services"].values())
         with self._lock:
-            available = self.capacity()["memory_available_for_executions"]
+            available = self._memory_for_environment(name)
             if needed > available:
                 raise CapacityExceeded(f"test services need {needed // 1024**2} MiB, {available // 1024**2} MiB available")
             self._ensure_network(network, {"ho.managed": "true", "ho.kind": "network", "ho.task": task, "ho.project": project},

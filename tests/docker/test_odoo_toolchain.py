@@ -41,12 +41,12 @@ def database():
         network.remove()
 
 
-def run(database, workspace: Path, module: str) -> tuple[int, str]:
+def run(database, workspace: Path, module: str, env: dict[str, str] | None = None) -> tuple[int, str]:
     client, network, host = database
     container = client.containers.run(
         _image(), ["ho-odoo-test", module], detach=True, network=network.name, user="10001:10001",
-        environment={"HO_ODOO_DB_HOST": host}, volumes={str(workspace): {"bind": "/workspace", "mode": "ro"}},
-        read_only=True, tmpfs={"/tmp": "size=512m"}, cap_drop=["ALL"], security_opt=["no-new-privileges"])
+        environment={"HO_ODOO_DB_HOST": host, **(env or {})}, volumes={str(workspace): {"bind": "/workspace", "mode": "ro"}},
+        read_only=True, tmpfs={"/tmp": "size=512m", "/home/agent": "size=256m,uid=10001,gid=10001"}, cap_drop=["ALL"], security_opt=["no-new-privileges"])
     try:
         status = container.wait(timeout=900)["StatusCode"]
         return status, container.logs().decode(errors="replace")
@@ -78,6 +78,47 @@ def test_a_module_odoo_cannot_load_fails_the_run(database, tmp_path):
     manifest.write_text(manifest.read_text().replace('"installable": True', '"installable": False'))
     status, logs = run(database, workspace, "ho_sample")
     assert status != 0 and "FAILED" in logs, logs[-3000:]
+
+
+BROWSER_TEST = """from odoo.tests import HttpCase, tagged
+
+
+@tagged("post_install", "-at_install")
+class TestBrowser(HttpCase):
+    def test_browser_starts(self):
+        self.browser_js("/web/login", "console.log('test successful')")
+"""
+
+
+def _with_slow_browser(tmp_path: Path) -> Path:
+    """The sample module plus an HttpCase browser test, and a Chromium that needs 15 s to start (a loaded machine)."""
+    workspace = tmp_path / "ho_sample"
+    shutil.copytree(MODULE, workspace)
+    manifest = workspace / "__manifest__.py"
+    manifest.write_text(manifest.read_text().replace('"depends": ["base"]', '"depends": ["base", "web"]'))
+    (workspace / "tests" / "test_browser.py").write_text(BROWSER_TEST)
+    tests_init = workspace / "tests" / "__init__.py"
+    tests_init.write_text(tests_init.read_text() + "from . import test_browser\n")
+    slow = workspace / "slow-chromium"
+    slow.write_text("#!/bin/sh\nsleep 15\nexec /usr/bin/chromium \"$@\"\n")
+    slow.chmod(0o755)
+    return workspace
+
+
+def test_a_slow_browser_start_still_runs_the_browser_test(database, tmp_path):
+    """T-21: Odoo skips a browser test when Chromium needs more than 10 s; ho-odoo-test waits up to 60 s."""
+    workspace = _with_slow_browser(tmp_path)
+    status, logs = run(database, workspace, "ho_sample", {"ODOO_BROWSER_BIN": "/workspace/slow-chromium"})
+    assert status == 0, logs[-3000:]
+    assert "test successful" in logs and "devtools port" not in logs
+
+
+def test_a_browser_test_skipped_because_chromium_did_not_start_fails_the_run(database, tmp_path):
+    workspace = _with_slow_browser(tmp_path)
+    status, logs = run(database, workspace, "ho_sample",
+                       {"ODOO_BROWSER_BIN": "/workspace/slow-chromium", "HO_ODOO_BROWSER_WAIT_SECONDS": "10"})
+    assert status != 0, logs[-3000:]
+    assert "a browser test was skipped because Chromium did not start within 10s" in logs
 
 
 def test_a_workspace_without_a_module_is_refused(database, tmp_path):

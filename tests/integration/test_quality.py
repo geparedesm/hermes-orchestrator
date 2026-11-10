@@ -140,6 +140,36 @@ def test_environment_failure_fails_the_verification(api, services, repo, agents,
     assert "TEST_FAILED" in events(api, task)
 
 
+def test_test_services_waiting_for_memory_keep_the_verification_preparing(api, services, repo, agents, task):
+    """T-22: test services that do not fit in Docker memory yet wait, as executions do, instead of failing the task."""
+    from control_plane.agentmgr import AgentManagerError
+
+    agents.environment_error = AgentManagerError(409, "capacity_exceeded", "test services need 1024 MiB, 625 MiB available")
+    integrate(api, services, repo, task, {"app.py": "x = 3\n"})
+    verification = latest_verification(services, task)
+    assert verification["state"] == "PREPARING" and not verification["execution_ids"]
+    services.verifications._launch(verification["id"])  # still no memory: one wait event, not one per attempt
+    assert events(api, task).count("LAUNCH_WAITING") == 1 and "TEST_FAILED" not in events(api, task)
+
+    agents.environment_error = None  # memory freed: the next launch (recovery's) starts the services and runners
+    services.verifications._launch(verification["id"])
+    assert latest_verification(services, task)["state"] == "RUNNING"
+    assert finish_verification(services, agents, task)["state"] == "PASSED"
+
+
+def test_test_services_that_never_fit_fail_after_the_capacity_wait(api, services, repo, agents, task):
+    from control_plane.agentmgr import AgentManagerError
+
+    agents.environment_error = AgentManagerError(409, "capacity_exceeded", "test services need 4096 MiB, 625 MiB available")
+    integrate(api, services, repo, task, {"app.py": "x = 3\n"})
+    verification = latest_verification(services, task)
+    with services.ctx.db.transaction() as cur:
+        cur.execute("UPDATE verifications SET created_at = now() - interval '31 minutes' WHERE id = %s", (verification["id"],))
+    services.verifications._launch(verification["id"])
+    verification = latest_verification(services, task)
+    assert verification["state"] == "ERROR" and "625 MiB available" in verification["error"]
+
+
 # ---------------------------------------------------------------- Quality Gate
 
 

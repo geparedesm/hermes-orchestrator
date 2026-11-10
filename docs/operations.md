@@ -96,8 +96,11 @@ Every Compose service has a memory and CPU limit (`compose.yaml`; override with 
 Executions are sized by the machine profile (`config/<machine>.yaml`, or the untracked `config/local.yaml` for one
 host): `resource_profiles` for agents, `runners` for test and browser runs. Agent Manager starts an execution only if
 its memory limit fits in `Docker total - docker_memory_reserve_gb - limits of the running executions`; otherwise the
-execution waits up to 30 minutes for memory, then fails with CAPACITY. Size the reserve to what really runs outside
-executions: the platform services (about 1 GB in use), other containers on the host, and the host itself.
+execution waits up to 30 minutes for memory, then fails with CAPACITY. A verification's test services wait the same
+way (the verification stays PREPARING, recovery launches it again, one `LAUNCH_WAITING` event) and only then fail it;
+a task's own test services still running from its agents do not count against their replacement. Size the reserve
+to what really runs outside executions: the platform services (about 1 GB in use), other containers on the host, and
+the host itself.
 
 On a small Linux server (8 GB) shared with other services, start from:
 
