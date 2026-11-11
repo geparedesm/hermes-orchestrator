@@ -220,6 +220,14 @@ def test_cross_review_must_come_from_another_provider(api, services, repo, agent
     assert api.post(f"/v1/tasks/{task}/reviews", {"provider": "codex"}).status_code == 201
 
 
+def test_reviewer_is_told_pinned_commands_run_in_verification(api, services, repo, agents, task):
+    # A read-only reviewer cannot run a build that writes files (compileall); it must not report that as unmet (T-1).
+    integrate(api, services, repo, task, {"app.py": "x = 2\n"})
+    execution = review(api, services, agents, task)
+    prompt = agents.specs[execution["id"]]["assignment"]["prompt"]
+    assert "pinned commands" in prompt and "is not an unmet requirement" in prompt
+
+
 def test_sensitive_change_with_test_gaps_needs_an_explicit_approval(api, services, repo, agents, task):
     integrate(api, services, repo, task, {"billing/charge.py": "def charge(): pass\n", "requirements.txt": "stripe\n"})
     verification = latest_verification(services, task)

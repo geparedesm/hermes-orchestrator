@@ -414,6 +414,10 @@ class Reviews:
             "rendered, a pixel comparison with design images, and clicking through it in a browser cannot be checked in "
             "this environment: they are not unmet requirements or findings. List them in the summary under "
             "'For the person to check:'; a person tests them in the preview before the merge.",
+            "The project's pinned commands (install, build, lint, typecheck, test, security) are run by the platform's "
+            "verification of the integrated change, and the Quality Gate checks their results. This workspace is "
+            "read-only: a pinned command you cannot run here (for example because it writes files) is not an unmet "
+            "requirement or a finding. Mention it in the summary instead.",
         ])
         if task.get("delivery_mode") == "FEATURE":
             from .delivery import feature_context
