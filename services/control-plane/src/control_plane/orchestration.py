@@ -2032,6 +2032,11 @@ class Orchestration:
                 needed = required_reviewer_set(self.reviews.developer_providers(uow, task))
                 if not needed and not done:  # no agent developed the change: the fallback reviewer, as in _on_verification
                     needed = {self._route(uow, task, "IMPLEMENT") or "claude"}
+                if not needed - done:
+                    # Every required reviewer already reviewed this commit (back in REVIEW on an unchanged commit, e.g.
+                    # after a budget pause): no review will finish to move it on, so it moves on now (T-1).
+                    self._integration_review_recorded(uow, task)
+                    continue
                 for provider in sorted(needed - done):
                     self._integration_review_failed(uow, task_id, provider, f"no integration review by {provider} was running")
         return len(stuck) + len(waiting)
@@ -2334,6 +2339,10 @@ class Orchestration:
             self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.MERGE,
                                            reason="requirements revised")
             self._move(uow, task, S.RUNNING, reason="requirements revised")
+        elif S(task["state"]) in (S.TESTING, S.REVIEW, S.QUALITY_GATE):
+            # The integrated change answers the previous version, and the orchestrator only steps in STEP_STATES:
+            # without this the revision waited, unplanned, behind reviews of the old change (T-1).
+            self._move(uow, task, S.FIX_REQUIRED, reason="requirements revised: impact analysis")
         return {"task": task_key, "requirements": version}
 
     # ------------------------------------------------------------ inspection

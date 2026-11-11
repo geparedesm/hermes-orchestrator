@@ -800,6 +800,28 @@ def test_a_lost_integration_review_is_requested_again(api, services, agents, rep
     assert [r["id"] for r in active(services, task, "REVIEWER")] == [again["id"]]  # still one reviewer
 
 
+def test_review_with_every_reviewer_done_moves_on_to_the_gate(api, services, agents, repo, task):
+    """T-1: back in REVIEW on an unchanged commit (budget pause) with every review already recorded, nothing moved it on."""
+    review = _to_integration_review(services, agents, repo, task)
+    review_verdict(services, agents, review)
+    assert state(api, task) != "REVIEW"
+    with services.ctx.db.transaction() as cur:  # stand-in: the task returned to REVIEW after a budget raise
+        cur.execute("UPDATE tasks SET state = 'REVIEW', updated_at = now() - interval '5 minutes' WHERE key = %s", (task,))
+    services.orchestration.heal_reviews()
+    assert state(api, task) != "REVIEW" and not active(services, task, "REVIEWER")  # gated, no duplicate review
+    assert q(services, "SELECT count(*) AS n FROM events e JOIN tasks t ON t.id = e.task_id WHERE t.key = %s "
+             "AND e.type = 'QUALITY_GATE_EVALUATED'", task)[0]["n"] == 2
+
+
+def test_a_revision_during_the_integration_review_is_planned(api, services, agents, repo, task):
+    """T-1: a revision while in REVIEW waited unplanned, since the orchestrator only steps in STEP_STATES."""
+    _to_integration_review(services, agents, repo, task)
+    assert api.post(f"/v1/tasks/{task}/revise", {"text": "Also greet in Spanish."}).status_code in (200, 201)
+    assert state(api, task) == "FIX_REQUIRED"
+    services.scheduler.run_once()
+    assert active(services, task, "ORCHESTRATOR")  # the impact analysis runs
+
+
 def test_accepted_work_still_integrates_after_a_resolution_that_could_not_start(api, services, agents, repo, task):
     """T-53: the resolution of a conflict was refused for budget, yet its workspace swap was kept; once the budget was
     raised, integration found "no committed work" although both subtasks were accepted."""
