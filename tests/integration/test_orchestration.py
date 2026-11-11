@@ -800,6 +800,59 @@ def test_a_lost_integration_review_is_requested_again(api, services, agents, rep
     assert [r["id"] for r in active(services, task, "REVIEWER")] == [again["id"]]  # still one reviewer
 
 
+def _back_in_review(services, task) -> None:
+    """Stand-in for a retry that integrated the same commit again and verified it: TESTING -> REVIEW, a while ago."""
+    q(services, "UPDATE tasks SET state = 'REVIEW', updated_at = now() - interval '5 minutes' WHERE key = %s", task)
+    q(services, "INSERT INTO events (project_id, task_id, type, actor, summary, data) SELECT project_id, id, "
+      "'TASK_STATE_CHANGED', 'orchestration', 'TESTING -> REVIEW', '{\"from\": \"TESTING\", \"to\": \"REVIEW\"}' "
+      "FROM tasks WHERE key = %s", task)
+
+
+def test_a_retry_that_integrates_the_same_commit_reviews_it_again(api, services, agents, repo, task):
+    """T-1 (commercial-properties): a retry integrated the same commit, which every reviewer had already reviewed; no
+    review was missing, so none was requested, and the task waited in REVIEW for hours with nothing running."""
+    review = _to_integration_review(services, agents, repo, task)
+    review_verdict(services, agents, review, {**REVIEW, "verdict": "blocked", "requirements_met": False})
+    assert state(api, task) != "REVIEW"
+    _back_in_review(services, task)
+    services.orchestration.heal_reviews()
+    [again] = active(services, task, "REVIEWER")  # the earlier verdict does not count for this pass
+    assert again["id"] != review["id"] and again["subtask_id"] is None
+    review_verdict(services, agents, again)
+    assert state(api, task) != "REVIEW"
+    [evaluation] = q(services, "SELECT e.* FROM quality_gate_evaluations e JOIN tasks t ON t.id = e.task_id WHERE t.key = %s "
+                               "ORDER BY evaluated_at DESC LIMIT 1", task)
+    assert next(r for r in evaluation["requirements"] if r["name"] == "cross_review")["status"] == "PASS"  # the new verdict
+
+
+def test_reviews_recorded_while_the_task_waited_move_it_to_the_gate(api, services, agents, repo, task):
+    """Every review of this pass was recorded but its handler saw the task elsewhere: the heal evaluates the gate
+    instead of leaving the task in REVIEW."""
+    review = _to_integration_review(services, agents, repo, task)
+    q(services, "UPDATE tasks SET state = 'PAUSED' WHERE key = %s", task)  # stand-in: paused while the review ran
+    review_verdict(services, agents, review)
+    q(services, "UPDATE tasks SET state = 'REVIEW', updated_at = now() - interval '5 minutes' WHERE key = %s", task)
+    services.orchestration.heal_reviews()
+    assert state(api, task) != "REVIEW"
+    assert active(services, task, "REVIEWER") == []  # nothing reviewed twice
+    [row] = q(services, "SELECT count(*) AS n FROM quality_gate_evaluations e JOIN tasks t ON t.id = e.task_id "
+                        "WHERE t.key = %s", task)
+    assert row["n"] == 1
+
+
+def test_requirements_revised_during_review_go_back_to_the_orchestrator(api, services, agents, repo, task):
+    """T-1 (commercial-properties): a revision made in REVIEW was never analysed (the orchestrator only steps in
+    PLANNING/QUEUED/RUNNING/FIX_REQUIRED), and the old requirements could have reached READY_FOR_MERGE."""
+    review = _to_integration_review(services, agents, repo, task)
+    assert api.post(f"/v1/tasks/{task}/revise", {"text": "Also show the QR expiry time"}).status_code == 200
+    assert state(api, task) == "FIX_REQUIRED"
+    review_verdict(services, agents, review)  # the review in flight finds the task moved on
+    assert state(api, task) == "FIX_REQUIRED"
+    services.scheduler.run_once()
+    [execution] = active(services, task, "ORCHESTRATOR")
+    assert "Also show the QR expiry time" in agents.specs[str(execution["id"])]["inputs"]["prompt.md"]
+
+
 def test_accepted_work_still_integrates_after_a_resolution_that_could_not_start(api, services, agents, repo, task):
     """T-53: the resolution of a conflict was refused for budget, yet its workspace swap was kept; once the budget was
     raised, integration found "no committed work" although both subtasks were accepted."""
@@ -948,6 +1001,34 @@ def test_a_failed_gate_s_finding_texts_reach_the_orchestrator_and_the_fix(api, s
     developer = agents.specs[str(dev["id"])]["inputs"]["prompt.md"]
     assert "## Open findings from the last Quality Gate evaluation" in developer
     assert "copy() raises AccessError" in developer
+
+
+def test_a_gate_failed_by_a_blocked_review_shows_its_findings(api, services, agents, repo, task):
+    """T-1 (commercial-properties): the gate failed on "cross_review: blocked by codex" over two MEDIUM findings; the
+    orchestrator saw no finding text and blocked the task as one only a person could fix."""
+    plan_and_start(services, agents, task)
+    develop(services, agents, repo, active(services, task, "DEVELOPER")[0], {"a.py": "a = 1\n"})
+    review_verdict(services, agents, active(services, task, "REVIEWER")[0])
+    for execution in active(services, task, "TESTER") + active(services, task, "REVIEWER"):
+        agents.finish_agent(str(execution["id"]), b"", exit_code=1)
+    q(services, "UPDATE verifications SET state = 'ERROR' WHERE state IN ('PREPARING', 'RUNNING')")
+    q(services, "CREATE TEMP TABLE x AS SELECT * FROM executions WHERE role = 'REVIEWER' LIMIT 1; "
+      "UPDATE x SET id = gen_random_uuid(); INSERT INTO executions SELECT * FROM x; "
+      "INSERT INTO reviews (id, task_id, execution_id, commit_sha, reviewer_provider, outcome, requirements_met, summary) "
+      "SELECT gen_random_uuid(), task_id, id, 'abc', 'codex', 'BLOCKED', true, 's' FROM x; "
+      "INSERT INTO review_findings (id, review_id, severity, category, path, line, description) "
+      "SELECT gen_random_uuid(), r.id, 'MEDIUM', 'error_handling', 'wizards/qr.py', 104, 'qr_duration=null raises TypeError' "
+      "FROM reviews r WHERE r.commit_sha = 'abc'")
+    q(services, "INSERT INTO quality_gate_evaluations (id, task_id, commit_sha, config_hash, policy_version, risk, requirements, "
+      "residual_risk, outcome) SELECT gen_random_uuid(), id, 'abc', 'h', 'p', 'MEDIUM', %s::jsonb, 'r', 'FAIL' FROM tasks "
+      "WHERE key = %s", json.dumps([{"name": "cross_review", "status": "FAIL", "detail": "blocked by codex"},
+                                     {"name": "no_blocking_findings", "status": "PASS", "detail": "no blocking findings"}]), task)
+    q(services, "UPDATE tasks SET state = 'PLANNING', step_requested = true WHERE key = %s", task)  # retried after a block
+    q(services, "UPDATE subtasks SET state = 'BLOCKED' WHERE local_key = 'a'")
+    services.scheduler.run_once()
+    [execution] = active(services, task, "ORCHESTRATOR")
+    prompt = agents.specs[str(execution["id"])]["inputs"]["prompt.md"]
+    assert "- [MEDIUM] wizards/qr.py:104 qr_duration=null raises TypeError (review by codex)" in prompt
 
 
 def test_an_invalid_plan_key_is_named_in_the_rejection(api, services, agents, task):

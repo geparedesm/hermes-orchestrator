@@ -1555,20 +1555,24 @@ class Orchestration:
 
     def _gate_findings(self, uow: UnitOfWork, task: Row, evaluation: Row | None = None) -> list[str]:
         """The open findings that failed the task's last Quality Gate evaluation, as lines: the gate's own selection
-        (the latest integration review per reviewer of the evaluated commit, blocking severities)."""
+        (the latest integration review per reviewer of the evaluated commit): blocking severities, and every finding
+        of a review whose BLOCKED verdict failed cross_review. Without the latter a gate failed by "blocked by codex"
+        over MEDIUM findings reached the orchestrator with no finding text, and it blocked the task as one only a
+        person could fix (T-1, commercial-properties)."""
         if evaluation is None:
             uow.cur.execute("SELECT * FROM quality_gate_evaluations WHERE task_id = %s ORDER BY evaluated_at DESC LIMIT 1",
                             (task["id"],))
             evaluation = uow.cur.fetchone()
-        if evaluation is None or evaluation["outcome"] != "FAIL" or not any(
-                r["name"] == "no_blocking_findings" and r.get("status") == "FAIL" for r in evaluation["requirements"]):
+        failed = {r["name"] for r in (evaluation or {}).get("requirements") or [] if r.get("status") == "FAIL"}
+        if evaluation is None or evaluation["outcome"] != "FAIL" or not failed & {"no_blocking_findings", "cross_review"}:
             return []
-        blocking = sorted(BLOCKING_ALWAYS)
+        blocking = sorted(BLOCKING_ALWAYS) if "no_blocking_findings" in failed else []
         uow.cur.execute("SELECT r.reviewer_provider, f.severity, f.path, f.line, f.description FROM review_findings f "
                         "JOIN (SELECT DISTINCT ON (reviewer_provider) * FROM reviews WHERE task_id = %s AND commit_sha = %s "
                         "AND subtask_id IS NULL ORDER BY reviewer_provider, created_at DESC) r ON r.id = f.review_id "
-                        "WHERE f.status = 'OPEN' AND f.severity = ANY(%s) ORDER BY r.reviewer_provider, f.path, f.line",
-                        (task["id"], evaluation["commit_sha"], blocking))
+                        "WHERE f.status = 'OPEN' AND (f.severity = ANY(%s) OR (%s AND r.outcome = 'BLOCKED')) "
+                        "ORDER BY r.reviewer_provider, f.path, f.line",
+                        (task["id"], evaluation["commit_sha"], blocking, "cross_review" in failed))
         return [f"- [{f['severity']}] {f['path'] or ''}{':' + str(f['line']) if f['line'] else ''} {f['description'][:1500]} "
                 f"(review by {f['reviewer_provider']})" for f in uow.cur.fetchall()[:20]]
 
@@ -2024,17 +2028,30 @@ class Orchestration:
                 task = self._task(uow, task_id)  # locked: recheck what a concurrent finish or heal may have started
                 if task["state"] != S.REVIEW or self._integration_review_pending(uow, task_id):
                     continue
-                uow.cur.execute("SELECT integration_sha FROM git_changes WHERE task_id = %s", (task_id,))
-                commit = uow.cur.fetchone()["integration_sha"]  # type: ignore[index]
-                uow.cur.execute("SELECT DISTINCT reviewer_provider FROM reviews WHERE task_id = %s AND commit_sha = %s "
-                                "AND subtask_id IS NULL", (task_id, commit))
-                done = {r["reviewer_provider"] for r in uow.cur.fetchall()}
+                done = self._integration_reviewers_done(uow, task)
                 needed = required_reviewer_set(self.reviews.developer_providers(uow, task))
                 if not needed and not done:  # no agent developed the change: the fallback reviewer, as in _on_verification
                     needed = {self._route(uow, task, "IMPLEMENT") or "claude"}
+                if not needed - done:
+                    # Every review this pass needs is recorded, but nothing moved the task on (its handler ran while
+                    # the task waited elsewhere): evaluate the gate now instead of waiting in REVIEW for ever.
+                    self._integration_review_recorded(uow, task)
                 for provider in sorted(needed - done):
                     self._integration_review_failed(uow, task_id, provider, f"no integration review by {provider} was running")
         return len(stuck) + len(waiting)
+
+    def _integration_reviewers_done(self, uow: UnitOfWork, task: Row) -> set[str]:
+        """Reviewers whose integration review of the integrated commit was recorded since verification last passed
+        (the task's latest TESTING -> REVIEW). A retry that integrates the same commit again verifies and reviews it
+        again: reviews from before it no longer count, or the task waits in REVIEW for ever (no review missing, none
+        requested) and the gate reads a verdict the retry was meant to replace."""
+        uow.cur.execute(
+            "SELECT DISTINCT r.reviewer_provider FROM reviews r JOIN git_changes g ON g.task_id = r.task_id "
+            "WHERE r.task_id = %s AND r.commit_sha = g.integration_sha AND r.subtask_id IS NULL "
+            "AND r.created_at >= coalesce((SELECT max(occurred_at) FROM events WHERE task_id = %s "
+            "AND type = 'TASK_STATE_CHANGED' AND data->>'from' = 'TESTING' AND data->>'to' = 'REVIEW'), '-infinity')",
+            (task["id"], task["id"]))
+        return {r["reviewer_provider"] for r in uow.cur.fetchall()}
 
     def _launch_review(self, uow: UnitOfWork, task: Row, subtask: Row, request: dict[str, Any]) -> Row:
         # Review the subtask's own changes: from where its workspace started (its dependencies' work, if any).
@@ -2230,11 +2247,7 @@ class Orchestration:
     def _integration_review_recorded(self, uow: UnitOfWork, task: Row) -> None:
         if task["state"] != S.REVIEW:
             return
-        uow.cur.execute("SELECT integration_sha FROM git_changes WHERE task_id = %s", (task["id"],))
-        commit = uow.cur.fetchone()["integration_sha"]  # type: ignore[index]
-        uow.cur.execute("SELECT DISTINCT reviewer_provider FROM reviews WHERE task_id = %s AND commit_sha = %s AND subtask_id IS NULL",
-                        (task["id"], commit))
-        done = {r["reviewer_provider"] for r in uow.cur.fetchall()}
+        done = self._integration_reviewers_done(uow, task)
         needed = required_reviewer_set(self.reviews.developer_providers(uow, task))
         if needed and not needed <= done:
             return
@@ -2334,6 +2347,11 @@ class Orchestration:
             self.approvals.invalidate_open(uow, project_id=task["project_id"], task_id=task["id"], action=ApprovalAction.MERGE,
                                            reason="requirements revised")
             self._move(uow, task, S.RUNNING, reason="requirements revised")
+        elif task["state"] in (S.TESTING, S.REVIEW, S.QUALITY_GATE):
+            # The orchestrator only steps in PLANNING/QUEUED/RUNNING/FIX_REQUIRED: left here, the revision was never
+            # analysed and the old requirements could still reach READY_FOR_MERGE (T-1, commercial-properties). The
+            # verification, review, or gate in flight finds the task moved on and is not applied.
+            self._move(uow, task, S.FIX_REQUIRED, reason="requirements revised: impact analysis")
         return {"task": task_key, "requirements": version}
 
     # ------------------------------------------------------------ inspection
