@@ -48,6 +48,26 @@ docker compose --env-file deploy/preview/runtime.env -f deploy/preview/compose.y
 The persistent controller already owns `controller.lock`; stop the service before running a manual controller cycle.
 Do not run a manual cycle concurrently with the daemon. Failed preparations back off instead of repeatedly using agents.
 
+## Synthetic baseline
+
+An installation whose production modules have no reviewed anonymization policy (for example one with `mail`, `crm`,
+`calendar`, or `website` installed) starts from a synthetic database instead of a production copy: a new Odoo
+database with the custom modules, the generated scenarios of `seed_odoo.py`, and each module's
+`.hermes/preview-seed.py`. No production record is ever copied into it.
+
+```bash
+docker compose --env-file deploy/preview/runtime.env -f deploy/preview/compose.yaml up -d --wait db
+docker compose --env-file deploy/preview/runtime.env -f deploy/preview/compose.yaml run --rm -T odoo init-synthetic
+```
+
+`init-synthetic` refuses a database that is already initialized, sets the preview administrator from
+`secrets/preview/admin_password`, and records the `hermes.preview.synthetic` marker. `odoo_entrypoint.py` serves a
+database only with that marker or the anonymization marker.
+
+On Linux, Compose secrets are bind mounts that keep host permissions: keep `secrets/preview/` at mode 0700 and its
+files at 0444 so the non-root Odoo and tunnel containers can read them. `cloudflared tunnel token --cred-file
+secrets/preview/cloudflare-tunnel.json <tunnel>` writes the tunnel credentials from an authenticated `cloudflared`.
+
 ## Refreshing source data
 
 Refreshing is a deliberate maintenance operation that replaces test edits. Stop the controller and retire any active
