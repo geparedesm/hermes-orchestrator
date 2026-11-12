@@ -2243,6 +2243,11 @@ class Orchestration:
             with self.ctx.unit_of_work() as uow:
                 task = self.tasks.get(uow, task_key, lock=True)
                 self._input(uow, task, f"integration review by {provider} could not start: {exc}")
+                if not isinstance(exc, UpstreamError) and task["state"] == S.REVIEW:
+                    # The platform refused it (T-1, commercial-properties: the UI design of revised requirements was
+                    # missing): asking again changes nothing. The orchestrator steps only in FIX_REQUIRED, not REVIEW;
+                    # left here, the heal asked every 5 minutes for 15 hours and the runtime budget ran out twice.
+                    self._move(uow, task, S.FIX_REQUIRED, reason=f"integration review by {provider} could not start: {exc}"[:300])
 
     def _integration_review_recorded(self, uow: UnitOfWork, task: Row) -> None:
         if task["state"] != S.REVIEW:

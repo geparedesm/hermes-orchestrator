@@ -800,6 +800,30 @@ def test_a_lost_integration_review_is_requested_again(api, services, agents, rep
     assert [r["id"] for r in active(services, task, "REVIEWER")] == [again["id"]]  # still one reviewer
 
 
+@pytest.mark.parametrize("refused", [True, False])
+def test_a_refused_integration_review_goes_back_to_the_orchestrator(api, services, agents, repo, task, monkeypatch, refused):
+    """T-1 (commercial-properties): the review could not start (the revised requirements had no approved UI design);
+    the heal asked again every 5 minutes for 15 hours while the orchestrator, which does not step in REVIEW, never
+    saw it. A refusal goes to the orchestrator; an unavailable service is still retried."""
+    from control_plane.errors import Conflict, UpstreamError
+
+    review = _to_integration_review(services, agents, repo, task)
+    with services.ctx.db.transaction() as cur:  # stand-in: the review was lost
+        cur.execute("UPDATE executions SET state = 'FAILED', ended_at = now() WHERE id = %s", (review["id"],))
+        cur.execute("UPDATE tasks SET updated_at = now() - interval '5 minutes' WHERE key = %s", (task,))
+
+    def fail(*_args, **_kwargs):
+        raise (Conflict("frontend implementation requires the current pen.dev design images and human UI_DESIGN approval")
+               if refused else UpstreamError("git-service unavailable: connection refused"))
+
+    monkeypatch.setattr(services.reviews, "request", fail)
+    services.orchestration.heal_reviews()
+    assert state(api, task) == ("FIX_REQUIRED" if refused else "REVIEW")
+    if refused:
+        [row] = q(services, "SELECT state_reason FROM tasks WHERE key = %s", task)
+        assert "UI_DESIGN approval" in row["state_reason"]
+
+
 def _back_in_review(services, task) -> None:
     """Stand-in for a retry that integrated the same commit again and verified it: TESTING -> REVIEW, a while ago."""
     q(services, "UPDATE tasks SET state = 'REVIEW', updated_at = now() - interval '5 minutes' WHERE key = %s", task)
